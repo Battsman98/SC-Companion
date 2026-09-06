@@ -1916,7 +1916,7 @@ function renderInventoryItem(item) {
       </label>
     </div>
     <details class="inventory-more">
-      <summary>More details</summary>
+      <summary>Notes</summary>
       <div class="inventory-card-main inventory-card-secondary">
         <label class="inventory-type-field">
         <span>Type</span>

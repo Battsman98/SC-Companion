@@ -2132,11 +2132,23 @@ body.hangar-modal-open {
 
 .inventory-more summary {
   width: max-content;
-  color: var(--muted);
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--button-surface);
+  color: var(--text);
   cursor: pointer;
-  font-size: 0.78rem;
+  padding: 6px 12px;
+  font-size: 0.84rem;
   font-weight: 700;
+  line-height: 1.25;
   user-select: none;
+}
+
+.inventory-more summary:hover,
+.inventory-more summary:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .inventory-more[open] summary {
