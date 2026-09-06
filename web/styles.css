@@ -2106,12 +2106,12 @@ body.hangar-modal-open {
 .inventory-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  gap: 8px;
   align-items: start;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--control);
-  padding: 12px;
+  padding: 10px;
   min-width: 0;
 }
 
@@ -2120,6 +2120,32 @@ body.hangar-modal-open {
   grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 8px;
   min-width: 0;
+}
+
+.inventory-card-primary {
+  grid-template-columns: minmax(220px, 2fr) minmax(150px, 1.15fr) minmax(190px, 1.6fr) minmax(120px, 0.8fr);
+}
+
+.inventory-more {
+  min-width: 0;
+}
+
+.inventory-more summary {
+  width: max-content;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  user-select: none;
+}
+
+.inventory-more[open] summary {
+  margin-bottom: 8px;
+}
+
+.inventory-card-secondary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 8px;
 }
 
 .inventory-row > *,
@@ -2994,6 +3020,10 @@ body.hangar-modal-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .inventory-card-primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .inventory-name-field,
   .inventory-notes-field {
     grid-column: 1 / -1;
@@ -3072,6 +3102,14 @@ body.hangar-modal-open {
     gap: 6px 8px;
   }
 
+  .inventory-card-primary {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 3fr) minmax(0, 4fr) minmax(0, 2fr);
+  }
+
+  .inventory-card-secondary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .inventory-name-field {
     grid-column: span 5;
   }
@@ -3084,12 +3122,14 @@ body.hangar-modal-open {
   .inventory-size-field,
   .inventory-quantity-field,
   .inventory-quality-field,
-  .inventory-scu-field {
-    grid-column: span 2;
+  .inventory-scu-field,
+  .inventory-location-field {
+    grid-column: auto;
   }
 
-  .inventory-location-field {
-    grid-column: span 4;
+  .inventory-card-primary > .inventory-name-field,
+  .inventory-card-primary > .inventory-category-field {
+    grid-column: auto;
   }
 
   .inventory-notes-field {

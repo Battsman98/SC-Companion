@@ -1897,7 +1897,7 @@ function inventoryTypeOptions(category, selectedValue = "", placeholder = "Item 
 function renderInventoryItem(item) {
   const id = String(item.id);
   return `<article class="inventory-row" data-inventory-id="${escapeAttribute(id)}">
-    <div class="inventory-card-main">
+    <div class="inventory-card-main inventory-card-primary">
       <label class="inventory-name-field">
       <span>Name</span>
       <input data-inventory-name="${escapeAttribute(id)}" value="${escapeAttribute(item.name)}">
@@ -1905,14 +1905,6 @@ function renderInventoryItem(item) {
       <label class="inventory-category-field">
       <span>Category</span>
       ${inventoryCategorySelect(`data-inventory-category="${escapeAttribute(id)}"`, item.category || "")}
-      </label>
-      <label class="inventory-type-field">
-      <span>Type</span>
-      ${inventoryTypeSelect(`data-inventory-type="${escapeAttribute(id)}"`, item.category || "", item.item_type || "")}
-      </label>
-      <label class="inventory-size-field">
-      <span>Size</span>
-      <input data-inventory-size="${escapeAttribute(id)}" value="${escapeAttribute(item.item_size || "")}">
       </label>
       <label class="inventory-location-field">
       <span>Station / location</span>
@@ -1922,19 +1914,32 @@ function renderInventoryItem(item) {
       <span>Found/Crafted Qty</span>
       <input data-inventory-quantity="${escapeAttribute(id)}" type="number" min="0" step="1" value="${escapeAttribute(Math.round(Number(item.quantity) || 0))}">
       </label>
-      <label class="inventory-quality-field">
-      <span>Quality</span>
-      <input data-inventory-quality="${escapeAttribute(id)}" type="number" min="0" step="0.01" value="${escapeAttribute(item.quality ?? "")}">
-      </label>
-      <label class="inventory-scu-field">
-      <span>SCU</span>
-      <input data-inventory-volume="${escapeAttribute(id)}" type="number" min="0" step="0.000001" value="${escapeAttribute(item.volume_scu ?? "")}">
-      </label>
     </div>
-    <label class="inventory-notes-field">
-      <span>Notes</span>
-      <textarea data-inventory-notes="${escapeAttribute(id)}">${escapeHtml(item.notes || "")}</textarea>
-    </label>
+    <details class="inventory-more">
+      <summary>More details</summary>
+      <div class="inventory-card-main inventory-card-secondary">
+        <label class="inventory-type-field">
+        <span>Type</span>
+        ${inventoryTypeSelect(`data-inventory-type="${escapeAttribute(id)}"`, item.category || "", item.item_type || "")}
+        </label>
+        <label class="inventory-size-field">
+        <span>Size</span>
+        <input data-inventory-size="${escapeAttribute(id)}" value="${escapeAttribute(item.item_size || "")}">
+        </label>
+        <label class="inventory-quality-field">
+        <span>Quality</span>
+        <input data-inventory-quality="${escapeAttribute(id)}" type="number" min="0" step="0.01" value="${escapeAttribute(item.quality ?? "")}">
+        </label>
+        <label class="inventory-scu-field">
+        <span>SCU</span>
+        <input data-inventory-volume="${escapeAttribute(id)}" type="number" min="0" step="0.000001" value="${escapeAttribute(item.volume_scu ?? "")}">
+        </label>
+      </div>
+      <label class="inventory-notes-field">
+        <span>Notes</span>
+        <textarea data-inventory-notes="${escapeAttribute(id)}">${escapeHtml(item.notes || "")}</textarea>
+      </label>
+    </details>
     <div class="inventory-actions">
       <input data-inventory-transfer-location="${escapeAttribute(id)}" placeholder="Move to station">
       <button type="button" data-inventory-transfer="${escapeAttribute(id)}">Transfer</button>
