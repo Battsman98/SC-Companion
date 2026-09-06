@@ -736,6 +736,45 @@ def test_inventory_scanner_normalizes_latest_component_quantity_misses() -> None
         assert web_module._normalize_inventory_tooltip_name(scanned) == expected
 
 
+def test_inventory_scanner_preserves_full_stronghold_armor_variants() -> None:
+    examples = {
+        "Morozov-SH-I Core Stronghold": "Morozov-SH-I Core Stronghold",
+        "Morozov-SH-I Arms Stronghold": "Morozov-SH-I Arms Stronghold",
+        "Morozov-SH-I Legs Stronghold": "Morozov-SH-I Legs Stronghold",
+        "Palatino Core Stronghold": "Palatino Core Stronghold",
+        "Palatino Backpack Stronghold": "Palatino Backpack Stronghold",
+        "Tetsudo Arms Stronghold": "Testudo Arms Stronghold",
+        "Tetsudo Legs Stronghold": "Testudo Legs Stronghold",
+    }
+
+    for scanned, expected in examples.items():
+        results = web_module._inventory_scanner_catalog_supplements(scanned)
+        assert [result.name for result in results] == [expected]
+
+
+def test_inventory_scanner_rejects_generic_or_variantless_stronghold_matches() -> None:
+    generic = SimpleNamespace(name="Stronghold")
+    variantless = SimpleNamespace(name="Palatino Backpack")
+    full_variant = SimpleNamespace(name="Palatino Backpack Stronghold")
+
+    assert _inventory_scanner_accepted_matches(
+        [(generic, 0.99), (variantless, 0.98), (full_variant, 0.94)],
+        0.88,
+        "Palatino Backpack Stronghold",
+    ) == [(full_variant, 0.94)]
+
+
+def test_inventory_scanner_normalizes_latest_armor_video_distortions() -> None:
+    examples = {
+        "Dtune": "Strata Legs Neptune",
+        "restarter": "Defiance Core Firestarter",
+        "ituitimatun": "Sabine Undersuit Ultimatum",
+    }
+
+    for scanned, expected in examples.items():
+        assert web_module._normalize_inventory_tooltip_name(scanned) == expected
+
+
 def test_inventory_title_ocr_uses_top_line_and_rejects_metadata_calibration() -> None:
     title = ([[0, 4], [100, 4], [100, 14], [0, 14]], "FS-9 LMG", 0.98)
     metadata = ([[0, 30], [100, 30], [100, 40], [0, 40]], "Volume: 8000 µSCU", 0.99)

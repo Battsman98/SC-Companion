@@ -3270,6 +3270,18 @@ def _inventory_scanner_accepted_matches(
     # A long tooltip title with a clearly separated catalog winner remains safe
     # slightly below the live threshold. This recovers screen-share OCR damage
     # without weakening short or ambiguous names.
+    if candidate:
+        candidate_words = _normalize_text(_normalize_inventory_tooltip_name(candidate)).split()
+        # Stronghold is an armor variant, not an item family. Never collapse a
+        # full armor title to the generic suffix or to a base item that drops
+        # the visible Stronghold variant.
+        if "stronghold" in candidate_words and len(candidate_words) > 1:
+            scored_matches = [
+                (result, confidence)
+                for result, confidence in scored_matches
+                if "stronghold" in _normalize_text(result.name).split()
+                and _normalize_text(result.name) != "stronghold"
+            ]
     ranked = sorted(scored_matches, key=lambda item: (-item[1], -len(item[0].name), item[0].name.lower()))
     adaptive_floor = min_score
     if candidate and ranked:
@@ -3586,6 +3598,13 @@ def _inventory_scanner_catalog_supplements(candidate: str) -> list[ItemLocatorRe
         (("c54", "0chelo", "smg"), 'C54 "Ochelo" SMG', "SMG", "Weapons", "Gemini"),
         (("tumbril", "cargo", "plushie"), "Tumbril Cargo Plushie", "Flair", "Other", "Tumbril Land Systems"),
         (("redimake", "item", "fabricator", "aa", "support"), "RediMake Item Fabricator AA Support", "Crafter", "Other", "RediMake"),
+        (("morozov", "core", "stronghold"), "Morozov-SH-I Core Stronghold", "Core", "Armor", "Greycat Industrial"),
+        (("morozov", "arms", "stronghold"), "Morozov-SH-I Arms Stronghold", "Arms", "Armor", "Greycat Industrial"),
+        (("morozov", "legs", "stronghold"), "Morozov-SH-I Legs Stronghold", "Legs", "Armor", "Greycat Industrial"),
+        (("palatino", "core", "stronghold"), "Palatino Core Stronghold", "Core", "Armor", "Roussimoff Rehabilitation Systems"),
+        (("palatino", "backpack", "stronghold"), "Palatino Backpack Stronghold", "Backpack", "Armor", "Roussimoff Rehabilitation Systems"),
+        (("testudo", "arms", "stronghold"), "Testudo Arms Stronghold", "Arms", "Armor", "Roussimoff Rehabilitation Systems"),
+        (("testudo", "legs", "stronghold"), "Testudo Legs Stronghold", "Legs", "Armor", "Roussimoff Rehabilitation Systems"),
     )
     results: list[ItemLocatorResult] = []
     compact = normalized.replace(" ", "")
@@ -4242,6 +4261,10 @@ def _normalize_inventory_tooltip_name(value: str) -> str:
         r"^mil\s*1[./ ]*a\s*vk[- ]*00$": "VK-00",
         r"^lox\s*core$": "LuxCore",
         r"^lnra[- ]*flov$": "Ultra-Flow",
+        r"\btetsudo\b": "Testudo",
+        r"^dtune$": "Strata Legs Neptune",
+        r"^restarter$": "Defiance Core Firestarter",
+        r"^ituitimatun$": "Sabine Undersuit Ultimatum",
         r"^torrenti\s*module$": "Torrent II Module",
         r"^uo\s*m\s*cargo\s+pushie$": "Tumbril Cargo Plushie",
         r"^uminala\s+s5\s*coin$": "Luminalia '55 Coin",
