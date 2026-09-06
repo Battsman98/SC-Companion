@@ -723,6 +723,17 @@ def test_inventory_scanner_supplements_catalog_gaps_from_live_video() -> None:
         assert max(web_module._inventory_match_confidence(scanned, name) for name in names) >= 0.88
 
 
+def test_inventory_scanner_normalizes_latest_component_quantity_misses() -> None:
+    examples = {
+        "Mil1.AVK-00": "VK-00",
+        "Cmp/2/A LoxCore": "LuxCore",
+        "Ind/1/ALNra-Flov": "Ultra-Flow",
+    }
+
+    for scanned, expected in examples.items():
+        assert web_module._normalize_inventory_tooltip_name(scanned) == expected
+
+
 def test_inventory_title_ocr_uses_top_line_and_rejects_metadata_calibration() -> None:
     title = ([[0, 4], [100, 4], [100, 14], [0, 14]], "FS-9 LMG", 0.98)
     metadata = ([[0, 30], [100, 30], [100, 40], [0, 40]], "Volume: 8000 µSCU", 0.99)

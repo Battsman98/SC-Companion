@@ -2411,8 +2411,8 @@ function renderInventoryScanProgress() {
           <span data-scanner-progress-time>Elapsed ${elapsed}</span>
         </div>
         <progress data-scanner-progress-bar max="100" value="${percent}">${percent}%</progress>
-        <small data-scanner-progress-counts>${completed} of ${total} captures processed · ${remaining} remaining${inventoryScannerFailedCaptures.length ? ` · ${inventoryScannerFailedCaptures.length} failed` : ""}</small>
-        ${inventoryScannerFailedCaptures.length ? `<button type="button" data-scanner-retry-failed>Retry ${inventoryScannerFailedCaptures.length} failed capture${inventoryScannerFailedCaptures.length === 1 ? "" : "s"}</button>` : ""}
+        <small data-scanner-progress-counts>${completed} of ${total} captures processed · ${remaining} remaining${inventoryScannerFailedCaptures.length ? ` · ${inventoryScannerFailedCaptures.length} missed` : ""}</small>
+        ${inventoryScannerFailedCaptures.length ? `<button type="button" data-scanner-retry-failed>Retry ${inventoryScannerFailedCaptures.length} missed capture${inventoryScannerFailedCaptures.length === 1 ? "" : "s"}</button>` : ""}
       </section>`
     : "";
   const timing = inventoryScannerLastTiming
@@ -2467,7 +2467,7 @@ function refreshInventoryScannerProgress() {
   if (percentElement) percentElement.textContent = `${percent}% processed`;
   if (timeElement) timeElement.textContent = `Elapsed ${elapsed}`;
   if (bar) bar.value = percent;
-  if (counts) counts.textContent = `${completed} of ${total} captures processed · ${remaining} remaining${inventoryScannerFailedCaptures.length ? ` · ${inventoryScannerFailedCaptures.length} failed` : ""}`;
+  if (counts) counts.textContent = `${completed} of ${total} captures processed · ${remaining} remaining${inventoryScannerFailedCaptures.length ? ` · ${inventoryScannerFailedCaptures.length} missed` : ""}`;
 }
 
 function firstInventoryOcrLine(text) {
@@ -2921,14 +2921,23 @@ async function processInventoryScannerCapture(capture) {
     && imageHashDistance(capture.titleHash, backup.titleHash) >= 12
     // A changed hash alone often reflects tooltip animation. Retry only when
     // the later title band also contains materially stronger, sharper text.
-    && backup.titleQuality >= Math.max(capture.titleQuality + 6, capture.titleQuality * 1.08);
-  if (!payload?.ocr_text?.trim()
+    && (document.querySelector("#inventoryImportCategory")?.value === "Components"
+      ? backup.titleQuality >= capture.titleQuality * 0.96
+      : backup.titleQuality >= Math.max(capture.titleQuality + 6, capture.titleQuality * 1.08));
+  const blankRetryQueued = !payload?.ocr_text?.trim()
     && backupLooksImproved
-    && backup.generation === inventoryScannerGeneration) {
+    && backup.generation === inventoryScannerGeneration;
+  if (blankRetryQueued) {
     backup.captureIndex = inventoryScannerCaptureIndex++;
     backup.clientQueueDepth = inventoryScannerQueue.length + inventoryScannerInFlight;
     inventoryScannerQueue.unshift(backup);
     inventoryScannerStatus = "Blank read detected. Retrying the saved stable frame.";
+  }
+  if (!payload?.ocr_text?.trim() && !blankRetryQueued) {
+    const missedCapture = backup && backup.generation === inventoryScannerGeneration ? backup : capture;
+    if (!inventoryScannerFailedCaptures.some((item) => item.captureToken === missedCapture.captureToken)) {
+      inventoryScannerFailedCaptures.push(missedCapture);
+    }
   }
   if (payload?.items?.length) {
     inventoryScannerLastHash = capture.hash;
