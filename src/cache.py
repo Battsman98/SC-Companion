@@ -1091,7 +1091,10 @@ class SQLiteCache:
             clauses.append("LOWER(TRIM(item_size)) = LOWER(TRIM(?))")
             values.append(item_size)
         if query:
-            clauses.append("(item_name LIKE ? OR notes LIKE ?)")
+            clauses.append(
+                "(LOWER(COALESCE(item_name, '')) LIKE LOWER(?) "
+                "OR LOWER(COALESCE(notes, '')) LIKE LOWER(?))"
+            )
             pattern = f"%{query}%"
             values.extend([pattern, pattern])
 

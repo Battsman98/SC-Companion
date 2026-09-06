@@ -184,6 +184,8 @@ def test_user_inventory_filters_type_size_and_case_insensitive_station(tmp_path)
             item_size="1",
         )
         assert [item["name"] for item in matches] == ["250-E Laser Pointer"]
+        lowercase_matches = await cache.user_inventory_items(42, query="laser pointer")
+        assert [item["name"] for item in lowercase_matches] == ["250-E Laser Pointer"]
         assert await cache.user_inventory_facets(42) == {
             "locations": ["Everus Harbor", "Port Tressler"],
             "categories": ["Personal Weapons"],
