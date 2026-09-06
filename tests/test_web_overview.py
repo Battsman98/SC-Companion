@@ -622,6 +622,9 @@ def test_live_scanner_times_out_and_continues_after_one_retry() -> None:
     assert "requestController.abort()" in javascript
     assert "inventoryScannerFailedCaptures.push(capture)" in javascript
     assert "data-scanner-retry-failed" in javascript
+    assert 'value === "Components"' in javascript
+    assert "backup.titleQuality >= capture.titleQuality * 0.96" in javascript
+    assert "missedCapture = backup" in javascript
 
 
 def test_live_scanner_retains_distinct_one_second_hovers_and_deduplicates_frames() -> None:
