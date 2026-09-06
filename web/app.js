@@ -2921,7 +2921,7 @@ async function processInventoryScannerCapture(capture) {
     && imageHashDistance(capture.titleHash, backup.titleHash) >= 12
     // A changed hash alone often reflects tooltip animation. Retry only when
     // the later title band also contains materially stronger, sharper text.
-    && (document.querySelector("#inventoryImportCategory")?.value === "Components"
+    && (["Armor", "Components"].includes(document.querySelector("#inventoryImportCategory")?.value)
       ? backup.titleQuality >= capture.titleQuality * 0.96
       : backup.titleQuality >= Math.max(capture.titleQuality + 6, capture.titleQuality * 1.08));
   const blankRetryQueued = !payload?.ocr_text?.trim()
