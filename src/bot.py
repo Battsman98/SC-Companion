@@ -920,6 +920,8 @@ class GameAssistBot(commands.Bot):
         return next(iter(dict.fromkeys(candidates)), None)
 
     async def mirror_feedback_thread(self, thread: discord.Thread) -> None:
+        if thread.name.casefold().startswith("example:") or (self.user and thread.owner_id == self.user.id):
+            return
         if await self.cache.feedback_mirror_for_origin_thread(thread.id):
             return
         try:
@@ -955,6 +957,7 @@ class GameAssistBot(commands.Bot):
             logging.exception("Could not mirror feedback thread %s", thread.id)
 
     async def backfill_feedback_tickets(self) -> None:
+        await self.remove_mirrored_feedback_examples()
         for guild in self.guilds:
             if guild.id == self.settings.discord_guild_id:
                 continue
@@ -963,6 +966,22 @@ class GameAssistBot(commands.Bot):
                     continue
                 for thread in forum.threads:
                     await self.mirror_feedback_thread(thread)
+
+    async def remove_mirrored_feedback_examples(self) -> None:
+        forum = self.primary_feedback_forum()
+        if forum is None:
+            return
+        threads = list(forum.threads)
+        with suppress(discord.Forbidden, discord.HTTPException):
+            threads.extend([thread async for thread in forum.archived_threads(limit=100)])
+        for thread in threads:
+            if not re.match(r"^\[[^]]+\]\s+Example:", thread.name, re.IGNORECASE):
+                continue
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                starter = await thread.fetch_message(thread.id)
+                if starter.embeds and (starter.embeds[0].title or "").startswith("Mirrored ticket from "):
+                    await thread.delete(reason="Remove accidentally mirrored feedback template")
+                    logging.info("Removed mirrored feedback template thread %s", thread.id)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.author.id not in self.settings.bot_admin_user_ids:

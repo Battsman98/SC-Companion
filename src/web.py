@@ -1503,12 +1503,14 @@ async def _sync_installed_server_feedback() -> int:
                 }
                 for thread in threads.values():
                     thread_id = int(thread["id"])
-                    if str(thread.get("name") or "").casefold().startswith("example: how to submit"):
+                    if str(thread.get("name") or "").casefold().startswith("example:"):
                         continue
                     if await state().cache.feedback_mirror_for_origin_thread(thread_id):
                         continue
                     starter = await _discord_api("GET", f"/channels/{thread_id}/messages/{thread_id}")
                     author = starter.get("author", {})
+                    if author.get("bot"):
+                        continue
                     author_name = str(author.get("global_name") or author.get("username") or "Discord user")
                     description = str(starter.get("content") or "Discord forum ticket")[:4000]
                     embed = {
@@ -1586,6 +1588,10 @@ async def feedback_tickets() -> list[dict[str, Any]]:
         if int(item.get("parent_id") or 0) in forum_ids
     }
     threads = list(by_id.values())
+    threads = [
+        item for item in threads
+        if not re.match(r"^\[[^]]+\]\s+Example:", str(item.get("name") or ""), re.IGNORECASE)
+    ]
     statuses = await state().cache.discord_ticket_statuses([int(item["id"]) for item in threads])
     return [{
         "id": str(item["id"]), "name": str(item.get("name") or "Untitled ticket"),
