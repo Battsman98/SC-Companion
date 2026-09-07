@@ -105,6 +105,17 @@ def test_mirrored_feedback_displays_image_attachments() -> None:
     assert "[broken-screen.png]" in embed["fields"][-1]["value"]
 
 
+def test_bot_copies_mirrored_images_into_peep() -> None:
+    mirror_source = inspect.getsource(GameAssistBot.mirror_feedback_thread)
+    sync_source = inspect.getsource(GameAssistBot.sync_mirrored_feedback_attachments)
+
+    assert "await image_attachment.to_file(use_cached=True)" in mirror_source
+    assert 'mirror_embed.set_image(url=f"attachment://{mirror_file.filename}")' in mirror_source
+    assert "files=mirror_files" in mirror_source
+    assert "await image.to_file(use_cached=True)" in sync_source
+    assert "attachments=[mirror_file]" in sync_source
+
+
 def test_reporter_updates_are_forwarded_to_the_main_ticket() -> None:
     source = inspect.getsource(GameAssistBot.on_message)
 
@@ -118,6 +129,8 @@ def test_website_reads_the_original_mirrored_ticket_conversation() -> None:
 
     assert "feedback_mirror_for_central_thread(thread_id)" in source
     assert "conversation_thread_id = origin_thread_id or thread_id" in source
+    assert 'central_starter = await _discord_api("GET", f"/channels/{thread_id}/messages/{thread_id}")' in source
+    assert 'oldest["attachments"]' in source
 
 
 def test_edited_ticket_messages_refresh_mirrored_images() -> None:

@@ -1697,6 +1697,23 @@ async def feedback_ticket_messages(thread_id: int) -> list[dict[str, Any]]:
         f"/channels/{conversation_thread_id}/messages?limit=50",
         bot_token=_public_bot_token() if origin_thread_id else None,
     )
+    # Mirrored images are copied into Peep so the inbox does not depend on an
+    # expiring CDN URL belonging to the public server. Include that durable
+    # attachment alongside the original conversation.
+    if origin_thread_id and messages:
+        central_starter = await _discord_api("GET", f"/channels/{thread_id}/messages/{thread_id}")
+        central_attachments = central_starter.get("attachments", [])
+        if central_attachments:
+            oldest = messages[-1]
+            source_attachments = oldest.get("attachments", [])
+            durable_image_names = {
+                str(item.get("filename") or "") for item in central_attachments
+                if str(item.get("content_type") or "").startswith("image/")
+            }
+            oldest["attachments"] = [
+                item for item in source_attachments
+                if str(item.get("filename") or "") not in durable_image_names
+            ] + central_attachments
     return [{
         "id": str(item["id"]), "content": str(item.get("content") or ""),
         "author": str(item.get("author", {}).get("global_name") or item.get("author", {}).get("username") or "Unknown"),

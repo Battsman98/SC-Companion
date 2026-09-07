@@ -973,6 +973,12 @@ class GameAssistBot(commands.Bot):
             if starter.embeds:
                 mirror_embed.add_field(name="Original report", value=(starter.embeds[0].description or starter.embeds[0].title or "Embedded report")[:1024], inline=False)
             self.add_feedback_attachments(mirror_embed, starter.attachments)
+            mirror_files: list[discord.File] = []
+            image_attachment = self.feedback_image_attachment(starter.attachments)
+            if image_attachment:
+                mirror_file = await image_attachment.to_file(use_cached=True)
+                mirror_files.append(mirror_file)
+                mirror_embed.set_image(url=f"attachment://{mirror_file.filename}")
             if not mirror_embed.image.url and starter.embeds and starter.embeds[0].image.url:
                 mirror_embed.set_image(url=starter.embeds[0].image.url)
             mirror_tag = discord.utils.find(
@@ -982,6 +988,7 @@ class GameAssistBot(commands.Bot):
             created = await central.create_thread(
                 name=f"[{thread.guild.name}] {thread.name}"[:100],
                 embed=mirror_embed,
+                files=mirror_files,
                 applied_tags=applied_tags,
             )
             central_thread = getattr(created, "thread", created)
@@ -994,10 +1001,15 @@ class GameAssistBot(commands.Bot):
             logging.exception("Could not mirror feedback thread %s", thread.id)
 
     @staticmethod
+    def feedback_image_attachment(attachments: list[discord.Attachment]) -> discord.Attachment | None:
+        return next((item for item in attachments if (item.content_type or "").startswith("image/")
+                     or re.search(r"\.(?:png|jpe?g|gif|webp)$", item.filename, re.IGNORECASE)), None)
+
+    @staticmethod
     def add_feedback_attachments(embed: discord.Embed, attachments: list[discord.Attachment]) -> None:
         if not attachments:
             return
-        image = next((item for item in attachments if (item.content_type or "").startswith("image/") or re.search(r"\.(?:png|jpe?g|gif|webp)$", item.filename, re.IGNORECASE)), None)
+        image = GameAssistBot.feedback_image_attachment(attachments)
         if image:
             embed.set_image(url=image.url)
         links = "\n".join(f"[{item.filename}]({item.url})" for item in attachments)
@@ -1017,19 +1029,24 @@ class GameAssistBot(commands.Bot):
             if not central_starter.embeds:
                 return
             embed = central_starter.embeds[0]
-            if embed.image.url:
+            if embed.image.url and str(embed.image.url).startswith("attachment://"):
                 return
             has_attachment_field = any(field.name == "Attachments" for field in embed.fields)
             if has_attachment_field:
-                image = next((item for item in attachments if (item.content_type or "").startswith("image/")
-                              or re.search(r"\.(?:png|jpe?g|gif|webp)$", item.filename, re.IGNORECASE)), None)
+                image = self.feedback_image_attachment(attachments)
                 if image:
                     embed.set_image(url=image.url)
             else:
                 self.add_feedback_attachments(embed, attachments)
             if not embed.image.url and embedded_image:
                 embed.set_image(url=embedded_image)
-            await central_starter.edit(embed=embed)
+            image = self.feedback_image_attachment(attachments)
+            if image:
+                mirror_file = await image.to_file(use_cached=True)
+                embed.set_image(url=f"attachment://{mirror_file.filename}")
+                await central_starter.edit(embed=embed, attachments=[mirror_file])
+            else:
+                await central_starter.edit(embed=embed)
             logging.info("Added feedback attachments to mirrored ticket %s", central_thread_id)
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
             logging.exception("Could not synchronize attachments for feedback thread %s", thread.id)
