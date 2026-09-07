@@ -977,13 +977,18 @@ def _bot_invite_url(guild_id: int) -> str:
     )
 
 
+def _snowflake(value: int | None) -> str | None:
+    """Send Discord IDs as strings so browsers do not round their 64-bit values."""
+    return str(value) if value is not None else None
+
+
 @app.get("/api/bot-management/guilds")
 async def manageable_bot_guilds(user=Depends(require_user)) -> list[dict[str, Any]]:
     configured_guilds = []
     bot_guild_ids = await _discord_bot_guild_ids()
     for guild in await state().cache.user_managed_guilds(user.id):
         configured_guilds.append({
-            "id": guild["id"],
+            "id": _snowflake(guild["id"]),
             "name": guild["name"],
             "icon_url": guild["icon_url"],
             "bot_installed": guild["id"] in bot_guild_ids,
@@ -1000,7 +1005,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     enabled_default = guild_id == state().settings.discord_guild_id and stored is None
     modules = normalize_module_settings(stored.get("modules") if stored else None, enabled_default=enabled_default)
     return {
-        "guild": {"id": guild["id"], "name": guild["name"], "icon_url": guild["icon_url"]},
+        "guild": {"id": _snowflake(guild["id"]), "name": guild["name"], "icon_url": guild["icon_url"]},
         "bot_installed": bot_guild is not None,
         "invite_url": _bot_invite_url(guild_id),
         "configured": stored is not None,
@@ -1012,10 +1017,15 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
                 "description": definition["description"],
                 "commands": list(definition["commands"]),
                 **modules[key],
+                "channel_id": _snowflake(modules[key]["channel_id"]),
+                "resource_channel_id": _snowflake(modules[key]["resource_channel_id"]),
             }
             for key, definition in BOT_MODULES.items()
         ],
-        "channels": await _discord_guild_channels(guild_id) if bot_guild is not None else [],
+        "channels": [
+            {**channel, "id": _snowflake(channel["id"])}
+            for channel in (await _discord_guild_channels(guild_id) if bot_guild is not None else [])
+        ],
         "updated_at": stored.get("updated_at") if stored else None,
     }
 

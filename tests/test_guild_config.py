@@ -68,6 +68,11 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Save Bot Settings" in javascript
 
 
+def test_discord_ids_are_sent_to_browsers_without_number_rounding() -> None:
+    discord_id = 1533026212463775754
+    assert web._snowflake(discord_id) == "1533026212463775754"
+
+
 def test_management_api_saves_only_a_users_managed_guild(monkeypatch, tmp_path) -> None:
     async def scenario() -> None:
         cache = await SQLiteCache.create(str(tmp_path / "management-api.sqlite3"))
