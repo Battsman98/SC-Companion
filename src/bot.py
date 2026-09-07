@@ -5749,6 +5749,15 @@ def build_wikelo_embed(result: WikeloMissionResult) -> discord.Embed:
 
     embed.add_field(name="Reward", value=format_items(result.rewards) or "Reward details unavailable", inline=False)
     embed.add_field(name="Turn In", value=format_items(result.requirements) or "No turn-in items listed", inline=False)
+    if any(item.name == "Metamaterial Test #146" for item in result.requirements):
+        embed.add_field(
+            name="How to Get Metamaterial Test #146",
+            value=(
+                "Accept **Extra Special Wolf** to unlock its blueprint, then craft it with "
+                "2 SCU Titanium (Q900+), 2 SCU Riccite (Q800+), and 4 Yormandi Eyes."
+            ),
+            inline=False,
+        )
     embed.add_field(
         name="Wikelo Reputation Required",
         value=f"{result.reputation_required_name} ({result.reputation_required:g} rep)",

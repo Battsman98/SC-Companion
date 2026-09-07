@@ -152,6 +152,8 @@ def test_missions_include_wikelo_item_lookup_tab() -> None:
     assert "Turn in" in javascript
     assert "Wikelo reputation required" in javascript
     assert "Wikelo reputation awarded" in javascript
+    assert "How to get Metamaterial Test #146" in javascript
+    assert "2 SCU Titanium (Q900+)" in javascript
     assert "data-wikelo-suggestion-menu" in html
     assert "Select one of ${suggestions.length} matching items or missions." in javascript
 

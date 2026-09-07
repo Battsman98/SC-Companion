@@ -948,9 +948,15 @@ function renderWikeloMission(item) {
       ? `${quantity}${unit} ${escapeHtml(entry.name)}`
       : `${quantity}${unit} ${escapeHtml(entry.name)}`;
   }).join("<br>");
+  const needsMetamaterial146 = item.requirements?.some(
+    (entry) => entry.name === "Metamaterial Test #146",
+  );
   return card(item.name, [
     ["Reward", formatItems(item.rewards) || "Reward details unavailable"],
     ["Turn in", formatItems(item.requirements) || "No turn-in items listed"],
+    ["How to get Metamaterial Test #146", needsMetamaterial146
+      ? "Accept <strong>Extra Special Wolf</strong> to unlock its blueprint, then craft it with 2 SCU Titanium (Q900+), 2 SCU Riccite (Q800+), and 4 Yormandi Eyes."
+      : null],
     ["Wikelo reputation required", `${escapeHtml(item.reputation_required_name)} (${number(item.reputation_required)} rep)`],
     ["Wikelo reputation awarded", item.reputation_reward === null || item.reputation_reward === undefined
       ? "No Wikelo reputation awarded"
