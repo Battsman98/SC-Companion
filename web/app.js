@@ -1,5 +1,18 @@
 const userPanel = document.querySelector("#userPanel");
 const loadingTemplate = document.querySelector("#loadingTemplate");
+const discordServerCount = document.querySelector("#discordServerCount");
+
+async function loadDiscordServerCount() {
+  if (!discordServerCount) return;
+  try {
+    const data = await api("/api/bot-stats");
+    const count = Number(data.active_servers || 0);
+    discordServerCount.innerHTML = `<strong>${number(count)}</strong><span>Discord ${count === 1 ? "server" : "servers"}</span>`;
+    discordServerCount.setAttribute("aria-label", `SC Companion is installed in ${count} Discord ${count === 1 ? "server" : "servers"}`);
+  } catch (_error) {
+    discordServerCount.innerHTML = "<span>Discord count unavailable</span>";
+  }
+}
 
 const outputs = {
   lookup: document.querySelector("#lookupOutput"),
@@ -4720,6 +4733,7 @@ document.addEventListener("click", async (event) => {
 persistentFieldObserver.observe(document.body, { childList: true, subtree: true });
 
 loadMe();
+void loadDiscordServerCount();
 sendActivityHeartbeat();
 void measureBrowserLanguage();
 setInterval(sendActivityHeartbeat, 60_000);

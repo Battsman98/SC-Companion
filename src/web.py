@@ -886,6 +886,12 @@ async def me(request: Request) -> dict[str, Any]:
     }
 
 
+@app.get("/api/bot-stats")
+async def public_bot_stats() -> dict[str, int]:
+    stats = await state().cache.guild_installation_stats()
+    return {"active_servers": stats["active_servers"]}
+
+
 async def _managed_guild(user: Any, guild_id: int) -> dict[str, Any]:
     guilds = await state().cache.user_managed_guilds(user.id)
     guild = next((item for item in guilds if item["id"] == guild_id), None)

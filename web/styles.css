@@ -154,6 +154,25 @@ h1 {
   font-size: clamp(2rem, 4vw, 3.25rem);
 }
 
+.discord-server-count {
+  position: absolute;
+  top: 18px;
+  right: clamp(16px, 4vw, 48px);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.discord-server-count strong {
+  color: var(--accent);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
 h2 {
   font-size: 1rem;
   margin-bottom: 14px;
@@ -165,6 +184,7 @@ h2 {
   justify-items: end;
   min-width: min(340px, 45vw);
   color: var(--muted);
+  padding-top: 24px;
 }
 
 .user-panel .user-row {
@@ -344,6 +364,15 @@ body.feedback-modal-open {
 }
 
 @media (max-width: 680px) {
+  .discord-server-count {
+    position: static;
+    margin-top: 12px;
+  }
+
+  .user-panel {
+    padding-top: 0;
+  }
+
   .feedback-field-row {
     grid-template-columns: 1fr;
   }

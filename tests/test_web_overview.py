@@ -8,11 +8,20 @@ def test_home_page_uses_companion_branding_and_guidance() -> None:
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
 
     assert '<h1 class="companion-title">Star Citizen Companion</h1>' in html
+    assert 'id="discordServerCount"' in html
     assert "Game Assist Control Deck" not in html
     assert "Star Citizen Discord Companion" not in html
     assert "Your Star Citizen companion" in html
     assert "Plan your next session, organize what you own" in html
     assert "The guide below provides a complete walkthrough" in html
+
+
+def test_home_page_loads_the_public_discord_server_count() -> None:
+    javascript = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+    css = (WEB_DIR / "styles.css").read_text(encoding="utf-8")
+    assert 'api("/api/bot-stats")' in javascript
+    assert "active_servers" in javascript
+    assert ".discord-server-count" in css
 
 
 def test_inventory_export_offers_categories_and_uex_selling_prices() -> None:
