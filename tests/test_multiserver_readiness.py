@@ -1,6 +1,14 @@
 import asyncio
 
-from src.bot import FirstRunSetupView, build_bot_setup_guide_embed, build_first_run_setup_embed, cz_timers_cache_key, exec_override_cache_key
+from src.bot import (
+    FirstRunSetupView,
+    NativeAdminView,
+    build_bot_setup_guide_embed,
+    build_first_run_setup_embed,
+    cz_timers_cache_key,
+    exec_override_cache_key,
+    manual_channel_steps,
+)
 from src.cache import SQLiteCache
 from src.guild_config import BOT_MODULES, module_for_command
 
@@ -44,6 +52,22 @@ def test_first_run_notice_points_to_admin_panel_and_has_persistent_button() -> N
     assert button.custom_id == "sc-companion:first-run-admin-panel"
     missing_permission = build_first_run_setup_embed(can_manage_channels=False)
     assert any(field.name == "One permission is still needed" for field in missing_permission.fields)
+
+
+def test_manual_setup_has_an_explicit_next_step_for_each_enabled_feature() -> None:
+    modules = {
+        key: {"enabled": key in {"ship_search", "trade_tools"}, "channel_id": None, "resource_channel_id": None}
+        for key in BOT_MODULES
+    }
+    assert manual_channel_steps(modules) == [
+        ("ship_search", "channel_id"),
+        ("trade_tools", "channel_id"),
+        ("trade_tools", "resource_channel_id"),
+    ]
+    labels = [getattr(item, "label", None) for item in NativeAdminView(modules, "manual").children]
+    assert "Next: Assign Channels" in labels
+    automatic_labels = [getattr(item, "label", None) for item in NativeAdminView(modules, "automatic").children]
+    assert "Next: Assign Channels" not in automatic_labels
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
