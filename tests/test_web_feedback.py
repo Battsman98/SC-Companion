@@ -18,6 +18,7 @@ from src.bot import (
     build_visitor_command_example_embeds,
 )
 from src.web import _feedback_embed, _provided_feedback_images
+from src.web import update_feedback_ticket_status
 from src.web_auth import WebUser
 
 
@@ -81,6 +82,15 @@ def test_shared_feedback_forums_copy_the_main_discord_tags() -> None:
         ("request", False),
     )
     assert FEEDBACK_FORUM_DEFAULT_REACTION == "👍"
+
+
+def test_resolving_a_website_ticket_applies_completed_tag_and_archives() -> None:
+    source = inspect.getsource(update_feedback_ticket_status)
+
+    assert 'tag_ids.get("completed")' in source
+    assert 'payload.status == "resolved"' in source
+    assert '"archived": payload.status == "resolved"' in source
+    assert '"applied_tags": applied_tags[:5]' in source
 
 
 def test_main_about_channel_only_keeps_welcome_and_directory() -> None:

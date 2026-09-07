@@ -1306,6 +1306,15 @@ async def _feedback_forum_tag_id(forum_id: int, report_type: str) -> str | None:
     return str(tag["id"]) if tag and tag.get("id") else None
 
 
+async def _feedback_forum_tag_ids(forum_id: int) -> dict[str, str]:
+    forum = await _discord_api("GET", f"/channels/{forum_id}")
+    return {
+        str(tag.get("name") or "").casefold(): str(tag["id"])
+        for tag in forum.get("available_tags", [])
+        if tag.get("id")
+    }
+
+
 @app.post("/api/me/feedback")
 async def submit_feedback(
     report_type: str = Form(...),
@@ -1629,11 +1638,22 @@ async def update_feedback_ticket_status(
     settings = state().settings
     if not settings.discord_guild_id:
         raise HTTPException(status_code=503, detail="Discord is not configured.")
-    await _require_feedback_thread(thread_id)
+    thread = await _require_feedback_thread(thread_id)
     await state().cache.set_discord_ticket_status(thread_id, settings.discord_guild_id, payload.status, user.id)
     label = payload.status.replace("_", " ").title()
     await _send_discord_channel_message(thread_id, f"**Ticket status updated: {label}**")
-    await _discord_api("PATCH", f"/channels/{thread_id}", json_payload={"archived": payload.status == "resolved"})
+    tag_ids = await _feedback_forum_tag_ids(int(thread["parent_id"]))
+    completed_tag = tag_ids.get("completed")
+    in_progress_tag = tag_ids.get("in-progress")
+    applied_tags = [str(tag_id) for tag_id in thread.get("applied_tags", [])]
+    applied_tags = [tag_id for tag_id in applied_tags if tag_id not in {completed_tag, in_progress_tag}]
+    status_tag = completed_tag if payload.status == "resolved" else in_progress_tag if payload.status == "in_progress" else None
+    if status_tag:
+        applied_tags.append(status_tag)
+    await _discord_api("PATCH", f"/channels/{thread_id}", json_payload={
+        "archived": payload.status == "resolved",
+        "applied_tags": applied_tags[:5],
+    })
     return {"status": payload.status}
 
 

@@ -1931,11 +1931,12 @@ function renderTicketList() {
   document.querySelector('[data-ticket-count="open"]').textContent = openTickets.length;
   document.querySelector('[data-ticket-count="archived"]').textContent = archivedTickets.length;
   const tickets = currentTicketTab === "archived" ? archivedTickets : openTickets;
-  ticketList.innerHTML = tickets.length ? tickets.map((ticket) => `<button type="button" data-ticket-id="${escapeAttribute(ticket.id)}" data-ticket-name="${escapeAttribute(ticket.name)}" data-ticket-status="${escapeAttribute(ticket.status)}"><strong>${escapeHtml(ticket.name)}</strong><span>${escapeHtml(ticket.status.replaceAll("_", " "))} · ${ticket.message_count} messages</span></button>`).join("") : `<p>No ${currentTicketTab} tickets.</p>`;
+  ticketList.innerHTML = tickets.length ? tickets.map((ticket) => `<button type="button" data-ticket-id="${escapeAttribute(ticket.id)}" data-ticket-name="${escapeAttribute(ticket.name)}" data-ticket-status="${escapeAttribute(ticket.status)}"><strong>${escapeHtml(ticket.name)}</strong><span><span class="ticket-status">${escapeHtml(ticket.status.replaceAll("_", " "))}</span>${ticket.message_count} messages</span></button>`).join("") : `<p class="ticket-empty">No ${currentTicketTab} tickets.</p>`;
 }
 
 async function selectTicket(button) {
   selectedTicket = { id: button.dataset.ticketId, name: button.dataset.ticketName };
+  document.querySelectorAll("[data-ticket-id]").forEach((item) => item.classList.toggle("selected", item === button));
   document.querySelector("[data-ticket-title]").textContent = selectedTicket.name;
   ticketMessages.textContent = "Loading conversation...";
   const messages = await jsonRequest(`/api/admin/feedback/tickets/${selectedTicket.id}/messages`);
