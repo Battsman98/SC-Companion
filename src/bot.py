@@ -991,9 +991,13 @@ class GameAssistBot(commands.Bot):
             mirror_files: list[discord.File] = []
             image_attachment = self.feedback_image_attachment(attachments)
             if image_attachment:
-                mirror_file = await image_attachment.to_file(use_cached=True)
-                mirror_files.append(mirror_file)
-                mirror_embed.set_image(url=f"attachment://{mirror_file.filename}")
+                try:
+                    mirror_file = await image_attachment.to_file(use_cached=True)
+                    mirror_files.append(mirror_file)
+                    mirror_embed.set_image(url=f"attachment://{mirror_file.filename}")
+                except discord.HTTPException:
+                    logging.info("Could not download the mirrored image; using its refreshed source URL")
+                    mirror_embed.set_image(url=image_attachment.url)
             if not mirror_embed.image.url and embedded_image:
                 mirror_embed.set_image(url=embedded_image)
             mirror_tag = discord.utils.find(
@@ -1097,12 +1101,12 @@ class GameAssistBot(commands.Bot):
                 self.order_feedback_embed_fields(embed, self.feedback_message_description(report_message))
             image = self.feedback_image_attachment(attachments)
             if image:
-                mirror_file = await image.to_file(use_cached=True)
-                embed.set_image(url=f"attachment://{mirror_file.filename}")
                 try:
+                    mirror_file = await image.to_file(use_cached=True)
+                    embed.set_image(url=f"attachment://{mirror_file.filename}")
                     await central_starter.edit(embed=embed, attachments=[mirror_file])
                 except discord.HTTPException:
-                    logging.info("Peep rejected the mirrored file update; retaining the source image URL")
+                    logging.info("Could not copy the mirrored file; retaining the refreshed source image URL")
                     embed.set_image(url=image.url)
                     await central_starter.edit(embed=embed)
             else:
