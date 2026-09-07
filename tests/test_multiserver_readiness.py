@@ -18,6 +18,7 @@ from src.bot import (
     manual_channel_steps,
     timer_dashboard_channel_id,
     automatic_cleanup_channel_ids,
+    automatic_cleanup_channel_names,
 )
 from src.cache import SQLiteCache
 from src.guild_config import BOT_MODULES, module_for_command
@@ -77,7 +78,7 @@ def test_first_run_notice_points_to_admin_panel_and_has_persistent_button() -> N
 
 
 def test_shared_channels_wait_for_setup_and_use_sc_companion_category() -> None:
-    about_source = inspect.getsource(GameAssistBot.ensure_about_panel)
+    about_source = inspect.getsource(GameAssistBot._ensure_about_panel)
     feedback_source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
 
     assert "if configured is None" in about_source
@@ -160,11 +161,30 @@ def test_uninstall_only_targets_channels_recorded_in_automatic_settings() -> Non
     targets = automatic_cleanup_channel_ids(modules)
     assert 999 in targets
     assert len(targets) == len(BOT_MODULES) + 1
+    names = automatic_cleanup_channel_names(modules)
+    assert {"marketplace", "about-the-bot", "feedback-and-issues", "ship-search"} <= names
     labels = [getattr(item, "label", None) for item in ConfirmBotUninstallView().children]
     assert labels == ["Delete Bot Setup and Uninstall", "Cancel"]
     warning = build_uninstall_warning_embed().description or ""
     assert "about-the-bot" in warning
     assert "feedback-and-issues" in warning
+
+
+def test_setup_lease_allows_only_one_worker_per_guild(tmp_path) -> None:
+    async def scenario() -> None:
+        cache = await SQLiteCache.create(str(tmp_path / "setup-lease.sqlite3"))
+        assert await cache.acquire_guild_setup_lease(42, "worker-one") is True
+        assert await cache.acquire_guild_setup_lease(42, "worker-two") is False
+        await cache.release_guild_setup_lease(42, "worker-one")
+        assert await cache.acquire_guild_setup_lease(42, "worker-two") is True
+
+    asyncio.run(scenario())
+
+
+def test_public_admin_panel_uses_only_local_server_authority() -> None:
+    source = inspect.getsource(__import__("src.bot", fromlist=["_can_manage_admin_commands"])._can_manage_admin_commands)
+    assert 'settings.runtime_profile == "public"' in source
+    assert "user.guild_permissions.manage_guild" in source
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:

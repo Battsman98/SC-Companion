@@ -3,6 +3,7 @@ import asyncio
 import io
 import os
 import re
+import secrets
 import time
 from contextlib import suppress
 from datetime import timedelta
@@ -1132,6 +1133,17 @@ class GameAssistBot(commands.Bot):
             await asyncio.sleep(60)
 
     async def ensure_about_panel(self, guild: discord.Guild) -> None:
+        lock = self._shared_setup_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            holder = secrets.token_hex(16)
+            if not await self.cache.acquire_guild_setup_lease(guild.id, holder):
+                return
+            try:
+                await self._ensure_about_panel(guild)
+            finally:
+                await self.cache.release_guild_setup_lease(guild.id, holder)
+
+    async def _ensure_about_panel(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
         if configured is None:
             # Do not create permanent server structure until a manager chooses
@@ -1161,6 +1173,14 @@ class GameAssistBot(commands.Bot):
                 name="about-the-bot", category=category,
                 reason="Recover the SC Companion information page",
             )
+        for duplicate in [
+            candidate for candidate in guild.text_channels
+            if candidate.id != channel.id
+            and candidate.name == "about-the-bot"
+            and candidate.category_id == category.id
+        ]:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await duplicate.delete(reason="Remove duplicate SC Companion About channel")
         cache_key = f"guild:{guild.id}:about-panel-message"
         message_id = await self.cache.get(cache_key)
         message = None
@@ -1174,7 +1194,7 @@ class GameAssistBot(commands.Bot):
             await message.edit(embed=build_about_bot_embed(guild))
         await self.cache.set(f"guild:{guild.id}:about-channel", channel.id, 315360000)
         await self.ensure_guild_feedback_forum(guild, category)
-        await self.ensure_automatic_module_channels(guild)
+        await self._ensure_automatic_module_channels(guild)
         await self.ensure_guild_marketplace(guild, normalize_module_settings(configured.get("modules")))
         await self.sync_guild_command_examples(guild)
 
@@ -1231,7 +1251,13 @@ class GameAssistBot(commands.Bot):
     async def ensure_automatic_module_channels(self, guild: discord.Guild) -> None:
         lock = self._shared_setup_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
-            await self._ensure_automatic_module_channels(guild)
+            holder = secrets.token_hex(16)
+            if not await self.cache.acquire_guild_setup_lease(guild.id, holder):
+                return
+            try:
+                await self._ensure_automatic_module_channels(guild)
+            finally:
+                await self.cache.release_guild_setup_lease(guild.id, holder)
 
     async def _ensure_automatic_module_channels(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -1272,6 +1298,15 @@ class GameAssistBot(commands.Bot):
                     sync_permissions=True,
                     reason="Recover SC Companion automatic channel",
                 )
+            duplicates = [
+                candidate for candidate in guild.text_channels
+                if candidate.id != channel.id
+                and candidate.name == channel_name
+                and candidate.category_id == category.id
+            ]
+            for duplicate in duplicates:
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await duplicate.delete(reason="Remove duplicate SC Companion automatic channel")
             if item["channel_id"] != channel.id:
                 item["channel_id"] = channel.id
                 changed = True
@@ -1293,6 +1328,14 @@ class GameAssistBot(commands.Bot):
                         sync_permissions=True,
                         reason="Recover SC Companion marketplace forum",
                     )
+                for duplicate in [
+                    candidate for candidate in guild.forums
+                    if candidate.id != forum.id
+                    and candidate.name == "marketplace"
+                    and candidate.category_id == category.id
+                ]:
+                    with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        await duplicate.delete(reason="Remove duplicate SC Companion marketplace")
                 if item["resource_channel_id"] != forum.id:
                     item["resource_channel_id"] = forum.id
                     changed = True
@@ -1334,6 +1377,14 @@ class GameAssistBot(commands.Bot):
                 topic=FEEDBACK_FORUM_TOPIC,
                 reason="Recover the SC Companion feedback forum",
             )
+        for duplicate in [
+            candidate for candidate in guild.forums
+            if candidate.id != forum.id
+            and candidate.name == "feedback-and-issues"
+            and candidate.category_id == category.id
+        ]:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await duplicate.delete(reason="Remove duplicate SC Companion feedback forum")
         await self.configure_feedback_forum(forum)
         await self.sync_feedback_template(forum)
         await self.cache.set(f"guild:{guild.id}:feedback-forum", forum.id, 315360000)
@@ -5916,6 +5967,14 @@ def automatic_cleanup_channel_ids(modules: dict[str, dict[str, object]]) -> set[
     }
 
 
+def automatic_cleanup_channel_names(modules: dict[str, dict[str, object]]) -> set[str]:
+    names = {
+        key.replace("_", "-") for key, item in modules.items() if item.get("enabled")
+    }
+    names.update({"marketplace", "about-the-bot", "feedback-and-issues"})
+    return names
+
+
 class ManualChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, module_key: str, field_name: str) -> None:
         channel_types = ([discord.ChannelType.forum] if field_name == "resource_channel_id"
@@ -6049,16 +6108,37 @@ class ConfirmBotUninstallView(discord.ui.View):
         await interaction.response.edit_message(
             content="Uninstalling SC Companion and cleaning up its channels…", embed=None, view=None
         )
+        lease_holder = secrets.token_hex(16)
+        lease_acquired = False
+        for _ in range(5):
+            lease_acquired = await bot.cache.acquire_guild_setup_lease(guild.id, lease_holder)
+            if lease_acquired:
+                break
+            await asyncio.sleep(1)
+        if not lease_acquired:
+            await interaction.edit_original_response(
+                content="SC Companion is still finishing channel setup. Wait a few seconds and run `/admin uninstall` again."
+            )
+            return
+
+        # Remove configuration before deleting channels so another worker cannot
+        # interpret uninstall deletions as damage that should be recovered.
+        await bot.cache.record_guild_installation(guild.id, guild.name, guild.member_count, active=False)
+        await bot.cache.purge_guild_data(guild.id)
         if automatic:
             category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
             cleanup_ids = automatic_cleanup_channel_ids(modules)
+            cleanup_names = automatic_cleanup_channel_names(modules)
             if category is not None:
                 original_children = list(category.channels)
                 for channel in original_children:
-                    if channel.id in cleanup_ids:
+                    if channel.id in cleanup_ids or channel.name in cleanup_names:
                         with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                             await channel.delete(reason="SC Companion confirmed uninstall")
-                if not any(channel.id not in cleanup_ids for channel in original_children):
+                if not any(
+                    channel.id not in cleanup_ids and channel.name not in cleanup_names
+                    for channel in original_children
+                ):
                     with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                         await category.delete(reason="SC Companion confirmed uninstall")
         for channel_id in setup_channel_ids:
@@ -6066,8 +6146,6 @@ class ConfirmBotUninstallView(discord.ui.View):
             if channel is not None:
                 with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                     await channel.delete(reason="SC Companion confirmed uninstall")
-        await bot.cache.record_guild_installation(guild.id, guild.name, guild.member_count, active=False)
-        await bot.cache.purge_guild_data(guild.id)
         await guild.leave()
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
@@ -6736,12 +6814,19 @@ def _can_manage_change_commands(interaction: discord.Interaction, settings: Sett
 
 def _can_manage_admin_commands(interaction: discord.Interaction, settings: Settings) -> bool:
     user = interaction.user
-    if getattr(user, "id", None) in settings.bot_admin_user_ids:
-        return True
     if not isinstance(user, discord.Member):
         return False
 
     if any(role.name.casefold() == BOT_MANAGER_ROLE_NAME.casefold() for role in user.roles):
+        return True
+
+    # Public installations are governed only by authority granted in that
+    # Discord server. Global Peep administrator IDs must not grant access in a
+    # third-party SC Companion server.
+    if settings.runtime_profile == "public":
+        return user.guild_permissions.manage_guild
+
+    if user.id in settings.bot_admin_user_ids:
         return True
 
     if settings.bot_admin_role_ids:

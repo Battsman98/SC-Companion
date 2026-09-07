@@ -394,6 +394,15 @@ class SQLiteCache:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS guild_setup_leases (
+                guild_id INTEGER PRIMARY KEY,
+                holder TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS feedback_ticket_mirrors (
                 ticket_key TEXT PRIMARY KEY,
                 origin_guild_id INTEGER,
@@ -473,6 +482,31 @@ class SQLiteCache:
                 updated_at = excluded.updated_at
             """,
             (guild_id, guild_name, json.dumps(modules), configured_by, now, now, channel_setup_mode, channel_setup_mode),
+        )
+        self._connection.commit()
+
+    async def acquire_guild_setup_lease(
+        self, guild_id: int, holder: str, ttl_seconds: int = 120
+    ) -> bool:
+        now = int(time.time())
+        cursor = self._connection.execute(
+            """
+            INSERT INTO guild_setup_leases (guild_id, holder, expires_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                holder = excluded.holder,
+                expires_at = excluded.expires_at
+            WHERE guild_setup_leases.expires_at <= ? OR guild_setup_leases.holder = ?
+            """,
+            (guild_id, holder, now + ttl_seconds, now, holder),
+        )
+        self._connection.commit()
+        return cursor.rowcount == 1
+
+    async def release_guild_setup_lease(self, guild_id: int, holder: str) -> None:
+        self._connection.execute(
+            "DELETE FROM guild_setup_leases WHERE guild_id = ? AND holder = ?",
+            (guild_id, holder),
         )
         self._connection.commit()
 
@@ -579,6 +613,7 @@ class SQLiteCache:
             ("DELETE FROM feedback_ticket_mirrors WHERE origin_guild_id = ?", (guild_id,)),
             ("DELETE FROM global_review_requests WHERE origin_guild_id = ?", (guild_id,)),
             ("DELETE FROM trade_store_listings WHERE guild_id = ?", (guild_id,)),
+            ("DELETE FROM guild_setup_leases WHERE guild_id = ?", (guild_id,)),
             ("DELETE FROM cache_entries WHERE cache_key LIKE ? OR cache_key LIKE ?", (guild_prefix, guild_suffix)),
         )
         for statement, parameters in statements:
