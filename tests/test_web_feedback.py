@@ -9,6 +9,7 @@ from src.bot import (
     GameAssistBot,
     VISITOR_CATEGORY_NAME,
     VISITOR_CHANNEL_SPECS,
+    VISITOR_ARCHIVE_CHANNEL_NAMES,
     VISITOR_COMMAND_CHANNELS,
     build_feedback_template_embed,
     build_visitor_command_example_embeds,
@@ -89,7 +90,10 @@ def test_shared_feedback_forums_publish_the_main_example_post() -> None:
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
     assert VISITOR_CATEGORY_NAME == "Discord Bot Hub"
-    assert VISITOR_CHANNEL_SPECS["bot-commands"] == "text"
+    assert "bot-commands" not in VISITOR_CHANNEL_SPECS
+    assert {"blueprints", "missions-wikelo", "timers"} <= set(VISITOR_CHANNEL_SPECS)
+    assert {"bot-commands", "industry-operations", "blueprints-and-missions",
+            "executive-hangar-status", "contested-zone-timers"} == VISITOR_ARCHIVE_CHANNEL_NAMES
     assert VISITOR_CHANNEL_SPECS["general-chat"] == "text"
     assert VISITOR_CHANNEL_SPECS["visitor-lounge"] == "voice"
     assert VISITOR_COMMAND_CHANNELS["ship"] == "ship-search"
@@ -104,14 +108,15 @@ def test_every_visitor_command_channel_has_a_response_example() -> None:
     assert set(VISITOR_COMMAND_CHANNELS.values()) <= set(examples)
     assert all(embed.title and "Example" in embed.title for embed in examples.values())
 
-    blueprint = examples["blueprints-and-missions"]
+    blueprint = examples["blueprints"]
     assert "/blueprint name: NDB-28 Repeater" in blueprint.description
     assert "select `name`" in blueprint.description
     assert "Titanium=750, Gold=820, Lindinium=910" in blueprint.description
     assert "qualities" in blueprint.description
     assert "/blueprint query:" not in blueprint.description
-    assert "/wikelo" in "\n".join(field.value for field in blueprint.fields)
-    assert "Wikelo reputation awarded" in "\n".join(field.value for field in blueprint.fields)
+    missions = examples["missions-wikelo"]
+    assert "/wikelo" in "\n".join(field.value for field in missions.fields)
+    assert "reputation awarded" in "\n".join(field.value for field in missions.fields)
 
     trade = examples["trade-tools"]
     assert "investment: 500000" in trade.description

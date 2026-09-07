@@ -77,6 +77,14 @@ VISITOR_ROLE_NAME = "Visitor"
 BOT_MANAGER_ROLE_NAME = "Bot Manager"
 VISITOR_CATEGORY_NAME = "Discord Bot Hub"
 LEGACY_VISITOR_CATEGORY_NAME = "Visitor Bot Hub"
+VISITOR_ARCHIVE_CATEGORY_NAME = "Bot Hub Archive"
+VISITOR_ARCHIVE_CHANNEL_NAMES = {
+    "bot-commands",
+    "industry-operations",
+    "blueprints-and-missions",
+    "executive-hangar-status",
+    "contested-zone-timers",
+}
 AUDIT_LOG_CATEGORY_ID = 1516295744603164732
 AUDIT_LOG_CATEGORY_NAME = "audit log"
 LOOT_REVIEW_CHANNEL_NAME = "loot-report-reviews"
@@ -90,17 +98,15 @@ WEBSITE_HEALTH_URL = os.getenv(
 VISITOR_CHANNEL_SPECS = {
     "bot-start-here": "text",
     "member-applications": "text",
-    "bot-commands": "text",
     "bot-status": "text",
     "ship-search": "text",
     "trade-tools": "text",
     "mining-tools": "text",
-    "industry-operations": "text",
-    "blueprints-and-missions": "text",
+    "blueprints": "text",
+    "missions-wikelo": "text",
     "item-locator": "text",
     "inventory-search": "text",
-    "executive-hangar-status": "text",
-    "contested-zone-timers": "text",
+    "timers": "text",
     "general-chat": "text",
     "visitor-lounge": "voice",
 }
@@ -111,13 +117,12 @@ VISITOR_CHANNEL_TOPICS = {
     "bot-status": "Check bot availability and connected data-provider health.",
     "ship-search": "Search Star Citizen ships and vehicles with /ship.",
     "trade-tools": "Commodity prices and trade-route planning commands.",
-    "mining-tools": "Mining material locations, scanning guidance, and community submissions.",
-    "industry-operations": "Crew splits, refinery orders, and operation briefs.",
-    "blueprints-and-missions": "Blueprint ownership, ingredients, and mission information.",
+    "mining-tools": "Mining locations, community reports, crew splits, refinery orders, and operation briefs.",
+    "blueprints": "Blueprint search, ownership, ingredients, and quality calculations.",
+    "missions-wikelo": "Mission search, blueprint rewards, and Wikelo contracts.",
     "item-locator": "Find in-game items and current purchase locations.",
     "inventory-search": "Search your linked Star Citizen inventory.",
-    "executive-hangar-status": "Live Executive Hangar clock and command example.",
-    "contested-zone-timers": "Persistent contested-zone timer dashboard.",
+    "timers": "Executive Hangar status and persistent Contested Zone timers.",
     "general-chat": "General conversation for Discord Bot Hub visitors.",
 }
 FEEDBACK_FORUM_TOPIC = "Submit website feedback, bug reports, screenshots, and reproducible examples."
@@ -161,18 +166,20 @@ VISITOR_COMMAND_CHANNELS = {
     "trade routing": "trade-tools",
     "mining": "mining-tools",
     "miningadd": "mining-tools",
-    "industry split": "industry-operations",
-    "industry refinery": "industry-operations",
-    "industry brief": "industry-operations",
-    "blueprint": "blueprints-and-missions",
-    "myblueprints": "blueprints-and-missions",
-    "mission": "blueprints-and-missions",
-    "wikelo": "blueprints-and-missions",
+    "industry split": "mining-tools",
+    "industry refinery": "mining-tools",
+    "industry brief": "mining-tools",
+    "blueprint": "blueprints",
+    "myblueprints": "blueprints",
+    "mission": "missions-wikelo",
+    "wikelo": "missions-wikelo",
     "item locator": "item-locator",
     "item search": "item-locator",
     "inventory search": "inventory-search",
-    "exec": "executive-hangar-status",
-    "cztimer": "contested-zone-timers",
+    "exec": "timers",
+    "execset": "timers",
+    "execclear": "timers",
+    "cztimer": "timers",
 }
 
 
@@ -2127,6 +2134,17 @@ class GameAssistBot(commands.Bot):
         self.visitor_category_id = category.id
 
         await self._remove_legacy_visitor_categories(guild, category)
+        await self._archive_replaced_visitor_channels(guild, category, role, me)
+
+        about = discord.utils.find(lambda item: item.name == "about-the-bot", guild.text_channels)
+        if isinstance(about, discord.TextChannel):
+            if about.category_id != category.id or not about.permissions_synced:
+                await about.edit(
+                    category=category,
+                    sync_permissions=True,
+                    reason="Move the bot information page into Discord Bot Hub",
+                )
+            self.visitor_channels["about-the-bot"] = about.id
 
         for name, channel_type in VISITOR_CHANNEL_SPECS.items():
             existing = guild.get_channel(self.visitor_channels.get(name, 0))
@@ -2198,6 +2216,58 @@ class GameAssistBot(commands.Bot):
         welcome = self.get_channel(self.visitor_channels.get("bot-start-here", 0))
         if isinstance(welcome, discord.TextChannel):
             await self.sync_visitor_welcome(welcome, role)
+
+    async def _archive_replaced_visitor_channels(
+        self,
+        guild: discord.Guild,
+        active_category: discord.CategoryChannel,
+        visitor_role: discord.Role,
+        me: discord.Member,
+    ) -> None:
+        replaced = [
+            channel for channel in active_category.channels
+            if channel.name in VISITOR_ARCHIVE_CHANNEL_NAMES
+        ]
+        if not replaced:
+            return
+        archive = discord.utils.find(
+            lambda item: item.name.casefold() == VISITOR_ARCHIVE_CATEGORY_NAME.casefold(),
+            guild.categories,
+        )
+        manager = guild.get_role(self.hub_role_ids.get(BOT_MANAGER_ROLE_NAME, 0))
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            visitor_role: discord.PermissionOverwrite(view_channel=False),
+            me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+            ),
+        }
+        if manager is not None:
+            overwrites[manager] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=False,
+                read_message_history=True,
+            )
+        if archive is None:
+            archive = await guild.create_category(
+                VISITOR_ARCHIVE_CATEGORY_NAME,
+                overwrites=overwrites,
+                reason="Preserve replaced Discord Bot Hub channels",
+            )
+        elif archive.overwrites != overwrites:
+            await archive.edit(
+                overwrites=overwrites,
+                reason="Protect preserved Discord Bot Hub history",
+            )
+        for channel in replaced:
+            await channel.edit(
+                category=archive,
+                sync_permissions=True,
+                reason="Archive replaced Discord Bot Hub channel",
+            )
 
     async def remove_legacy_star_citizen_bot_channels(
         self,
@@ -2798,7 +2868,7 @@ class GameAssistBot(commands.Bot):
 
     async def sync_commands_reference_message(self) -> None:
         channel_ids = []
-        visitor_channel_id = self.visitor_channels.get("bot-commands")
+        visitor_channel_id = self.visitor_channels.get("bot-start-here")
         if self.settings.commands_channel_id and not visitor_channel_id:
             channel_ids.append(self.settings.commands_channel_id)
         if visitor_channel_id and visitor_channel_id not in channel_ids:
@@ -2877,7 +2947,7 @@ class GameAssistBot(commands.Bot):
         logging.info("Synced %s commands reference message(s) in channel %s", len(updated_message_ids), channel_id)
 
     async def sync_exec_status_message(self) -> None:
-        visitor_channel_id = self.visitor_channels.get("executive-hangar-status")
+        visitor_channel_id = self.visitor_channels.get("timers")
         channel_ids = {visitor_channel_id} if visitor_channel_id else {self.settings.exec_status_channel_id}
         channel_ids.discard(None)
         if channel_ids:
@@ -3013,7 +3083,7 @@ class GameAssistBot(commands.Bot):
             logging.info("Could not scan for duplicate %s messages", title)
 
     async def sync_cz_timers_message(self) -> None:
-        visitor_channel_id = self.visitor_channels.get("contested-zone-timers")
+        visitor_channel_id = self.visitor_channels.get("timers")
         channel_ids = {visitor_channel_id} if visitor_channel_id else {self.settings.cz_timers_channel_id}
         channel_ids.discard(None)
         if not channel_ids:
@@ -3119,31 +3189,29 @@ class GameAssistBot(commands.Bot):
         channel_name: str,
         channel: discord.TextChannel,
     ) -> None:
-        timer_specs = {
-            "executive-hangar-status": ("discord:exec-status-message", "Executive Hangar Clock"),
-            "contested-zone-timers": ("discord:cz-timers-message", "Contested Zone Timers"),
-        }
-        spec = timer_specs.get(channel_name)
-        if spec is None:
+        if channel_name != "timers":
             return
-        marker_key = f"discord:visitor-example-before-dashboard:v1:{channel.id}"
-        if await self.cache.get(marker_key):
-            return
-
-        cache_prefix, embed_title = spec
-        dashboard_cache_key = f"{cache_prefix}:{channel.id}"
-        dashboard_message_id = await self.cache.get(dashboard_cache_key)
-        dashboard_message = None
-        if isinstance(dashboard_message_id, int):
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                dashboard_message = await channel.fetch_message(dashboard_message_id)
-        if dashboard_message is None:
-            dashboard_message = await self.find_recent_embed_message(channel, embed_title)
-        if dashboard_message is not None:
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                await dashboard_message.delete()
-        await self.cache.set(dashboard_cache_key, None, 315360000)
-        await self.cache.set(marker_key, True, 315360000)
+        timer_specs = (
+            ("discord:exec-status-message", "Executive Hangar Clock"),
+            ("discord:cz-timers-message", "Contested Zone Timers"),
+        )
+        for cache_prefix, embed_title in timer_specs:
+            marker_key = f"discord:visitor-example-before-dashboard:v1:{cache_prefix}:{channel.id}"
+            if await self.cache.get(marker_key):
+                continue
+            dashboard_cache_key = f"{cache_prefix}:{channel.id}"
+            dashboard_message_id = await self.cache.get(dashboard_cache_key)
+            dashboard_message = None
+            if isinstance(dashboard_message_id, int):
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    dashboard_message = await channel.fetch_message(dashboard_message_id)
+            if dashboard_message is None:
+                dashboard_message = await self.find_recent_embed_message(channel, embed_title)
+            if dashboard_message is not None:
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await dashboard_message.delete()
+            await self.cache.set(dashboard_cache_key, None, 315360000)
+            await self.cache.set(marker_key, True, 315360000)
 
     async def resolve_exec_cycle_start(self, guild_id: int | None = None) -> tuple[int, str]:
         override = await self.cache.get(exec_override_cache_key(guild_id))
@@ -6138,19 +6206,19 @@ def build_visitor_command_example_embeds() -> dict[str, discord.Embed]:
             "Example /mining Response",
             "/mining material: Quantanium",
             "Type `/mining`, select the `material` option, enter or choose `Quantanium`, then submit. Optional `system` and `planet` options narrow the results.",
-            (("Best locations", "Lyria · Aaron Halo · microTech moon belts"), ("Scan signature", "High-value volatile mineral; confirm cluster composition before extraction"), ("Handling", "Transport promptly after collection and monitor instability"), ("Community data", "Type `/miningadd`, then fill `material`, `system`, `location_type`, and `location` to submit a verified location.")),
+            (("Best locations", "Lyria · Aaron Halo · microTech moon belts"), ("Scan signature", "High-value volatile mineral; confirm cluster composition before extraction"), ("Handling", "Transport promptly after collection and monitor instability"), ("Community data", "Type `/miningadd`, then fill `material`, `system`, `location_type`, and `location` to submit a verified location."), ("Industry tools", "Use `/industry split` for crew payouts, `/industry refinery` for completion times, or `/industry brief` for an operation brief.")),
         ),
-        "industry-operations": _visitor_example_embed(
-            "Example Industry Response",
-            "/industry split gross: 1200000 crew: Alex,Bex,Cato expenses: 150000",
-            "Type `/industry`, select `split`, fill the required `gross` and `crew` options, optionally add `expenses`, then submit.",
-            (("Net payout", "1,050,000 aUEC"), ("Crew shares", "Alex 350,000 · Bex 350,000 · Cato 350,000"), ("Other tools", "After typing `/industry`, select `refinery` for completion times or `brief` for an operation brief.")),
-        ),
-        "blueprints-and-missions": _visitor_example_embed(
-            "Example Blueprint, Mission & Wikelo Response",
+        "blueprints": _visitor_example_embed(
+            "Example Blueprint Response",
             "/blueprint name: NDB-28 Repeater qualities: Titanium=750, Gold=820, Lindinium=910",
             "Type `/blueprint`, select `name`, and choose the blueprint. Add `qualities` to calculate crafted stats. Enter one number, such as `750`, to apply it to every material, or enter comma-separated `Material=quality` pairs to give every required material a different value. Qualities must be from 0 to 1000.",
-            (("NDB-28 Repeater", "Vehicle weapon · Blueprint available"), ("Required materials", "Titanium 0.64 SCU · Gold 0.22 SCU · Lindinium 0.13 SCU"), ("Quality calculation", "Titanium Q750: Integrity +5.0%\nGold Q820: Impact Force +3.2%\nLindinium Q910: Impact Force +4.1%"), ("Command tips", "Use `qualities: 750` for the same quality on all materials. Material names are not case-sensitive. Separate different materials with commas and place `=` between each name and quality."), ("Mission search", "Type `/mission`, select the `name` option, enter or choose a mission name, then submit. Other mission options filter by region, reputation giver, reputation level, or type."), ("Wikelo search", "Type `/wikelo`, select `item`, then choose a reward or mission such as `Golem`. The result shows the mission, turn-in list, required Wikelo reputation, and Wikelo reputation awarded.")),
+            (("NDB-28 Repeater", "Vehicle weapon · Blueprint available"), ("Required materials", "Titanium 0.64 SCU · Gold 0.22 SCU · Lindinium 0.13 SCU"), ("Quality calculation", "Titanium Q750: Integrity +5.0%\nGold Q820: Impact Force +3.2%\nLindinium Q910: Impact Force +4.1%"), ("Command tips", "Use `qualities: 750` for the same quality on all materials. Use `/myblueprints` to search saved blueprints.")),
+        ),
+        "missions-wikelo": _visitor_example_embed(
+            "Example Mission & Wikelo Response",
+            "/mission rep_giver: Wikelo",
+            "Type `/mission` and choose a name or filter. Use `/wikelo` when you want to search Wikelo contracts by reward or required item.",
+            (("Mission search", "Filter by region, reputation giver, reputation level, or mission type."), ("Wikelo search", "Use `/wikelo` and choose a reward or mission such as `Golem` to see the turn-in list, required reputation, and reputation awarded.")),
         ),
         "item-locator": _visitor_example_embed(
             "Example Item Locator Response",
@@ -6164,8 +6232,12 @@ def build_visitor_command_example_embeds() -> dict[str, discord.Embed]:
             "Type `/inventory`, select `search`, choose `item`, and enter or choose `FS-9`. Add `station` only if you want to limit the search to `Port Tressler`, then submit.",
             (("FS-9 LMG × 2", "Port Tressler · Personal Weapons / Weapons"), ("FS-9 Magazine × 14", "Port Tressler · Personal Weapons / Ammunition"), ("Privacy", "Only your linked inventory is searched")),
         ),
-        "executive-hangar-status": build_exec_example_embed(),
-        "contested-zone-timers": build_cz_example_embed(),
+        "timers": _visitor_example_embed(
+            "Example Timer Responses",
+            "/exec",
+            "Use `/exec` for the Executive Hangar clock. Use `/cztimer` to create and manage this server's Contested Zone timers.",
+            (("Executive Hangar", "Current phase, lights, and next change time."), ("Contested Zone", "Persistent keycard, compboard, and door countdowns for this Discord.")),
+        ),
     }
 
 

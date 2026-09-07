@@ -223,7 +223,7 @@ def test_message_embed_matches_existing_embed_payload() -> None:
 def test_only_cached_bot_hub_messages_are_protected() -> None:
     async def scenario() -> None:
         bot = GameAssistBot.__new__(GameAssistBot)
-        bot.visitor_channels = {"bot-commands": 123}
+        bot.visitor_channels = {"bot-start-here": 123}
         bot.cache = SimpleNamespace(get=AsyncMock(side_effect=lambda key: [456, 789] if "commands-reference" in key else None))
 
         assert await bot._is_protected_hub_message(123, 789)
