@@ -76,6 +76,17 @@ def test_first_run_notice_points_to_admin_panel_and_has_persistent_button() -> N
     assert any(field.name == "One permission is still needed" for field in missing_permission.fields)
 
 
+def test_shared_channels_wait_for_setup_and_use_sc_companion_category() -> None:
+    about_source = inspect.getsource(GameAssistBot.ensure_about_panel)
+    feedback_source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
+
+    assert "if configured is None" in about_source
+    assert 'item.name == "SC Companion"' in about_source
+    assert '"about-the-bot", category=category' in about_source
+    assert '"feedback-and-issues"' in feedback_source
+    assert "category=category" in feedback_source
+
+
 def test_manual_setup_has_an_explicit_next_step_for_each_enabled_feature() -> None:
     modules = {
         key: {"enabled": key in {"ship_search", "trade_tools"}, "channel_id": None, "resource_channel_id": None}

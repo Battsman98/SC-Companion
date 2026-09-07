@@ -1132,9 +1132,17 @@ class GameAssistBot(commands.Bot):
             await asyncio.sleep(60)
 
     async def ensure_about_panel(self, guild: discord.Guild) -> None:
+        configured = await self.cache.guild_bot_settings(guild.id)
+        if configured is None:
+            # Do not create permanent server structure until a manager chooses
+            # automatic or manual setup.
+            return
         if guild.me is None or not guild.me.guild_permissions.manage_channels:
             logging.warning("Manage Channels is required to create the About page in guild %s", guild.id)
             return
+        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+        if category is None:
+            category = await guild.create_category("SC Companion", reason="Set up SC Companion channels")
         tracked_channel_id = await self.cache.get(f"guild:{guild.id}:about-channel")
         channel = guild.get_channel(tracked_channel_id) if isinstance(tracked_channel_id, int) else None
         if not isinstance(channel, discord.TextChannel):
@@ -1145,10 +1153,14 @@ class GameAssistBot(commands.Bot):
                 guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True),
             }
             channel = await guild.create_text_channel(
-                "about-the-bot", overwrites=overwrites, reason="Create the SC Companion information page"
+                "about-the-bot", category=category, overwrites=overwrites,
+                reason="Create the SC Companion information page"
             )
-        elif channel.name != "about-the-bot":
-            await channel.edit(name="about-the-bot", reason="Recover the SC Companion information page")
+        elif channel.name != "about-the-bot" or channel.category_id != category.id:
+            await channel.edit(
+                name="about-the-bot", category=category,
+                reason="Recover the SC Companion information page",
+            )
         cache_key = f"guild:{guild.id}:about-panel-message"
         message_id = await self.cache.get(cache_key)
         message = None
@@ -1161,11 +1173,9 @@ class GameAssistBot(commands.Bot):
         else:
             await message.edit(embed=build_about_bot_embed(guild))
         await self.cache.set(f"guild:{guild.id}:about-channel", channel.id, 315360000)
-        await self.ensure_guild_feedback_forum(guild)
+        await self.ensure_guild_feedback_forum(guild, category)
         await self.ensure_automatic_module_channels(guild)
-        configured = await self.cache.guild_bot_settings(guild.id)
-        if configured is not None:
-            await self.ensure_guild_marketplace(guild, normalize_module_settings(configured.get("modules")))
+        await self.ensure_guild_marketplace(guild, normalize_module_settings(configured.get("modules")))
         await self.sync_guild_command_examples(guild)
 
     async def sync_first_run_notice(self, guild: discord.Guild) -> None:
@@ -1292,9 +1302,15 @@ class GameAssistBot(commands.Bot):
                 guild.id, guild.name, modules, int(configured["configured_by"]), "automatic"
             )
 
-    async def ensure_guild_feedback_forum(self, guild: discord.Guild) -> None:
+    async def ensure_guild_feedback_forum(
+        self, guild: discord.Guild, category: discord.CategoryChannel | None = None
+    ) -> None:
         if guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id} or guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
+        if category is None:
+            category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+            if category is None:
+                category = await guild.create_category("SC Companion", reason="Set up SC Companion channels")
         tracked_forum_id = await self.cache.get(f"guild:{guild.id}:feedback-forum")
         forum = guild.get_channel(tracked_forum_id) if isinstance(tracked_forum_id, int) else None
         if not isinstance(forum, discord.ForumChannel):
@@ -1302,13 +1318,19 @@ class GameAssistBot(commands.Bot):
         if forum is None:
             forum = await guild.create_forum(
                 "feedback-and-issues",
+                category=category,
                 topic=FEEDBACK_FORUM_TOPIC,
                 default_reaction_emoji=FEEDBACK_FORUM_DEFAULT_REACTION,
                 reason="Create the SC Companion feedback ticket forum",
             )
-        elif forum.name != "feedback-and-issues" or forum.topic != FEEDBACK_FORUM_TOPIC:
+        elif (
+            forum.name != "feedback-and-issues"
+            or forum.category_id != category.id
+            or forum.topic != FEEDBACK_FORUM_TOPIC
+        ):
             await forum.edit(
                 name="feedback-and-issues",
+                category=category,
                 topic=FEEDBACK_FORUM_TOPIC,
                 reason="Recover the SC Companion feedback forum",
             )
@@ -5833,13 +5855,13 @@ class ChannelSetupChoiceView(discord.ui.View):
         if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
             await interaction.response.send_message("You need Manage Server permission to choose channel setup.", ephemeral=True)
             return
-        if mode == "automatic" and (
+        if (
             interaction.guild.me is None
             or not interaction.guild.me.guild_permissions.manage_channels
         ):
             await interaction.response.send_message(
-                "SC Companion needs the **Manage Channels** permission before it can create channels. "
-                "Enable that permission for the bot role, then choose automatic setup again.",
+                "SC Companion needs the **Manage Channels** permission before it can complete setup. "
+                "Enable that permission for the bot role, then choose a setup mode again.",
                 ephemeral=True,
             )
             return
@@ -5847,10 +5869,10 @@ class ChannelSetupChoiceView(discord.ui.View):
         await bot.cache.save_guild_bot_settings(
             interaction.guild.id, interaction.guild.name, self.modules, interaction.user.id, mode
         )
-        if mode == "automatic":
-            # This creates the shared About and Feedback destinations first, then
-            # creates a channel for every enabled feature.
-            await bot.ensure_about_panel(interaction.guild)
+        # This creates the shared About and Feedback destinations only after the
+        # manager chooses a setup mode. Automatic mode also creates enabled
+        # feature channels; manual mode leaves those assignments to the wizard.
+        await bot.ensure_about_panel(interaction.guild)
         await interaction.edit_original_response(
             embed=build_native_admin_embed(interaction.guild, self.modules),
             view=NativeAdminView(self.modules, mode),
