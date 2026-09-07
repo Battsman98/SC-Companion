@@ -39,6 +39,11 @@ BOT_MODULES: Final[dict[str, dict[str, object]]] = {
         "description": "Commodity lookup, routes, listings, and stores.",
         "commands": ("commodity", "trade routing", "trade listing", "trade store", "trade store-refresh"),
     },
+    "timers": {
+        "label": "Timers",
+        "description": "Executive Hangar status and server-isolated Contested Zone timers.",
+        "commands": ("exec", "execset", "execclear", "cztimer"),
+    },
 }
 
 COMMAND_MODULE: Final[dict[str, str]] = {

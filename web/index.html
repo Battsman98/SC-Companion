@@ -684,6 +684,14 @@
 
     <section id="admin" class="tab-panel">
         <article class="panel">
+          <div class="panel-heading"><div><h2>Discord Service</h2><p>Installed-server totals and configuration coverage.</p></div></div>
+          <div id="botServiceAnalyticsOutput" class="mini-output"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><div><h2>Central Review Queue</h2><p>Approve or reject shared knowledge and per-server timer corrections.</p></div></div>
+          <div id="centralReviewsOutput" class="results compact"></div>
+        </article>
+        <article class="panel">
           <div class="panel-heading">
             <div>
               <h2>RSI Importer Health</h2>
@@ -788,6 +796,7 @@
       </div>
       <p id="feedbackIntro" class="feedback-intro">Share a problem, expected behavior, or an idea that could improve Star Citizen Companion.</p>
       <form class="feedback-form" data-feedback-form>
+        <label><span>Discord server copy</span><select name="guild_id" data-feedback-guild><option value="">Primary SC Companion Discord only</option></select><small>When selected, the ticket is created in that server and duplicated to the primary support Discord.</small></label>
         <div class="feedback-field-row">
           <label><span>Report type</span>
             <select name="report_type" required>

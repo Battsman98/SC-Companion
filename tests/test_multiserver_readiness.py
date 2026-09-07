@@ -1,0 +1,43 @@
+import asyncio
+
+from src.bot import cz_timers_cache_key, exec_override_cache_key
+from src.cache import SQLiteCache
+from src.guild_config import BOT_MODULES, module_for_command
+
+
+def test_timer_commands_are_shared_module_commands() -> None:
+    assert "timers" in BOT_MODULES
+    assert module_for_command("exec") == "timers"
+    assert module_for_command("execset") == "timers"
+    assert module_for_command("cztimer") == "timers"
+
+
+def test_timer_cache_keys_are_isolated_by_guild() -> None:
+    assert exec_override_cache_key(None) != exec_override_cache_key(123)
+    assert exec_override_cache_key(123) != exec_override_cache_key(456)
+    assert cz_timers_cache_key(123) != cz_timers_cache_key(456)
+
+
+def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
+    asyncio.run(_exercise_review_queue_and_server_analytics(tmp_path))
+
+
+async def _exercise_review_queue_and_server_analytics(tmp_path) -> None:
+    cache = await SQLiteCache.create(str(tmp_path / "readiness.sqlite3"))
+    review_id = await cache.submit_review_request(
+        "timer", {"phase": "open"}, submitted_by=7, submitted_by_name="Tester", origin_guild_id=42
+    )
+    pending = await cache.pending_review_requests()
+    assert pending[0]["id"] == review_id
+    assert pending[0]["origin_guild_id"] == 42
+    assert await cache.review_request(review_id, "approved", 1, "Owner") is True
+    assert await cache.pending_review_requests() == []
+
+    await cache.record_guild_installation(42, "Test One", 10)
+    await cache.record_guild_installation(43, "Test Two", 20)
+    stats = await cache.guild_installation_stats()
+    assert stats["active_servers"] == 2
+    assert stats["visible_members"] == 30
+    await cache.record_guild_installation(43, "Test Two", 20, active=False)
+    assert (await cache.guild_installation_stats())["active_servers"] == 1
+    await cache.close()

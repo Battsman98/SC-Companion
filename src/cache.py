@@ -347,6 +347,51 @@ class SQLiteCache:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS global_review_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                review_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                origin_guild_id INTEGER,
+                origin_channel_id INTEGER,
+                submitted_by INTEGER NOT NULL,
+                submitted_by_name TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                reviewer_id INTEGER,
+                reviewer_name TEXT,
+                created_at INTEGER NOT NULL,
+                reviewed_at INTEGER
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_global_reviews_status ON global_review_requests(status, created_at)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS guild_installations (
+                guild_id INTEGER PRIMARY KEY,
+                guild_name TEXT NOT NULL,
+                member_count INTEGER,
+                active INTEGER NOT NULL DEFAULT 1,
+                joined_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL,
+                removed_at INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS feedback_ticket_mirrors (
+                ticket_key TEXT PRIMARY KEY,
+                origin_guild_id INTEGER,
+                origin_thread_id INTEGER,
+                central_thread_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
         cls._ensure_column(connection, "trade_store_listings", "source_type", "TEXT NOT NULL DEFAULT 'google_sheet'")
         cls._ensure_column(connection, "trade_store_listings", "guild_id", "INTEGER")
         cls._ensure_column(connection, "user_ships", "image_url", "TEXT")
@@ -462,6 +507,79 @@ class SQLiteCache:
             }
             for row in rows
         ]
+
+    async def submit_review_request(self, review_type: str, payload: dict[str, Any], *, submitted_by: int,
+                                    submitted_by_name: str, origin_guild_id: int | None = None,
+                                    origin_channel_id: int | None = None) -> int:
+        now = int(time.time())
+        cursor = self._connection.execute(
+            "INSERT INTO global_review_requests (review_type, origin_guild_id, origin_channel_id, submitted_by, "
+            "submitted_by_name, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (review_type, origin_guild_id, origin_channel_id, submitted_by, submitted_by_name,
+             json.dumps(payload), now),
+        )
+        self._connection.commit()
+        return int(cursor.lastrowid)
+
+    async def pending_review_requests(self, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT id, review_type, status, origin_guild_id, origin_channel_id, submitted_by, "
+            "submitted_by_name, payload_json, created_at FROM global_review_requests "
+            "WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?", (limit,),
+        ).fetchall()
+        return [{"id": int(r[0]), "review_type": r[1], "status": r[2], "origin_guild_id": r[3],
+                 "origin_channel_id": r[4], "submitted_by": int(r[5]), "submitted_by_name": r[6],
+                 "payload": json.loads(r[7]), "created_at": int(r[8])} for r in rows]
+
+    async def review_request(self, review_id: int, status: str, reviewer_id: int, reviewer_name: str) -> bool:
+        if status not in {"approved", "rejected"}:
+            raise ValueError("Unknown review status")
+        cursor = self._connection.execute(
+            "UPDATE global_review_requests SET status = ?, reviewer_id = ?, reviewer_name = ?, reviewed_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (status, reviewer_id, reviewer_name, int(time.time()), review_id),
+        )
+        self._connection.commit()
+        return bool(cursor.rowcount)
+
+    async def record_guild_installation(self, guild_id: int, guild_name: str, member_count: int | None,
+                                        *, active: bool = True) -> None:
+        now = int(time.time())
+        self._connection.execute(
+            "INSERT INTO guild_installations (guild_id, guild_name, member_count, active, joined_at, last_seen_at, removed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id) DO UPDATE SET guild_name=excluded.guild_name, "
+            "member_count=excluded.member_count, active=excluded.active, last_seen_at=excluded.last_seen_at, "
+            "removed_at=excluded.removed_at",
+            (guild_id, guild_name, member_count, int(active), now, now, None if active else now),
+        )
+        self._connection.commit()
+
+    async def guild_installation_stats(self) -> dict[str, int]:
+        row = self._connection.execute(
+            "SELECT COUNT(*), COALESCE(SUM(member_count), 0) FROM guild_installations WHERE active = 1"
+        ).fetchone()
+        configured = self._connection.execute("SELECT COUNT(*) FROM guild_bot_settings").fetchone()
+        return {"active_servers": int(row[0]), "visible_members": int(row[1]), "configured_servers": int(configured[0])}
+
+    async def save_feedback_mirror(self, ticket_key: str, central_thread_id: int,
+                                   origin_guild_id: int | None = None, origin_thread_id: int | None = None) -> None:
+        self._connection.execute(
+            "INSERT INTO feedback_ticket_mirrors (ticket_key, origin_guild_id, origin_thread_id, central_thread_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(ticket_key) DO UPDATE SET origin_guild_id=excluded.origin_guild_id, "
+            "origin_thread_id=excluded.origin_thread_id, central_thread_id=excluded.central_thread_id",
+            (ticket_key, origin_guild_id, origin_thread_id, central_thread_id, int(time.time())),
+        )
+        self._connection.commit()
+
+    async def feedback_mirror_for_central_thread(self, central_thread_id: int) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT ticket_key, origin_guild_id, origin_thread_id, central_thread_id, created_at "
+            "FROM feedback_ticket_mirrors WHERE central_thread_id = ?", (central_thread_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"ticket_key": row[0], "origin_guild_id": row[1], "origin_thread_id": row[2],
+                "central_thread_id": int(row[3]), "created_at": int(row[4])}
 
     async def save_inventory_scan_diagnostic(
         self,

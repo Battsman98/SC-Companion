@@ -48,6 +48,18 @@ from src.trade_stores import ParsedStoreInventory, StoreInventoryItem, google_sh
 
 EXEC_OVERRIDE_CACHE_KEY = "exec:cycle-start-override"
 CZ_TIMERS_CACHE_KEY = "cz:dashboard:timers"
+
+
+def exec_override_cache_key(guild_id: int | None) -> str:
+    return f"{EXEC_OVERRIDE_CACHE_KEY}:guild:{guild_id}" if guild_id else EXEC_OVERRIDE_CACHE_KEY
+
+
+def cz_timers_cache_key(guild_id: int | None) -> str:
+    return f"{CZ_TIMERS_CACHE_KEY}:guild:{guild_id}" if guild_id else CZ_TIMERS_CACHE_KEY
+
+
+def timer_scope(bot: "GameAssistBot", guild_id: int | None) -> int | None:
+    return None if guild_id == bot.settings.discord_guild_id else guild_id
 BLUEPRINT_PAGE_SIZE = 25
 BLUEPRINT_MISSION_LINES_PER_PAGE = 25
 MINING_LOCATION_LINES_PER_PAGE = 25
@@ -412,7 +424,7 @@ class GameAssistCommandTree(app_commands.CommandTree):
         command_name = _interaction_command_name(interaction)
         configured = await bot.cache.guild_bot_settings(interaction.guild_id)
         is_primary_guild = interaction.guild_id == bot.settings.discord_guild_id
-        if configured is None and not is_primary_guild:
+        if configured is None and not is_primary_guild and not command_name.startswith("admin "):
             await interaction.response.send_message(
                 "This server has not configured SC Companion yet. A server manager can finish setup at sccompanion.org.",
                 ephemeral=True,
@@ -421,7 +433,8 @@ class GameAssistCommandTree(app_commands.CommandTree):
 
         allowed_channel_ids: set[int] = set()
         module_key = module_for_command(command_name)
-        if configured is not None and not is_primary_guild and module_key is None and command_name != "status":
+        shared_utility = command_name == "status" or command_name.startswith("admin ")
+        if configured is not None and not is_primary_guild and module_key is None and not shared_utility:
             await interaction.response.send_message(
                 f"`/{command_name}` is not available in the shared bot yet.",
                 ephemeral=True,
@@ -665,6 +678,7 @@ class GameAssistBot(commands.Bot):
         self._website_deployment_task: asyncio.Task | None = None
         self._anniversary_task: asyncio.Task | None = None
         self._trade_store_sync_task: asyncio.Task | None = None
+        self._guild_sync_task: asyncio.Task | None = None
         self._hub_last_recovery_monotonic = 0.0
         self._hub_incident_count = 0
         self._hub_pending_incident: tuple[str, discord.AuditLogAction | None, int | None] | None = None
@@ -745,9 +759,68 @@ class GameAssistBot(commands.Bot):
             self._anniversary_task = asyncio.create_task(self._anniversary_role_loop())
         if self._trade_store_sync_task is None:
             self._trade_store_sync_task = asyncio.create_task(self._trade_store_sync_loop())
+        if self._guild_sync_task is None:
+            self._guild_sync_task = asyncio.create_task(self._guild_sync_loop())
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
+        await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
         await self.ensure_about_panel(guild)
+
+    async def on_guild_remove(self, guild: discord.Guild) -> None:
+        await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count, active=False)
+
+    async def on_thread_create(self, thread: discord.Thread) -> None:
+        if thread.guild.id == self.settings.discord_guild_id or not isinstance(thread.parent, discord.ForumChannel):
+            return
+        if thread.parent.name != "feedback-and-issues" or not self.settings.feedback_forum_channel_id:
+            return
+        try:
+            starter = await thread.fetch_message(thread.id)
+            central = await self.fetch_channel(self.settings.feedback_forum_channel_id)
+            if not isinstance(central, discord.ForumChannel):
+                return
+            mirror_embed = discord.Embed(
+                title=f"Mirrored ticket from {thread.guild.name}",
+                description=(starter.content or "Discord forum ticket")[:4000],
+                color=discord.Color.blurple(),
+            )
+            mirror_embed.add_field(name="Origin", value=f"[{thread.name}]({thread.jump_url})", inline=False)
+            if starter.embeds:
+                mirror_embed.add_field(name="Original report", value=(starter.embeds[0].description or starter.embeds[0].title or "Embedded report")[:1024], inline=False)
+            created = await central.create_thread(name=f"[{thread.guild.name}] {thread.name}"[:100], embed=mirror_embed)
+            central_thread = getattr(created, "thread", created)
+            await self.cache.save_feedback_mirror(f"discord:{thread.id}", central_thread.id, thread.guild.id, thread.id)
+        except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            logging.exception("Could not mirror feedback thread %s", thread.id)
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot or message.author.id not in self.settings.bot_admin_user_ids:
+            return
+        if not isinstance(message.channel, discord.Thread) or message.guild is None or message.guild.id != self.settings.discord_guild_id:
+            return
+        mirror = await self.cache.feedback_mirror_for_central_thread(message.channel.id)
+        if not mirror or not mirror.get("origin_thread_id"):
+            return
+        try:
+            origin = await self.fetch_channel(int(mirror["origin_thread_id"]))
+            if isinstance(origin, discord.Thread):
+                content = message.content.strip() or "The SC Companion team posted an update."
+                embed = discord.Embed(title="Official SC Companion response", description=content[:4000],
+                                      color=discord.Color.green(), timestamp=message.created_at)
+                if message.attachments:
+                    embed.add_field(name="Attachments", value="\n".join(item.url for item in message.attachments)[:1024], inline=False)
+                await origin.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            logging.exception("Could not sync official feedback response from thread %s", message.channel.id)
+
+    async def _guild_sync_loop(self) -> None:
+        await self.wait_until_ready()
+        while not self.is_closed():
+            for guild in self.guilds:
+                with suppress(Exception):
+                    await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
+                    await self.ensure_about_panel(guild)
+            await asyncio.sleep(60)
 
     async def ensure_about_panel(self, guild: discord.Guild) -> None:
         if guild.me is None or not guild.me.guild_permissions.manage_channels:
@@ -773,7 +846,17 @@ class GameAssistBot(commands.Bot):
             await self.cache.set(cache_key, message.id, 315360000)
         else:
             await message.edit(embed=build_about_bot_embed(guild))
+        await self.ensure_guild_feedback_forum(guild)
         await self.sync_guild_command_examples(guild)
+
+    async def ensure_guild_feedback_forum(self, guild: discord.Guild) -> None:
+        if guild.id == self.settings.discord_guild_id or guild.me is None or not guild.me.guild_permissions.manage_channels:
+            return
+        forum = discord.utils.find(lambda item: item.name == "feedback-and-issues", guild.forums)
+        if forum is None:
+            forum = await guild.create_forum("feedback-and-issues", topic=FEEDBACK_FORUM_TOPIC,
+                                             reason="Create the SC Companion feedback ticket forum")
+        await self.cache.set(f"guild:{guild.id}:feedback-forum", forum.id, 315360000)
 
     async def sync_guild_command_examples(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -2117,7 +2200,7 @@ class GameAssistBot(commands.Bot):
             lambda item: item.name == LOOT_REVIEW_CHANNEL_NAME and item.category_id == category.id,
             guild.text_channels,
         )
-        topic = "Private audit queue for community loot sightings. Only Bot Managers can approve or reject."
+        topic = "Private audit queue for community loot sightings. Only the configured service owner can approve or reject."
         if channel is None:
             channel = await guild.create_text_channel(
                 LOOT_REVIEW_CHANNEL_NAME,
@@ -2158,9 +2241,9 @@ class GameAssistBot(commands.Bot):
     async def review_loot_sighting(
         self, interaction: discord.Interaction, report_id: int, approved: bool
     ) -> None:
-        if not _is_bot_manager(interaction.user):
+        if interaction.user.id not in self.settings.bot_admin_user_ids:
             await interaction.response.send_message(
-                f"Only members with the **{BOT_MANAGER_ROLE_NAME}** role can review loot reports.",
+                "Only the configured service owner can review item reports.",
                 ephemeral=True,
             )
             return
@@ -2673,18 +2756,18 @@ class GameAssistBot(commands.Bot):
         await self.cache.set(dashboard_cache_key, None, 315360000)
         await self.cache.set(marker_key, True, 315360000)
 
-    async def resolve_exec_cycle_start(self) -> tuple[int, str]:
-        override = await self.cache.get(EXEC_OVERRIDE_CACHE_KEY)
+    async def resolve_exec_cycle_start(self, guild_id: int | None = None) -> tuple[int, str]:
+        override = await self.cache.get(exec_override_cache_key(guild_id))
         if isinstance(override, dict) and isinstance(override.get("cycle_start_unix"), int):
             return override["cycle_start_unix"], "Manual override"
 
         cycle_start = await fetch_exec_cycle_start_unix(self.settings.http_timeout_seconds)
         return cycle_start, "contestedzonetimers.com community timer"
 
-    async def resolve_exec_status_context(self) -> dict:
+    async def resolve_exec_status_context(self, guild_id: int | None = None) -> dict:
         source_cycle_start = await fetch_exec_cycle_start_unix(self.settings.http_timeout_seconds)
         source_status = calculate_exec_hangar_status(source_cycle_start)
-        override = await self.cache.get(EXEC_OVERRIDE_CACHE_KEY)
+        override = await self.cache.get(exec_override_cache_key(guild_id))
 
         if isinstance(override, dict) and isinstance(override.get("cycle_start_unix"), int):
             corrected_status = calculate_exec_hangar_status(override["cycle_start_unix"])
@@ -2711,6 +2794,8 @@ class GameAssistBot(commands.Bot):
             self._website_deployment_task.cancel()
         if self._trade_store_sync_task:
             self._trade_store_sync_task.cancel()
+        if self._guild_sync_task:
+            self._guild_sync_task.cancel()
         await self.sources.close()
         await self.cache.close()
         await super().close()
@@ -3201,6 +3286,13 @@ async def miningadd_command(
         "location": location.strip(),
         "reported_by": str(interaction.user),
     }
+    if interaction.user.id not in bot.settings.bot_admin_user_ids:
+        review_id = await bot.cache.submit_review_request(
+            "mining", entry, submitted_by=interaction.user.id, submitted_by_name=str(interaction.user),
+            origin_guild_id=interaction.guild_id, origin_channel_id=interaction.channel_id,
+        )
+        await interaction.followup.send(f"Mining report #{review_id} was sent to the central review queue.", ephemeral=True)
+        return
     await add_community_mining_location(bot.cache, entry)
     await bot.log_audit_event(
         "Mining Location Added",
@@ -4810,6 +4902,128 @@ async def trade_system_autocomplete(
 admin_group = app_commands.Group(name="admin", description="Bot management commands.")
 
 
+def build_native_admin_embed(guild: discord.Guild, modules: dict[str, dict[str, object]], pending: int = 0) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"SC Companion Admin — {guild.name}",
+        description="Enable features below. Channel assignments can be changed with `/admin channel` or on sccompanion.org.",
+        color=discord.Color.blurple(),
+    )
+    for key, definition in BOT_MODULES.items():
+        item = modules[key]
+        destination = f" <#{item['channel_id']}>" if item.get("channel_id") else " any channel"
+        embed.add_field(name=str(definition["label"]), value=("Enabled —" if item["enabled"] else "Disabled —") + destination, inline=True)
+    embed.add_field(name="Central reviews", value=f"{pending} pending", inline=False)
+    embed.set_footer(text="Changes are isolated to this Discord server. Global approved game knowledge remains shared.")
+    return embed
+
+
+class NativeAdminModuleSelect(discord.ui.Select):
+    def __init__(self, modules: dict[str, dict[str, object]]) -> None:
+        options = [discord.SelectOption(label=str(value["label"]), value=key, default=bool(modules[key]["enabled"]))
+                   for key, value in BOT_MODULES.items()]
+        super().__init__(placeholder="Choose enabled features", min_values=0, max_values=len(options), options=options)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
+            await interaction.response.send_message("You need Manage Server permission to change these settings.", ephemeral=True)
+            return
+        stored = await bot.cache.guild_bot_settings(interaction.guild.id)
+        modules = normalize_module_settings(stored.get("modules") if stored else None)
+        enabled = set(self.values)
+        for key in modules:
+            modules[key]["enabled"] = key in enabled
+        await bot.cache.save_guild_bot_settings(interaction.guild.id, interaction.guild.name, modules, interaction.user.id)
+        await bot.ensure_about_panel(interaction.guild)
+        pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
+        await interaction.response.edit_message(embed=build_native_admin_embed(interaction.guild, modules, pending), view=NativeAdminView(modules))
+
+
+class NativeAdminView(discord.ui.View):
+    def __init__(self, modules: dict[str, dict[str, object]]) -> None:
+        super().__init__(timeout=900)
+        self.add_item(NativeAdminModuleSelect(modules))
+        self.add_item(discord.ui.Button(label="Open full website panel", style=discord.ButtonStyle.link, url="https://sccompanion.org"))
+
+
+@admin_group.command(name="panel", description="Open this server's native bot administration panel.")
+async def admin_panel_command(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or interaction.guild is None:
+        await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
+        return
+    if not _can_manage_admin_commands(interaction, bot.settings):
+        await interaction.response.send_message("You need Manage Server permission to open this panel.", ephemeral=True)
+        return
+    stored = await bot.cache.guild_bot_settings(interaction.guild.id)
+    modules = normalize_module_settings(stored.get("modules") if stored else None,
+                                        enabled_default=interaction.guild.id == bot.settings.discord_guild_id)
+    pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
+    await interaction.response.send_message(embed=build_native_admin_embed(interaction.guild, modules, pending),
+                                            view=NativeAdminView(modules), ephemeral=True)
+
+
+@admin_group.command(name="channel", description="Assign a feature's commands to a channel in this server.")
+@app_commands.describe(module="Feature key shown in /admin panel", channel="Command channel; omit to allow any channel")
+async def admin_channel_command(interaction: discord.Interaction, module: str,
+                                channel: discord.TextChannel | None = None) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
+        await interaction.response.send_message("You need Manage Server permission to change bot routing.", ephemeral=True)
+        return
+    key = module.strip().casefold().replace(" ", "_")
+    if key not in BOT_MODULES:
+        await interaction.response.send_message("Unknown feature. Use `/admin panel` to see available features.", ephemeral=True)
+        return
+    stored = await bot.cache.guild_bot_settings(interaction.guild.id)
+    modules = normalize_module_settings(stored.get("modules") if stored else None)
+    modules[key]["channel_id"] = channel.id if channel else None
+    await bot.cache.save_guild_bot_settings(interaction.guild.id, interaction.guild.name, modules, interaction.user.id)
+    await bot.ensure_about_panel(interaction.guild)
+    await interaction.response.send_message(f"{BOT_MODULES[key]['label']} now works " +
+                                            (f"in {channel.mention}." if channel else "in any channel."), ephemeral=True)
+
+
+@admin_group.command(name="reviews", description="Show pending global knowledge and timer reviews.")
+async def admin_reviews_command(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or interaction.guild_id != bot.settings.discord_guild_id or interaction.user.id not in bot.settings.bot_admin_user_ids:
+        await interaction.response.send_message("Central reviews are restricted to the service owner in the primary Discord.", ephemeral=True)
+        return
+    reviews = await bot.cache.pending_review_requests(20)
+    embed = discord.Embed(title="Central Review Queue", color=discord.Color.gold())
+    embed.description = "No pending reviews." if not reviews else "Use `/admin review` with the request number."
+    for review in reviews:
+        summary = "\n".join(f"**{key}:** {value}" for key, value in list(review["payload"].items())[:6])
+        embed.add_field(name=f"#{review['id']} — {review['review_type']}", value=summary[:1024] or "No details", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@admin_group.command(name="review", description="Approve or reject a central review request.")
+@app_commands.choices(decision=[app_commands.Choice(name="Approve", value="approved"),
+                               app_commands.Choice(name="Reject", value="rejected")])
+async def admin_review_command(interaction: discord.Interaction, request_id: int,
+                               decision: app_commands.Choice[str]) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or interaction.guild_id != bot.settings.discord_guild_id or interaction.user.id not in bot.settings.bot_admin_user_ids:
+        await interaction.response.send_message("Central reviews are restricted to the service owner in the primary Discord.", ephemeral=True)
+        return
+    pending = {item["id"]: item for item in await bot.cache.pending_review_requests(500)}
+    review = pending.get(request_id)
+    if review is None:
+        await interaction.response.send_message("That pending request was not found.", ephemeral=True)
+        return
+    if decision.value == "approved" and review["review_type"] == "timer":
+        await bot.cache.set(exec_override_cache_key(review["origin_guild_id"]), review["payload"], 315360000)
+    elif decision.value == "approved" and review["review_type"] == "mining":
+        await add_community_mining_location(bot.cache, review["payload"])
+    changed = await bot.cache.review_request(request_id, decision.value, interaction.user.id, str(interaction.user))
+    await bot.log_audit_event("Central Review Completed", {"Request": request_id, "Decision": decision.name,
+                                                             "Reviewer": _audit_user(interaction.user)})
+    await interaction.response.send_message(
+        f"Request #{request_id} was {decision.value}." if changed else "That request was already reviewed.", ephemeral=True)
+
+
 @admin_group.command(name="channels", description="Show command channel routing.")
 async def admin_channels_command(interaction: discord.Interaction) -> None:
     bot = interaction.client
@@ -4820,7 +5034,12 @@ async def admin_channels_command(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("You do not have permission to view bot management details.", ephemeral=True)
         return
 
-    embed = build_admin_channels_embed(bot.settings)
+    if interaction.guild is not None and interaction.guild_id != bot.settings.discord_guild_id:
+        stored = await bot.cache.guild_bot_settings(interaction.guild.id)
+        modules = normalize_module_settings(stored.get("modules") if stored else None)
+        embed = build_native_admin_embed(interaction.guild, modules)
+    else:
+        embed = build_admin_channels_embed(bot.settings)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -4835,6 +5054,12 @@ async def admin_health_command(interaction: discord.Interaction) -> None:
         return
 
     embed = build_admin_health_embed(bot)
+    if interaction.guild_id != bot.settings.discord_guild_id:
+        stored = await bot.cache.guild_bot_settings(interaction.guild_id or 0)
+        enabled = sum(bool(item["enabled"]) for item in normalize_module_settings(stored.get("modules") if stored else None).values())
+        embed = discord.Embed(title="Bot Management - Server Health",
+                              description=f"Status: Online\nConfiguration: {'Saved' if stored else 'Not saved'}\nEnabled features: {enabled}\nServer isolation: Active",
+                              color=discord.Color.green())
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -4844,7 +5069,7 @@ async def admin_hub_health_command(interaction: discord.Interaction) -> None:
     if not isinstance(bot, GameAssistBot):
         await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
         return
-    if not _can_manage_admin_commands(interaction, bot.settings):
+    if interaction.guild_id != bot.settings.discord_guild_id or interaction.user.id not in bot.settings.bot_admin_user_ids:
         await interaction.response.send_message("You do not have permission to inspect the bot hub.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
@@ -4868,7 +5093,7 @@ async def admin_hub_repair_command(interaction: discord.Interaction) -> None:
     if not isinstance(bot, GameAssistBot):
         await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
         return
-    if not _can_manage_admin_commands(interaction, bot.settings):
+    if interaction.guild_id != bot.settings.discord_guild_id or interaction.user.id not in bot.settings.bot_admin_user_ids:
         await interaction.response.send_message("You do not have permission to repair the bot hub.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
@@ -4900,7 +5125,7 @@ async def audit_recent_command(interaction: discord.Interaction, limit: int = 10
     if not isinstance(bot, GameAssistBot):
         await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
         return
-    if not _can_manage_admin_commands(interaction, bot.settings):
+    if interaction.guild_id != bot.settings.discord_guild_id or interaction.user.id not in bot.settings.bot_admin_user_ids:
         await interaction.response.send_message("You do not have permission to view audit logs.", ephemeral=True)
         return
     if limit < 1 or limit > 20:
@@ -4919,6 +5144,10 @@ async def exec_command(interaction: discord.Interaction) -> None:
         return
 
     await interaction.response.defer(thinking=True, ephemeral=True)
+    if interaction.guild_id != bot.settings.discord_guild_id:
+        context = await bot.resolve_exec_status_context(timer_scope(bot, interaction.guild_id))
+        await interaction.followup.send(embed=build_exec_status_embed(context), ephemeral=True)
+        return
     await bot.sync_exec_status_message()
 
     if bot.settings.exec_status_channel_id:
@@ -4963,18 +5192,25 @@ async def execset_command(
         await interaction.response.send_message(str(error), ephemeral=True)
         return
 
-    await bot.cache.set(
-        EXEC_OVERRIDE_CACHE_KEY,
-        {
+    payload = {
             "cycle_start_unix": cycle_start,
             "updated_by": interaction.user.id,
             "updated_by_name": str(interaction.user),
             "updated_at_unix": discord.utils.utcnow().timestamp(),
             "phase": phase.value,
             "remaining_minutes": remaining_minutes,
-        },
-        315360000,
-    )
+        }
+    if interaction.guild_id != bot.settings.discord_guild_id:
+        review_id = await bot.cache.submit_review_request(
+            "timer", payload, submitted_by=interaction.user.id, submitted_by_name=str(interaction.user),
+            origin_guild_id=interaction.guild_id, origin_channel_id=interaction.channel_id,
+        )
+        await interaction.response.send_message(
+            f"Timer correction #{review_id} was sent to the central review queue. It will only affect this server after approval.",
+            ephemeral=True,
+        )
+        return
+    await bot.cache.set(exec_override_cache_key(None), payload, 315360000)
     await bot.sync_exec_status_message()
     await bot.log_audit_event(
         "Executive Timer Corrected",
@@ -5000,7 +5236,7 @@ async def execclear_command(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("You do not have permission to clear the Executive Hangar timer.", ephemeral=True)
         return
 
-    await bot.cache.delete(EXEC_OVERRIDE_CACHE_KEY)
+    await bot.cache.delete(exec_override_cache_key(timer_scope(bot, interaction.guild_id)))
     await bot.sync_exec_status_message()
     await bot.log_audit_event(
         "Executive Timer Override Cleared",
@@ -5370,7 +5606,8 @@ async def handle_cz_timer_button(
         await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
         return
 
-    timers = await get_cz_dashboard_timers(bot.cache)
+    scope = timer_scope(bot, interaction.guild_id)
+    timers = await get_cz_dashboard_timers(bot.cache, scope)
     now = int(discord.utils.utcnow().timestamp())
 
     if action == "start" and timer_key in CZ_TIMER_DEFINITIONS:
@@ -5393,7 +5630,7 @@ async def handle_cz_timer_button(
         await interaction.response.send_message("Unknown CZ timer action.", ephemeral=True)
         return
 
-    await set_cz_dashboard_timers(bot.cache, timers)
+    await set_cz_dashboard_timers(bot.cache, timers, scope)
     embed = build_cz_dashboard_embed(timers)
     await interaction.response.edit_message(embed=embed, view=CZTimerDashboardView())
     await bot.log_audit_event(
@@ -5409,13 +5646,13 @@ async def handle_cz_timer_button(
     await interaction.followup.send(message, ephemeral=True)
 
 
-async def get_cz_dashboard_timers(cache: SQLiteCache) -> dict:
-    timers = await cache.get(CZ_TIMERS_CACHE_KEY)
+async def get_cz_dashboard_timers(cache: SQLiteCache, guild_id: int | None = None) -> dict:
+    timers = await cache.get(cz_timers_cache_key(guild_id))
     return timers if isinstance(timers, dict) else {}
 
 
-async def set_cz_dashboard_timers(cache: SQLiteCache, timers: dict) -> None:
-    await cache.set(CZ_TIMERS_CACHE_KEY, timers, 315360000)
+async def set_cz_dashboard_timers(cache: SQLiteCache, timers: dict, guild_id: int | None = None) -> None:
+    await cache.set(cz_timers_cache_key(guild_id), timers, 315360000)
 
 
 def build_cz_dashboard_embed(timers: dict) -> discord.Embed:

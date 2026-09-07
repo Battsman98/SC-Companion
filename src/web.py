@@ -368,6 +368,11 @@ class GuildBotSettingsRequest(BaseModel):
     modules: dict[str, GuildModuleRequest]
 
 
+class ReviewDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+    queue: str = Field(default="global", pattern="^(global|loot)$")
+
+
 async def _warm_inventory_scanner(sources: SourceRegistry) -> None:
     """Prepare OCR and catalog indexes without delaying web readiness."""
     warmup_started = time.perf_counter()
@@ -1050,6 +1055,53 @@ async def save_guild_bot_configuration(
     return {"status": "saved", "guild_id": guild_id, "modules": modules}
 
 
+@app.get("/api/bot-management/analytics", dependencies=[Depends(require_bot_admin)])
+async def bot_management_analytics() -> dict[str, int]:
+    return await state().cache.guild_installation_stats()
+
+
+@app.get("/api/reviews/pending", dependencies=[Depends(require_bot_admin)])
+async def pending_global_reviews() -> list[dict[str, Any]]:
+    global_reviews = [{**item, "queue": "global"} for item in await state().cache.pending_review_requests(100)]
+    loot_reviews = [{
+        **item, "queue": "loot", "review_type": "item",
+        "origin_guild_id": item.get("guild_id"),
+        "payload": {"item": item["item_name"], "location": item["location"],
+                    "location_type": item.get("location_type"), "notes": item.get("notes")},
+    } for item in await state().cache.pending_loot_sighting_reports(100)]
+    return sorted(global_reviews + loot_reviews, key=lambda item: int(item.get("created_at") or 0))
+
+
+@app.post("/api/reviews/{review_id}", dependencies=[Depends(require_bot_admin)])
+async def decide_global_review(review_id: int, payload: ReviewDecisionRequest, request: Request) -> dict[str, str]:
+    user = current_user_from_request(request, state().settings)
+    if payload.queue == "loot":
+        changed = await state().cache.review_loot_sighting(review_id, payload.decision, user.id, user.username)
+        if not changed:
+            raise HTTPException(status_code=409, detail="That item report was already reviewed or was not found.")
+        await state().cache.add_audit_event("Website Item Review Completed", {
+            "Request": review_id, "Decision": payload.decision, "User": _website_audit_user(user),
+        }, "items")
+        return {"status": payload.decision}
+    reviews = {item["id"]: item for item in await state().cache.pending_review_requests(500)}
+    review = reviews.get(review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="That pending review was not found.")
+    if payload.decision == "approved" and review["review_type"] == "mining":
+        await add_community_mining_location(state().cache, review["payload"])
+    elif payload.decision == "approved" and review["review_type"] == "timer":
+        guild_id = review.get("origin_guild_id")
+        key = f"{EXEC_OVERRIDE_CACHE_KEY}:guild:{guild_id}" if guild_id else EXEC_OVERRIDE_CACHE_KEY
+        await state().cache.set(key, review["payload"], 315360000)
+    changed = await state().cache.review_request(review_id, payload.decision, user.id, user.username)
+    if not changed:
+        raise HTTPException(status_code=409, detail="That request was already reviewed.")
+    await state().cache.add_audit_event("Website Central Review Completed", {
+        "Request": review_id, "Decision": payload.decision, "User": _website_audit_user(user),
+    }, "admin")
+    return {"status": payload.decision}
+
+
 def _feedback_embed(
     *,
     report_type: str,
@@ -1102,6 +1154,7 @@ async def submit_feedback(
     expected_action: str = Form(default=""),
     steps: str = Form(default=""),
     recommendations: str = Form(default=""),
+    guild_id: int | None = Form(default=None),
     images: list[UploadFile] = File(default=[]),
     user=Depends(require_user),
 ) -> dict[str, str]:
@@ -1161,18 +1214,39 @@ async def submit_feedback(
             for index, (filename, _data, _content_type) in enumerate(attachments)
         ]
     payload = {"name": title, "message": message}
-    form = aiohttp.FormData()
-    form.add_field("payload_json", json.dumps(payload), content_type="application/json")
-    for index, (filename, data, content_type) in enumerate(attachments):
-        form.add_field(f"files[{index}]", data, filename=filename, content_type=content_type)
+
+    origin_channel_id: int | None = None
+    if guild_id and guild_id != settings.discord_guild_id:
+        await _managed_guild(user, guild_id)
+        channels = await _discord_guild_channels(guild_id)
+        origin = next((channel for channel in channels if channel["name"] == "feedback-and-issues" and channel["type"] in {15, 16}), None)
+        if origin is None:
+            raise HTTPException(status_code=409, detail="The bot has not finished creating this server's feedback forum. Try Refresh shortly.")
+        origin_channel_id = int(origin["id"])
+
+    def feedback_form() -> aiohttp.FormData:
+        form = aiohttp.FormData()
+        form.add_field("payload_json", json.dumps(payload), content_type="application/json")
+        for index, (filename, data, content_type) in enumerate(attachments):
+            form.add_field(f"files[{index}]", data, filename=filename, content_type=content_type)
+        return form
 
     try:
         timeout = aiohttp.ClientTimeout(total=max(30, settings.http_timeout_seconds))
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            origin_payload: dict[str, Any] | None = None
+            if origin_channel_id:
+                async with session.post(
+                    f"https://discord.com/api/v10/channels/{origin_channel_id}/threads",
+                    headers={"Authorization": f"Bot {settings.discord_token}"}, data=feedback_form(),
+                ) as response:
+                    origin_payload = await response.json(content_type=None)
+                    if response.status >= 400:
+                        raise HTTPException(status_code=502, detail="Discord could not create the server feedback post.")
             async with session.post(
                 f"https://discord.com/api/v10/channels/{channel_id}/threads",
                 headers={"Authorization": f"Bot {settings.discord_token}"},
-                data=form,
+                data=feedback_form(),
             ) as response:
                 response_payload = await response.json(content_type=None)
                 if response.status >= 400:
@@ -1187,6 +1261,9 @@ async def submit_feedback(
     thread_id = str(response_payload.get("id") or "")
     if not thread_id:
         raise HTTPException(status_code=502, detail="Discord created the post but did not confirm the ticket.")
+    ticket_key = secrets.token_hex(12)
+    await state().cache.save_feedback_mirror(ticket_key, int(thread_id), guild_id,
+                                             int(origin_payload["id"]) if origin_channel_id and origin_payload else None)
     return {"status": "submitted"}
 
 

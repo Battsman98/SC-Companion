@@ -23,6 +23,8 @@ const outputs = {
   cz: document.querySelector("#czOutput"),
   audit: document.querySelector("#auditOutput"),
   visitorAnalytics: document.querySelector("#visitorAnalyticsOutput"),
+  botServiceAnalytics: document.querySelector("#botServiceAnalyticsOutput"),
+  centralReviews: document.querySelector("#centralReviewsOutput"),
   gameDataStatus: document.querySelector("#gameDataStatusOutput"),
   rsiImportHealth: document.querySelector("#rsiImportHealthOutput"),
   intel: document.querySelector("#intelOutput"),
@@ -1814,11 +1816,20 @@ function closeFeedbackModal() {
   document.querySelector("[data-feedback-open]")?.focus();
 }
 
-function openFeedbackModal() {
+async function openFeedbackModal() {
   if (!feedbackModal) return;
   feedbackModal.hidden = false;
   document.body.classList.add("feedback-modal-open");
   setFeedbackStatus("Submit here to create a new Discord forum post. You will receive a direct link to continue the conversation.");
+  const guildSelect = feedbackModal.querySelector("[data-feedback-guild]");
+  if (guildSelect && currentUser?.can_manage_guilds) {
+    try {
+      const guilds = await api("/api/bot-management/guilds");
+      guildSelect.innerHTML = '<option value="">Primary SC Companion Discord only</option>' + guilds
+        .filter((guild) => guild.bot_installed)
+        .map((guild) => `<option value="${guild.id}">${escapeHtml(guild.name)}</option>`).join("");
+    } catch (_) { /* The primary support destination remains available. */ }
+  }
   feedbackModal.querySelector('[name="report_type"]')?.focus();
 }
 
@@ -4225,6 +4236,7 @@ async function loadAudit() {
       api(`/api/audit/recent?${params}`),
     ]);
     renderVisitorAnalytics(analytics);
+    await Promise.all([loadBotServiceAnalytics(), loadCentralReviews()]);
     await loadGameDataStatus();
     await loadRsiImportHealth();
     renderCards(outputs.audit, events, (event) => card(event.title, [
@@ -4236,6 +4248,36 @@ async function loadAudit() {
     outputs.audit.innerHTML = errorMessage(error.message);
     if (outputs.visitorAnalytics) outputs.visitorAnalytics.innerHTML = errorMessage(error.message);
   }
+}
+
+async function loadBotServiceAnalytics() {
+  if (!outputs.botServiceAnalytics) return;
+  const data = await api("/api/bot-management/analytics");
+  outputs.botServiceAnalytics.innerHTML = `<p class="state"><strong>${number(data.active_servers)}</strong> active servers · <strong>${number(data.configured_servers)}</strong> configured · <strong>${number(data.visible_members)}</strong> combined visible members</p>`;
+}
+
+async function loadCentralReviews() {
+  if (!outputs.centralReviews) return;
+  const reviews = await api("/api/reviews/pending");
+  if (!reviews.length) {
+    outputs.centralReviews.innerHTML = stateMessage("No pending reviews.");
+    return;
+  }
+  outputs.centralReviews.innerHTML = reviews.map((review) => `<article class="result-card">
+    <h3>#${number(review.id)} · ${escapeHtml(review.review_type)}</h3>
+    <p>${escapeHtml(Object.entries(review.payload || {}).map(([key, value]) => `${key}: ${value}`).join(" · "))}</p>
+    <small>${review.origin_guild_id ? `Origin server: ${escapeHtml(String(review.origin_guild_id))}` : "Website submission"} · ${dateTime(review.created_at)}</small>
+    <div class="inline-actions"><button data-review-id="${review.id}" data-review-queue="${escapeAttribute(review.queue)}" data-review-decision="approved">Approve</button><button data-review-id="${review.id}" data-review-queue="${escapeAttribute(review.queue)}" data-review-decision="rejected">Reject</button></div>
+  </article>`).join("");
+  outputs.centralReviews.querySelectorAll("[data-review-id]").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await api(`/api/reviews/${button.dataset.reviewId}`, { method: "POST", body: { decision: button.dataset.reviewDecision, queue: button.dataset.reviewQueue } });
+      await loadCentralReviews();
+    } catch (error) {
+      outputs.centralReviews.prepend(Object.assign(document.createElement("p"), { className: "state error", textContent: error.message }));
+    }
+  }));
 }
 
 async function loadGameDataStatus() {
