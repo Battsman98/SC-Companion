@@ -784,6 +784,8 @@ class GameAssistBot(commands.Bot):
 
     async def on_guild_remove(self, guild: discord.Guild) -> None:
         await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count, active=False)
+        await self.cache.purge_guild_data(guild.id)
+        logging.info("Removed saved configuration and server-owned data for uninstalled guild %s", guild.id)
 
     async def on_thread_create(self, thread: discord.Thread) -> None:
         if thread.guild.id == self.settings.discord_guild_id or not isinstance(thread.parent, discord.ForumChannel):

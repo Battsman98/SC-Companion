@@ -103,3 +103,38 @@ async def _exercise_review_queue_and_server_analytics(tmp_path) -> None:
     await cache.record_guild_installation(43, "Test Two", 20, active=False)
     assert (await cache.guild_installation_stats())["active_servers"] == 1
     await cache.close()
+
+
+def test_uninstall_purges_server_settings_without_removing_install_history(tmp_path) -> None:
+    asyncio.run(_exercise_guild_uninstall_purge(tmp_path))
+
+
+async def _exercise_guild_uninstall_purge(tmp_path) -> None:
+    cache = await SQLiteCache.create(str(tmp_path / "uninstall.sqlite3"))
+    modules = {
+        key: {"enabled": True, "channel_id": 900, "resource_channel_id": None}
+        for key in BOT_MODULES
+    }
+    await cache.save_guild_bot_settings(42, "Removed Server", modules, 7, "manual")
+    await cache.record_guild_installation(42, "Removed Server", 25)
+    await cache.replace_user_managed_guilds(7, [{
+        "id": 42, "name": "Removed Server", "permissions": 32, "owner": True,
+    }])
+    await cache.set("guild:42:about-panel-message", 123, 3600)
+    await cache.set("exec:cycle-start-override:guild:42", {"phase": "open"}, 3600)
+    await cache.submit_review_request(
+        "timer", {"phase": "open"}, submitted_by=7, submitted_by_name="Tester", origin_guild_id=42,
+    )
+
+    await cache.record_guild_installation(42, "Removed Server", 25, active=False)
+    await cache.purge_guild_data(42)
+
+    assert await cache.guild_bot_settings(42) is None
+    assert await cache.user_managed_guilds(7) == []
+    assert await cache.get("guild:42:about-panel-message") is None
+    assert await cache.get("exec:cycle-start-override:guild:42") is None
+    assert await cache.pending_review_requests() == []
+    stats = await cache.guild_installation_stats()
+    assert stats["active_servers"] == 0
+    assert stats["configured_servers"] == 0
+    await cache.close()
