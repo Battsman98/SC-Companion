@@ -931,13 +931,6 @@ class GameAssistBot(commands.Bot):
         await self.cache.purge_guild_data(guild.id)
         logging.info("Removed saved configuration and server-owned data for uninstalled guild %s", guild.id)
 
-    async def on_thread_create(self, thread: discord.Thread) -> None:
-        if thread.guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id} or not isinstance(thread.parent, discord.ForumChannel):
-            return
-        if thread.parent.name != "feedback-and-issues":
-            return
-        await self.mirror_feedback_thread(thread)
-
     def primary_feedback_forum(self) -> discord.ForumChannel | None:
         guild = self.get_guild(self.settings.discord_support_guild_id or self.settings.discord_guild_id or 0)
         if guild is None:
@@ -2154,10 +2147,16 @@ class GameAssistBot(commands.Bot):
             )
 
     async def on_thread_create(self, thread: discord.Thread) -> None:
+        if (
+            thread.guild.id not in {self.settings.discord_guild_id, self.settings.discord_support_guild_id}
+            and isinstance(thread.parent, discord.ForumChannel)
+            and thread.parent.name == "feedback-and-issues"
+        ):
+            await self.mirror_feedback_thread(thread)
+
         forum_id = await self.marketplace_forum_id(thread.guild.id)
-        if thread.parent_id != forum_id:
-            return
-        await self.enrich_trading_post(thread)
+        if thread.parent_id == forum_id:
+            await self.enrich_trading_post(thread)
 
     async def marketplace_forum_id(self, guild_id: int | None) -> int | None:
         if guild_id is None:

@@ -89,7 +89,7 @@ def test_resolving_a_website_ticket_applies_completed_tag_and_archives() -> None
 
     assert "await _apply_feedback_ticket_state(thread, payload.status)" in source
     assert "feedback_mirror_for_central_thread(thread_id)" in source
-    assert "await _apply_feedback_ticket_state(origin_thread, payload.status)" in source
+    assert "origin_thread, payload.status, bot_token=_public_bot_token()" in source
 
 
 def test_mirrored_feedback_displays_image_attachments() -> None:
@@ -147,6 +147,27 @@ def test_shared_feedback_forums_publish_the_main_example_post() -> None:
     embed = build_feedback_template_embed()
     assert embed.title == "Example: Guide button does not display the selected information"
     assert embed.footer.text == "This is an example. Create a new forum post for your own report."
+
+
+def test_thread_create_handles_feedback_and_marketplace_events() -> None:
+    source = inspect.getsource(GameAssistBot.on_thread_create)
+
+    assert "await self.mirror_feedback_thread(thread)" in source
+    assert "await self.enrich_trading_post(thread)" in source
+
+
+def test_website_feedback_sync_reads_origins_as_sc_companion() -> None:
+    import src.web as web
+
+    sync_source = inspect.getsource(web._sync_installed_server_feedback)
+    message_source = inspect.getsource(web.feedback_ticket_messages)
+    status_source = inspect.getsource(web.update_feedback_ticket_status)
+    submission_source = inspect.getsource(web.submit_feedback)
+    assert "public_token = _public_bot_token()" in sync_source
+    assert "bot_token=public_token" in sync_source
+    assert "bot_token=_public_bot_token() if origin_thread_id else None" in message_source
+    assert "bot_token=_public_bot_token()" in status_source
+    assert 'f"Bot {_public_bot_token()}"' in submission_source
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:

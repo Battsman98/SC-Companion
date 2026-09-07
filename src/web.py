@@ -1422,7 +1422,7 @@ async def submit_feedback(
             if origin_channel_id:
                 async with session.post(
                     f"https://discord.com/api/v10/channels/{origin_channel_id}/threads",
-                    headers={"Authorization": f"Bot {settings.discord_token}"}, data=feedback_form(origin_tag_id),
+                    headers={"Authorization": f"Bot {_public_bot_token()}"}, data=feedback_form(origin_tag_id),
                 ) as response:
                     origin_payload = await response.json(content_type=None)
                     if response.status >= 400:
@@ -1453,9 +1453,16 @@ async def submit_feedback(
     return {"status": "submitted", "thread_id": thread_id, "ticket_url": ticket_url}
 
 
-async def _discord_api(method: str, path: str, *, json_payload: dict[str, Any] | None = None) -> Any:
+async def _discord_api(
+    method: str,
+    path: str,
+    *,
+    json_payload: dict[str, Any] | None = None,
+    bot_token: str | None = None,
+) -> Any:
     settings = state().settings
-    if not settings.discord_token:
+    token = bot_token or settings.discord_token
+    if not token:
         raise HTTPException(status_code=503, detail="Discord is not configured.")
     timeout = aiohttp.ClientTimeout(total=max(30, settings.http_timeout_seconds))
     try:
@@ -1463,7 +1470,7 @@ async def _discord_api(method: str, path: str, *, json_payload: dict[str, Any] |
             async with session.request(
                 method,
                 f"https://discord.com/api/v10{path}",
-                headers={"Authorization": f"Bot {settings.discord_token}"},
+                headers={"Authorization": f"Bot {token}"},
                 json=json_payload,
             ) as response:
                 payload = await response.json(content_type=None)
@@ -1483,7 +1490,7 @@ async def _send_discord_channel_message(channel_id: int, content: str) -> dict[s
     mirror = await state().cache.feedback_mirror_for_central_thread(channel_id)
     origin_thread_id = int(mirror.get("origin_thread_id") or 0) if mirror else 0
     if origin_thread_id and origin_thread_id != channel_id:
-        await _discord_api("POST", f"/channels/{origin_thread_id}/messages", json_payload={
+        await _discord_api("POST", f"/channels/{origin_thread_id}/messages", bot_token=_public_bot_token(), json_payload={
             "content": f"**Official SC Companion response**\n{content.strip()}",
             "allowed_mentions": {"parse": []},
         })
@@ -1495,7 +1502,8 @@ async def _sync_installed_server_feedback() -> int:
         settings = state().settings
         central_forum_id = await _main_feedback_forum_id()
         central_tag_id = await _feedback_forum_tag_id(central_forum_id, "issue")
-        guilds = await _discord_api("GET", "/users/@me/guilds?limit=200")
+        public_token = _public_bot_token()
+        guilds = await _discord_api("GET", "/users/@me/guilds?limit=200", bot_token=public_token)
         mirrored = 0
         for guild in guilds:
             guild_id = int(guild.get("id") or 0)
@@ -1509,10 +1517,10 @@ async def _sync_installed_server_feedback() -> int:
                 ]
                 if not forums:
                     continue
-                active = await _discord_api("GET", f"/guilds/{guild_id}/threads/active")
+                active = await _discord_api("GET", f"/guilds/{guild_id}/threads/active", bot_token=public_token)
                 active_threads = active.get("threads", [])
                 archived_pages = await asyncio.gather(*(
-                    _discord_api("GET", f"/channels/{forum['id']}/threads/archived/public?limit=50")
+                    _discord_api("GET", f"/channels/{forum['id']}/threads/archived/public?limit=50", bot_token=public_token)
                     for forum in forums
                 ))
                 forum_ids = {int(item["id"]) for item in forums}
@@ -1525,10 +1533,14 @@ async def _sync_installed_server_feedback() -> int:
                     thread_id = int(thread["id"])
                     if str(thread.get("name") or "").casefold().startswith("example:"):
                         continue
-                    starter = await _discord_api("GET", f"/channels/{thread_id}/messages/{thread_id}")
+                    starter = await _discord_api(
+                        "GET", f"/channels/{thread_id}/messages/{thread_id}", bot_token=public_token
+                    )
                     existing_mirror = await state().cache.feedback_mirror_for_origin_thread(thread_id)
                     if existing_mirror:
-                        await _sync_mirrored_feedback_attachments(starter, int(existing_mirror["central_thread_id"]))
+                        await _sync_mirrored_feedback_attachments(
+                            starter, int(existing_mirror["central_thread_id"]), public_token
+                        )
                         continue
                     author = starter.get("author", {})
                     if author.get("bot"):
@@ -1584,8 +1596,12 @@ def _add_feedback_attachments_to_embed(
         embed.setdefault("fields", []).append({"name": "Attachments", "value": links[:1024], "inline": False})
 
 
-async def _sync_mirrored_feedback_attachments(starter: dict[str, Any], central_thread_id: int) -> None:
-    messages = await _discord_api("GET", f"/channels/{int(starter['channel_id'])}/messages?limit=50")
+async def _sync_mirrored_feedback_attachments(
+    starter: dict[str, Any], central_thread_id: int, origin_bot_token: str
+) -> None:
+    messages = await _discord_api(
+        "GET", f"/channels/{int(starter['channel_id'])}/messages?limit=50", bot_token=origin_bot_token
+    )
     attachments = [attachment for message in messages for attachment in message.get("attachments", [])]
     embedded_images = [str(image["url"]) for message in messages for item in message.get("embeds", [])
                        for image in [item.get("image") or item.get("thumbnail")] if image and image.get("url")]
@@ -1676,7 +1692,11 @@ async def feedback_ticket_messages(thread_id: int) -> list[dict[str, Any]]:
     mirror = await state().cache.feedback_mirror_for_central_thread(thread_id)
     origin_thread_id = int(mirror.get("origin_thread_id") or 0) if mirror else 0
     conversation_thread_id = origin_thread_id or thread_id
-    messages = await _discord_api("GET", f"/channels/{conversation_thread_id}/messages?limit=50")
+    messages = await _discord_api(
+        "GET",
+        f"/channels/{conversation_thread_id}/messages?limit=50",
+        bot_token=_public_bot_token() if origin_thread_id else None,
+    )
     return [{
         "id": str(item["id"]), "content": str(item.get("content") or ""),
         "author": str(item.get("author", {}).get("global_name") or item.get("author", {}).get("username") or "Unknown"),
@@ -1707,13 +1727,24 @@ async def update_feedback_ticket_status(
     mirror = await state().cache.feedback_mirror_for_central_thread(thread_id)
     origin_thread_id = int(mirror.get("origin_thread_id") or 0) if mirror else 0
     if origin_thread_id and origin_thread_id != thread_id:
-        origin_thread = await _discord_api("GET", f"/channels/{origin_thread_id}")
-        await _apply_feedback_ticket_state(origin_thread, payload.status)
+        origin_thread = await _discord_api(
+            "GET", f"/channels/{origin_thread_id}", bot_token=_public_bot_token()
+        )
+        await _apply_feedback_ticket_state(
+            origin_thread, payload.status, bot_token=_public_bot_token()
+        )
     return {"status": payload.status}
 
 
-async def _apply_feedback_ticket_state(thread: dict[str, Any], status: str) -> None:
-    tag_ids = await _feedback_forum_tag_ids(int(thread["parent_id"]))
+async def _apply_feedback_ticket_state(
+    thread: dict[str, Any], status: str, *, bot_token: str | None = None
+) -> None:
+    forum = await _discord_api("GET", f"/channels/{int(thread['parent_id'])}", bot_token=bot_token)
+    tag_ids = {
+        str(tag.get("name") or "").casefold(): str(tag["id"])
+        for tag in forum.get("available_tags", [])
+        if tag.get("id")
+    }
     completed_tag = tag_ids.get("completed")
     in_progress_tag = tag_ids.get("in-progress")
     applied_tags = [str(tag_id) for tag_id in thread.get("applied_tags", [])]
@@ -1721,7 +1752,7 @@ async def _apply_feedback_ticket_state(thread: dict[str, Any], status: str) -> N
     status_tag = completed_tag if status == "resolved" else in_progress_tag if status == "in_progress" else None
     if status_tag:
         applied_tags.append(status_tag)
-    await _discord_api("PATCH", f"/channels/{int(thread['id'])}", json_payload={
+    await _discord_api("PATCH", f"/channels/{int(thread['id'])}", bot_token=bot_token, json_payload={
         "archived": status == "resolved",
         "applied_tags": applied_tags[:5],
     })
