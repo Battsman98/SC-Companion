@@ -99,6 +99,17 @@ def test_management_server_list_only_returns_installed_servers(monkeypatch) -> N
     asyncio.run(scenario())
 
 
+def test_public_bot_stats_only_exposes_the_active_server_count(monkeypatch) -> None:
+    async def scenario() -> None:
+        cache = SimpleNamespace(guild_installation_stats=AsyncMock(return_value={
+            "active_servers": 7, "configured_servers": 6, "visible_members": 900,
+        }))
+        monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
+        assert await web.public_bot_stats() == {"active_servers": 7}
+
+    asyncio.run(scenario())
+
+
 def test_management_api_saves_only_a_users_managed_guild(monkeypatch, tmp_path) -> None:
     async def scenario() -> None:
         cache = await SQLiteCache.create(str(tmp_path / "management-api.sqlite3"))
