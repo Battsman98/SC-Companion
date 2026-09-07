@@ -130,6 +130,13 @@ def test_archived_hub_channels_and_manual_order_are_not_restored() -> None:
     assert "position" not in source.casefold()
 
 
+def test_membership_reviews_are_kept_in_the_audit_log_category() -> None:
+    source = inspect.getsource(GameAssistBot._ensure_membership_applications)
+    assert "AUDIT_LOG_CATEGORY_ID" in source
+    assert "category=audit_category" in source
+    assert "review_channel.category_id != audit_category.id" in source
+
+
 def test_every_visitor_command_channel_has_a_response_example() -> None:
     examples = build_visitor_command_example_embeds()
 
