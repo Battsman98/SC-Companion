@@ -1037,12 +1037,13 @@ async def manageable_bot_guilds(user=Depends(require_user)) -> list[dict[str, An
     configured_guilds = []
     bot_guild_ids = await _discord_bot_guild_ids()
     for guild in await state().cache.user_managed_guilds(user.id):
+        if guild["id"] not in bot_guild_ids:
+            continue
         configured_guilds.append({
             "id": _snowflake(guild["id"]),
             "name": guild["name"],
             "icon_url": guild["icon_url"],
-            "bot_installed": guild["id"] in bot_guild_ids,
-            "invite_url": _bot_invite_url(guild["id"]),
+            "bot_installed": True,
         })
     return configured_guilds
 

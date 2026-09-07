@@ -113,11 +113,16 @@ body[data-mfd-theme] {
 }
 
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   display: flex;
   align-items: end;
   justify-content: space-between;
   gap: 20px;
   padding: 24px clamp(16px, 4vw, 48px) 18px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
   background: rgba(5, 5, 5, 0.88);
   position: relative;

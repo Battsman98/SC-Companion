@@ -84,6 +84,21 @@ def test_existing_primary_mining_routes_are_discovered() -> None:
     assert next(route for route in mining if route["command"] == "mining")["channel_id"] == "1001"
 
 
+def test_management_server_list_only_returns_installed_servers(monkeypatch) -> None:
+    async def scenario() -> None:
+        cache = SimpleNamespace(user_managed_guilds=AsyncMock(return_value=[
+            {"id": 101, "name": "Installed", "icon_url": None},
+            {"id": 202, "name": "Not Installed", "icon_url": None},
+        ]))
+        monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
+        monkeypatch.setattr(web, "_discord_bot_guild_ids", AsyncMock(return_value={101}))
+        result = await web.manageable_bot_guilds(SimpleNamespace(id=99))
+        assert [guild["name"] for guild in result] == ["Installed"]
+        assert result[0]["bot_installed"] is True
+
+    asyncio.run(scenario())
+
+
 def test_management_api_saves_only_a_users_managed_guild(monkeypatch, tmp_path) -> None:
     async def scenario() -> None:
         cache = await SQLiteCache.create(str(tmp_path / "management-api.sqlite3"))

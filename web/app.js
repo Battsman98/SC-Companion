@@ -1123,11 +1123,11 @@ async function loadManageableGuilds() {
     guilds.forEach((guild) => {
       const option = document.createElement("option");
       option.value = String(guild.id);
-      option.textContent = `${guild.name}${guild.bot_installed ? "" : " — invite required"}`;
+      option.textContent = guild.name;
       select.append(option);
     });
     if (!guilds.length) {
-      outputs.botManagement.innerHTML = stateMessage("No Discord servers with Manage Server permission were found. Log out and back in if your permissions recently changed.");
+      outputs.botManagement.innerHTML = stateMessage("The bot is not installed in a Discord server you manage. Use Add to Discord at the top of this page.");
       return;
     }
     const next = guilds.some((guild) => String(guild.id) === selected) ? selected : String(guilds[0].id);
