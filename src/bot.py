@@ -724,6 +724,10 @@ class GameAssistBot(commands.Bot):
     async def on_ready(self) -> None:
         for guild in self.guilds:
             await self._run_startup_step(
+                f"publish first-run setup notice in {guild.id}",
+                lambda guild=guild: self.sync_first_run_notice(guild),
+            )
+            await self._run_startup_step(
                 f"publish About panel in {guild.id}", lambda guild=guild: self.ensure_about_panel(guild)
             )
         if self._commands_reference_synced:
@@ -765,6 +769,7 @@ class GameAssistBot(commands.Bot):
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
+        await self.sync_first_run_notice(guild)
         await self.ensure_about_panel(guild)
 
     async def on_guild_remove(self, guild: discord.Guild) -> None:
@@ -820,6 +825,7 @@ class GameAssistBot(commands.Bot):
             for guild in self.guilds:
                 with suppress(Exception):
                     await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
+                    await self.sync_first_run_notice(guild)
                     await self.ensure_about_panel(guild)
             await asyncio.sleep(60)
 
@@ -848,6 +854,10 @@ class GameAssistBot(commands.Bot):
         else:
             await message.edit(embed=build_about_bot_embed(guild))
         await self.ensure_guild_feedback_forum(guild)
+        await self.ensure_automatic_module_channels(guild)
+        await self.sync_guild_command_examples(guild)
+
+    async def sync_first_run_notice(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
         setup_complete = configured is not None and any(
             bool(item["enabled"]) for item in normalize_module_settings(configured.get("modules")).values()
@@ -856,13 +866,14 @@ class GameAssistBot(commands.Bot):
             await self.ensure_first_run_notice(guild)
         else:
             await self.remove_first_run_notice(guild)
-        await self.ensure_automatic_module_channels(guild)
-        await self.sync_guild_command_examples(guild)
 
     async def ensure_first_run_notice(self, guild: discord.Guild) -> None:
         if guild.me is None:
             return
-        candidates = [guild.system_channel, *guild.text_channels]
+        preferred_names = ("welcome", "welcome-and-rules", "introductions", "general", "general-chat")
+        preferred = [discord.utils.find(lambda item, name=name: item.name == name, guild.text_channels)
+                     for name in preferred_names]
+        candidates = [*preferred, guild.system_channel, *guild.text_channels]
         channel = next((candidate for candidate in candidates if isinstance(candidate, discord.TextChannel)
                         and candidate.name != "about-the-bot"
                         and candidate.permissions_for(guild.me).send_messages
@@ -877,7 +888,7 @@ class GameAssistBot(commands.Bot):
         if isinstance(stored, dict) and int(stored.get("channel_id") or 0) == channel.id:
             with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                 message = await channel.fetch_message(int(stored.get("message_id") or 0))
-        embed = build_first_run_setup_embed()
+        embed = build_first_run_setup_embed(can_manage_channels=guild.me.guild_permissions.manage_channels)
         if message is None:
             message = await channel.send(embed=embed, view=FirstRunSetupView())
             await self.cache.set(cache_key, {"channel_id": channel.id, "message_id": message.id}, 315360000)
@@ -5054,7 +5065,7 @@ def build_bot_setup_guide_embed() -> discord.Embed:
     return embed
 
 
-def build_first_run_setup_embed() -> discord.Embed:
+def build_first_run_setup_embed(*, can_manage_channels: bool = True) -> discord.Embed:
     embed = discord.Embed(
         title="Finish setting up SC Companion",
         description=("A server owner or manager can select **Open Admin Panel** below. "
@@ -5062,6 +5073,13 @@ def build_first_run_setup_embed() -> discord.Embed:
         color=discord.Color.blurple(),
     )
     embed.add_field(name="What happens next?", value="Choose how channels are made, pick the features you want, and save.", inline=False)
+    if not can_manage_channels:
+        embed.add_field(
+            name="One permission is still needed",
+            value=("Give the bot **Manage Channels** before choosing automatic setup. "
+                   "A server owner can update the bot role in **Server Settings → Roles**."),
+            inline=False,
+        )
     embed.set_footer(text="This setup notice is removed after the server settings are saved.")
     return embed
 
