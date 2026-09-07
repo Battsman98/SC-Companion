@@ -1569,7 +1569,8 @@ def _add_feedback_attachments_to_embed(embed: dict[str, Any], attachments: list[
 
 
 async def _sync_mirrored_feedback_attachments(starter: dict[str, Any], central_thread_id: int) -> None:
-    attachments = starter.get("attachments", [])
+    messages = await _discord_api("GET", f"/channels/{int(starter['channel_id'])}/messages?limit=50")
+    attachments = [attachment for message in messages for attachment in message.get("attachments", [])]
     if not attachments:
         return
     central_starter = await _discord_api("GET", f"/channels/{central_thread_id}/messages/{central_thread_id}")

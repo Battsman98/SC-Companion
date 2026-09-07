@@ -105,6 +105,14 @@ def test_mirrored_feedback_displays_image_attachments() -> None:
     assert "[broken-screen.png]" in embed["fields"][-1]["value"]
 
 
+def test_reporter_updates_are_forwarded_to_the_main_ticket() -> None:
+    source = inspect.getsource(GameAssistBot.on_message)
+
+    assert "feedback_mirror_for_origin_thread(message.channel.id)" in source
+    assert 'title=f"Reporter update from {message.author.display_name}"' in source
+    assert "self.add_feedback_attachments(embed, message.attachments)" in source
+
+
 def test_main_about_channel_only_keeps_welcome_and_directory() -> None:
     source = inspect.getsource(GameAssistBot._sync_commands_reference_channel)
     assert "directory_only" in source

@@ -971,8 +971,9 @@ class GameAssistBot(commands.Bot):
 
     async def sync_mirrored_feedback_attachments(self, thread: discord.Thread, central_thread_id: int) -> None:
         try:
-            starter = await thread.fetch_message(thread.id)
-            if not starter.attachments:
+            messages = [message async for message in thread.history(limit=50, oldest_first=True)]
+            attachments = [attachment for message in messages for attachment in message.attachments]
+            if not attachments:
                 return
             central = await self.fetch_channel(central_thread_id)
             if not isinstance(central, discord.Thread):
@@ -983,7 +984,7 @@ class GameAssistBot(commands.Bot):
             embed = central_starter.embeds[0]
             if embed.image.url or any(field.name == "Attachments" for field in embed.fields):
                 return
-            self.add_feedback_attachments(embed, starter.attachments)
+            self.add_feedback_attachments(embed, attachments)
             await central_starter.edit(embed=embed)
             logging.info("Added feedback attachments to mirrored ticket %s", central_thread_id)
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
@@ -997,7 +998,10 @@ class GameAssistBot(commands.Bot):
             for forum in guild.forums:
                 if forum.name != "feedback-and-issues":
                     continue
-                for thread in forum.threads:
+                threads = list(forum.threads)
+                with suppress(discord.Forbidden, discord.HTTPException):
+                    threads.extend([thread async for thread in forum.archived_threads(limit=100)])
+                for thread in threads:
                     await self.mirror_feedback_thread(thread)
 
     async def remove_mirrored_feedback_examples(self) -> None:
@@ -1017,9 +1021,27 @@ class GameAssistBot(commands.Bot):
                     logging.info("Removed mirrored feedback template thread %s", thread.id)
 
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or message.author.id not in self.settings.bot_admin_user_ids:
+        if message.author.bot or not isinstance(message.channel, discord.Thread) or message.guild is None:
             return
-        if not isinstance(message.channel, discord.Thread) or message.guild is None or message.guild.id != self.settings.discord_guild_id:
+        if message.guild.id != self.settings.discord_guild_id:
+            mirror = await self.cache.feedback_mirror_for_origin_thread(message.channel.id)
+            if not mirror:
+                return
+            try:
+                central = await self.fetch_channel(int(mirror["central_thread_id"]))
+                if isinstance(central, discord.Thread):
+                    embed = discord.Embed(
+                        title=f"Reporter update from {message.author.display_name}",
+                        description=(message.content.strip() or "Image or attachment added to the ticket.")[:4000],
+                        color=discord.Color.blurple(),
+                        timestamp=message.created_at,
+                    )
+                    self.add_feedback_attachments(embed, message.attachments)
+                    await central.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+                logging.exception("Could not sync reporter update from thread %s", message.channel.id)
+            return
+        if message.author.id not in self.settings.bot_admin_user_ids:
             return
         mirror = await self.cache.feedback_mirror_for_central_thread(message.channel.id)
         if not mirror or not mirror.get("origin_thread_id"):
