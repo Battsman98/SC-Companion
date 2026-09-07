@@ -2288,13 +2288,18 @@ body.hangar-modal-open {
 }
 
 .discord-console { width: min(1120px, calc(100vw - 32px)); max-height: 92vh; overflow: auto; }
+.ticket-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 18px; }
+.ticket-tabs button { justify-content: center; border-bottom-width: 2px; }
+.ticket-tabs button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--button-surface)); color: var(--accent); }
+.ticket-tabs span { min-width: 1.6rem; margin-left: 7px; padding: 1px 6px; border-radius: 999px; background: rgba(0, 0, 0, .3); text-align: center; }
+.ticket-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ticket-list-heading h3 { margin: 0; }
 .discord-console-grid { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(360px, 1.5fr); gap: 18px; }
 .ticket-list, .ticket-messages { border: 1px solid rgba(80, 200, 255, .28); background: rgba(3, 13, 22, .72); border-radius: 8px; padding: 10px; min-height: 220px; max-height: 390px; overflow: auto; }
 .ticket-list button { display: flex; width: 100%; flex-direction: column; gap: 4px; text-align: left; padding: 10px; margin-bottom: 8px; }
 .ticket-list span, .ticket-messages time { display: block; color: var(--muted); font-size: .8rem; }
 .ticket-messages article { border-bottom: 1px solid rgba(80, 200, 255, .16); padding: 10px 2px; }
 .ticket-messages article p { white-space: pre-wrap; margin-bottom: 0; }
-.discord-broadcast { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(80, 200, 255, .25); }
 .discord-console textarea { width: 100%; }
 @media (max-width: 760px) { .discord-console-grid { grid-template-columns: 1fr; } }
 

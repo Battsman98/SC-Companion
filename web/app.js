@@ -1887,6 +1887,8 @@ const ticketList = document.querySelector("[data-ticket-list]");
 const ticketMessages = document.querySelector("[data-ticket-messages]");
 const ticketReplyForm = document.querySelector("[data-ticket-reply]");
 let selectedTicket = null;
+let allTickets = [];
+let currentTicketTab = "open";
 
 async function jsonRequest(url, options = {}) {
   const response = await fetch(url, { credentials: "same-origin", ...options });
@@ -1915,8 +1917,21 @@ function closeDiscordConsole() {
 async function loadTickets() {
   if (!ticketList) return;
   ticketList.textContent = "Loading tickets...";
-  const tickets = await jsonRequest("/api/admin/feedback/tickets");
-  ticketList.innerHTML = tickets.length ? tickets.map((ticket) => `<button type="button" data-ticket-id="${escapeAttribute(ticket.id)}" data-ticket-name="${escapeAttribute(ticket.name)}" data-ticket-status="${escapeAttribute(ticket.status)}"><strong>${escapeHtml(ticket.name)}</strong><span>${escapeHtml(ticket.status.replaceAll("_", " "))}${ticket.archived ? " · archived" : ""} · ${ticket.message_count} messages</span></button>`).join("") : "<p>No feedback tickets were found in the main forum.</p>";
+  allTickets = await jsonRequest("/api/admin/feedback/tickets");
+  renderTicketList();
+}
+
+function isArchivedTicket(ticket) {
+  return Boolean(ticket.archived || ticket.status === "resolved");
+}
+
+function renderTicketList() {
+  const openTickets = allTickets.filter((ticket) => !isArchivedTicket(ticket));
+  const archivedTickets = allTickets.filter(isArchivedTicket);
+  document.querySelector('[data-ticket-count="open"]').textContent = openTickets.length;
+  document.querySelector('[data-ticket-count="archived"]').textContent = archivedTickets.length;
+  const tickets = currentTicketTab === "archived" ? archivedTickets : openTickets;
+  ticketList.innerHTML = tickets.length ? tickets.map((ticket) => `<button type="button" data-ticket-id="${escapeAttribute(ticket.id)}" data-ticket-name="${escapeAttribute(ticket.name)}" data-ticket-status="${escapeAttribute(ticket.status)}"><strong>${escapeHtml(ticket.name)}</strong><span>${escapeHtml(ticket.status.replaceAll("_", " "))} · ${ticket.message_count} messages</span></button>`).join("") : `<p>No ${currentTicketTab} tickets.</p>`;
 }
 
 async function selectTicket(button) {
@@ -1973,6 +1988,20 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("[data-discord-console-open]")) openDiscordConsole();
   if (event.target.closest("[data-discord-console-close]") || event.target === discordConsole) closeDiscordConsole();
   if (event.target.closest("[data-ticket-refresh]")) loadTickets().catch((error) => { ticketList.textContent = error.message; });
+  const tab = event.target.closest("[data-ticket-tab]");
+  if (tab) {
+    currentTicketTab = tab.dataset.ticketTab;
+    document.querySelectorAll("[data-ticket-tab]").forEach((button) => {
+      const active = button === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    selectedTicket = null;
+    ticketReplyForm.hidden = true;
+    document.querySelector("[data-ticket-title]").textContent = "Ticket conversation";
+    ticketMessages.innerHTML = "<p>Select a ticket on the left to read and respond.</p>";
+    renderTicketList();
+  }
   const ticketButton = event.target.closest("[data-ticket-id]");
   if (ticketButton) selectTicket(ticketButton).catch((error) => { ticketMessages.textContent = error.message; });
 });
@@ -2028,8 +2057,15 @@ ticketReplyForm?.addEventListener("submit", async (event) => {
     if (content) await jsonRequest(`/api/admin/feedback/tickets/${selectedTicket.id}/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) });
     await jsonRequest(`/api/admin/feedback/tickets/${selectedTicket.id}/status`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
     ticketReplyForm.elements.content.value = "";
-    await selectTicket(document.querySelector(`[data-ticket-id="${selectedTicket.id}"]`));
     await loadTickets();
+    const selectedButton = document.querySelector(`[data-ticket-id="${selectedTicket.id}"]`);
+    if (selectedButton) await selectTicket(selectedButton);
+    else {
+      selectedTicket = null;
+      ticketReplyForm.hidden = true;
+      document.querySelector("[data-ticket-title]").textContent = "Ticket conversation";
+      ticketMessages.innerHTML = "<p>The ticket moved to the Archived tab.</p>";
+    }
   } catch (error) { ticketMessages.insertAdjacentHTML("beforeend", `<p>${escapeHtml(error.message)}</p>`); }
 });
 

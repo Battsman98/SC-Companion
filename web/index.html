@@ -857,14 +857,18 @@
   <div class="feedback-backdrop" data-discord-console hidden>
     <section class="feedback-dialog discord-console" role="dialog" aria-modal="true" aria-labelledby="discordConsoleTitle">
       <div class="feedback-heading"><div><p class="guide-kicker">CREATOR TOOLS</p><h2 id="discordConsoleTitle">Discord Inbox</h2></div><button type="button" class="feedback-close" data-discord-console-close>Close</button></div>
+      <div class="ticket-tabs" role="tablist" aria-label="Ticket status">
+        <button type="button" role="tab" aria-selected="true" class="active" data-ticket-tab="open">Open <span data-ticket-count="open">0</span></button>
+        <button type="button" role="tab" aria-selected="false" data-ticket-tab="archived">Archived <span data-ticket-count="archived">0</span></button>
+      </div>
       <div class="discord-console-grid">
-        <section><h3>Select a ticket</h3><p class="feedback-status">Open and archived reports from the main feedback forum.</p><button type="button" data-ticket-refresh>Refresh tickets</button><div class="ticket-list" data-ticket-list><p>Select refresh to load Discord tickets.</p></div></section>
+        <section><div class="ticket-list-heading"><h3>Select a ticket</h3><button type="button" data-ticket-refresh>Refresh</button></div><div class="ticket-list" data-ticket-list><p>Loading tickets...</p></div></section>
         <section><h3 data-ticket-title>Ticket conversation</h3><div class="ticket-messages" data-ticket-messages><p>Select a ticket on the left to read and respond.</p></div><form data-ticket-reply hidden><textarea name="content" rows="3" maxlength="2000" placeholder="Reply to the selected ticket in Discord"></textarea><div class="feedback-actions"><select name="status" aria-label="Ticket status"><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting">Waiting on reporter</option><option value="resolved">Resolved and archived</option></select><button type="submit">Reply to selected ticket</button></div></form></section>
       </div>
     </section>
   </div>
 
   <script src="/assets/hotfix-overlay.js?v=20260815-scanner-errors" defer></script>
-  <script src="/assets/app.js?v=20260906-discord-tickets-v3" defer></script>
+  <script src="/assets/app.js?v=20260906-discord-ticket-tabs-v4" defer></script>
 </body>
 </html>
