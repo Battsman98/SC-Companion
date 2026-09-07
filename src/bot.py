@@ -711,13 +711,23 @@ class GameAssistBot(commands.Bot):
         self.tree.add_command(cztimer_command)
         self.tree.add_command(trade_group)
         self.tree.add_command(admin_group)
-        self.tree.add_command(audit_group)
+
+        # Primary-community maintenance commands are deliberately excluded
+        # from the global command registration.
+        primary_admin_commands = [
+            command
+            for name in PRIMARY_GUILD_ADMIN_COMMAND_NAMES
+            if (command := admin_group.remove_command(name)) is not None
+        ]
 
         await self.tree.sync()
         logging.info("Synced global slash commands")
         if self.settings.discord_guild_id:
             guild = discord.Object(id=self.settings.discord_guild_id)
+            for command in primary_admin_commands:
+                admin_group.add_command(command)
             self.tree.copy_global_to(guild=guild)
+            self.tree.add_command(audit_group, guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
 
@@ -5347,6 +5357,9 @@ async def admin_channel_command(interaction: discord.Interaction, module: str,
     await bot.ensure_about_panel(interaction.guild)
     await interaction.response.send_message(f"{BOT_MODULES[key]['label']} now works " +
                                             (f"in {channel.mention}." if channel else "in any channel."), ephemeral=True)
+
+
+PRIMARY_GUILD_ADMIN_COMMAND_NAMES = ("reviews", "review", "hub-health", "hub-repair")
 
 
 @admin_group.command(name="reviews", description="Show pending global knowledge and timer reviews.")
