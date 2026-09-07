@@ -496,6 +496,29 @@ button:hover, .button-link:hover, .tabs button.active {
   line-height: 1.55;
 }
 
+.bot-setup-choice {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+}
+
+.bot-setup-choice label {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+}
+
+.bot-setup-choice span,
+.bot-setup-choice small {
+  display: block;
+}
+
+.control-disabled {
+  opacity: 0.55;
+}
+
 .bot-module-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr);

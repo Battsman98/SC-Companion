@@ -366,6 +366,7 @@ class GuildModuleRequest(BaseModel):
 
 class GuildBotSettingsRequest(BaseModel):
     modules: dict[str, GuildModuleRequest]
+    channel_setup_mode: str = Field(default="manual", pattern="^(automatic|manual)$")
 
 
 class ReviewDecisionRequest(BaseModel):
@@ -1003,6 +1004,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
         "bot_installed": bot_guild is not None,
         "invite_url": _bot_invite_url(guild_id),
         "configured": stored is not None,
+        "channel_setup_mode": stored.get("channel_setup_mode", "manual") if stored else None,
         "modules": [
             {
                 "key": key,
@@ -1036,6 +1038,10 @@ async def save_guild_bot_configuration(
         {key: value.model_dump() for key, value in payload.modules.items()},
         enabled_default=False,
     )
+    if payload.channel_setup_mode == "automatic":
+        for item in modules.values():
+            item["channel_id"] = None
+            item["resource_channel_id"] = None
     if any(
         channel_id and channel_id not in channel_ids
         for item in modules.values()
@@ -1048,12 +1054,15 @@ async def save_guild_bot_configuration(
     trade_forum_id = modules["trade_tools"]["resource_channel_id"]
     if trade_forum_id and trade_forum_id not in forum_ids:
         raise HTTPException(status_code=422, detail="The marketplace destination must be a Discord forum channel.")
-    await state().cache.save_guild_bot_settings(guild_id, guild["name"], modules, user.id)
+    await state().cache.save_guild_bot_settings(
+        guild_id, guild["name"], modules, user.id, payload.channel_setup_mode
+    )
     await state().cache.add_audit_event(
         "Bot Configuration Updated",
         {"Server": guild["name"], "Server ID": str(guild_id), "Updated By": user.username},
     )
-    return {"status": "saved", "guild_id": guild_id, "modules": modules}
+    return {"status": "saved", "guild_id": guild_id, "modules": modules,
+            "channel_setup_mode": payload.channel_setup_mode}
 
 
 @app.get("/api/bot-management/analytics", dependencies=[Depends(require_bot_admin)])

@@ -407,6 +407,7 @@ class SQLiteCache:
         cls._ensure_column(connection, "loot_sighting_reports", "celestial_body", "TEXT")
         cls._ensure_column(connection, "loot_sighting_reports", "source_url", "TEXT")
         cls._ensure_column(connection, "audit_events", "action_type", "TEXT NOT NULL DEFAULT 'other'")
+        cls._ensure_column(connection, "guild_bot_settings", "channel_setup_mode", "TEXT NOT NULL DEFAULT 'manual'")
         cls._backfill_audit_action_types(connection)
         # Scanner diagnostics are transient. PostgreSQL TRUNCATE releases the
         # legacy image/TOAST allocation without needing the free space that a
@@ -423,7 +424,7 @@ class SQLiteCache:
 
     async def guild_bot_settings(self, guild_id: int) -> dict[str, Any] | None:
         row = self._connection.execute(
-            "SELECT guild_id, guild_name, modules_json, configured_by, configured_at, updated_at "
+            "SELECT guild_id, guild_name, modules_json, configured_by, configured_at, updated_at, channel_setup_mode "
             "FROM guild_bot_settings WHERE guild_id = ?",
             (guild_id,),
         ).fetchone()
@@ -436,6 +437,7 @@ class SQLiteCache:
             "configured_by": int(row[3]),
             "configured_at": int(row[4]),
             "updated_at": int(row[5]),
+            "channel_setup_mode": str(row[6] or "manual"),
         }
 
     async def save_guild_bot_settings(
@@ -444,20 +446,22 @@ class SQLiteCache:
         guild_name: str,
         modules: dict[str, dict[str, object]],
         configured_by: int,
+        channel_setup_mode: str | None = None,
     ) -> None:
         now = int(time.time())
         self._connection.execute(
             """
             INSERT INTO guild_bot_settings (
-                guild_id, guild_name, modules_json, configured_by, configured_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                guild_id, guild_name, modules_json, configured_by, configured_at, updated_at, channel_setup_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 'manual'))
             ON CONFLICT(guild_id) DO UPDATE SET
                 guild_name = excluded.guild_name,
                 modules_json = excluded.modules_json,
                 configured_by = excluded.configured_by,
+                channel_setup_mode = COALESCE(?, guild_bot_settings.channel_setup_mode),
                 updated_at = excluded.updated_at
             """,
-            (guild_id, guild_name, json.dumps(modules), configured_by, now, now),
+            (guild_id, guild_name, json.dumps(modules), configured_by, now, now, channel_setup_mode, channel_setup_mode),
         )
         self._connection.commit()
 

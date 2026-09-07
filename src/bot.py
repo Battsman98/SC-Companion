@@ -847,7 +847,57 @@ class GameAssistBot(commands.Bot):
         else:
             await message.edit(embed=build_about_bot_embed(guild))
         await self.ensure_guild_feedback_forum(guild)
+        await self.ensure_automatic_module_channels(guild)
         await self.sync_guild_command_examples(guild)
+
+    async def ensure_automatic_module_channels(self, guild: discord.Guild) -> None:
+        configured = await self.cache.guild_bot_settings(guild.id)
+        if configured is None or configured.get("channel_setup_mode") != "automatic" or guild.me is None:
+            return
+        if not guild.me.guild_permissions.manage_channels:
+            logging.warning("Manage Channels is required for automatic setup in guild %s", guild.id)
+            return
+        modules = normalize_module_settings(configured.get("modules"))
+        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+        if category is None:
+            category = await guild.create_category("SC Companion", reason="Set up SC Companion feature channels")
+        changed = False
+        for key, item in modules.items():
+            if not item["enabled"]:
+                continue
+            channel_name = key.replace("_", "-")
+            channel = guild.get_channel(int(item["channel_id"] or 0))
+            if not isinstance(channel, discord.TextChannel):
+                channel = discord.utils.find(
+                    lambda candidate, name=channel_name: candidate.name == name and candidate.category_id == category.id,
+                    guild.text_channels,
+                )
+            if channel is None:
+                channel = await guild.create_text_channel(
+                    channel_name, category=category, topic=f"SC Companion {BOT_MODULES[key]['label']} commands and examples.",
+                    reason="Automatic SC Companion channel setup",
+                )
+            if item["channel_id"] != channel.id:
+                item["channel_id"] = channel.id
+                changed = True
+            if key == "trade_tools":
+                forum = guild.get_channel(int(item["resource_channel_id"] or 0))
+                if not isinstance(forum, discord.ForumChannel):
+                    forum = discord.utils.find(
+                        lambda candidate: candidate.name == "marketplace" and candidate.category_id == category.id,
+                        guild.forums,
+                    )
+                if forum is None:
+                    forum = await guild.create_forum("marketplace", category=category,
+                                                     topic="Marketplace listings for this Discord server.",
+                                                     reason="Automatic SC Companion marketplace setup")
+                if item["resource_channel_id"] != forum.id:
+                    item["resource_channel_id"] = forum.id
+                    changed = True
+        if changed:
+            await self.cache.save_guild_bot_settings(
+                guild.id, guild.name, modules, int(configured["configured_by"]), "automatic"
+            )
 
     async def ensure_guild_feedback_forum(self, guild: discord.Guild) -> None:
         if guild.id == self.settings.discord_guild_id or guild.me is None or not guild.me.guild_permissions.manage_channels:
@@ -4930,18 +4980,18 @@ def build_bot_setup_guide_embed() -> discord.Embed:
         inline=False,
     )
     embed.add_field(
-        name="2. Pick the features",
+        name="2. Choose channel setup",
+        value="Choose **Let the bot set up channels** or **I will set up channels**. The bot asks this before you pick features.",
+        inline=False,
+    )
+    embed.add_field(
+        name="3. Pick the features",
         value="Open **Choose enabled features**. Check each feature you want. Remove the check from a feature you do not want. Then save your choice.",
         inline=False,
     )
     embed.add_field(
-        name="3. Pick command channels",
-        value="Type `/admin channel`. Enter the feature name and choose a text channel. Leave the channel empty if the commands may work in any channel.",
-        inline=False,
-    )
-    embed.add_field(
-        name="4. Check your setup",
-        value="Type `/admin health`. Then try one enabled command in its channel. The bot will tell you if a command is turned off or used in the wrong channel.",
+        name="4. Finish and test",
+        value="For manual setup, use `/admin channel` to pick channels. Then type `/admin health` and try one enabled command.",
         inline=False,
     )
     embed.add_field(
@@ -4971,6 +5021,7 @@ class NativeAdminModuleSelect(discord.ui.Select):
         if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
             await interaction.response.send_message("You need Manage Server permission to change these settings.", ephemeral=True)
             return
+        await interaction.response.defer()
         stored = await bot.cache.guild_bot_settings(interaction.guild.id)
         modules = normalize_module_settings(stored.get("modules") if stored else None)
         enabled = set(self.values)
@@ -4979,13 +5030,51 @@ class NativeAdminModuleSelect(discord.ui.Select):
         await bot.cache.save_guild_bot_settings(interaction.guild.id, interaction.guild.name, modules, interaction.user.id)
         await bot.ensure_about_panel(interaction.guild)
         pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
-        await interaction.response.edit_message(embed=build_native_admin_embed(interaction.guild, modules, pending), view=NativeAdminView(modules))
+        refreshed = await bot.cache.guild_bot_settings(interaction.guild.id)
+        mode = str((refreshed or {}).get("channel_setup_mode") or "manual")
+        await interaction.edit_original_response(embed=build_native_admin_embed(interaction.guild, modules, pending), view=NativeAdminView(modules, mode))
+
+
+class ChannelSetupChoiceView(discord.ui.View):
+    def __init__(self, modules: dict[str, dict[str, object]]) -> None:
+        super().__init__(timeout=900)
+        self.modules = modules
+
+    async def save_choice(self, interaction: discord.Interaction, mode: str) -> None:
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
+            await interaction.response.send_message("You need Manage Server permission to choose channel setup.", ephemeral=True)
+            return
+        await bot.cache.save_guild_bot_settings(
+            interaction.guild.id, interaction.guild.name, self.modules, interaction.user.id, mode
+        )
+        if mode == "automatic":
+            await bot.ensure_automatic_module_channels(interaction.guild)
+        await interaction.response.edit_message(
+            embed=build_native_admin_embed(interaction.guild, self.modules),
+            view=NativeAdminView(self.modules, mode),
+        )
+
+    @discord.ui.button(label="Let the bot set up channels", style=discord.ButtonStyle.primary)
+    async def automatic(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self.save_choice(interaction, "automatic")
+
+    @discord.ui.button(label="I will set up channels", style=discord.ButtonStyle.secondary)
+    async def manual(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self.save_choice(interaction, "manual")
 
 
 class NativeAdminView(discord.ui.View):
-    def __init__(self, modules: dict[str, dict[str, object]]) -> None:
+    def __init__(self, modules: dict[str, dict[str, object]], setup_mode: str = "manual") -> None:
         super().__init__(timeout=900)
+        self.modules = modules
         self.add_item(NativeAdminModuleSelect(modules))
+        setup = discord.ui.Button(label=f"Channels: {'Bot setup' if setup_mode == 'automatic' else 'Manual'}",
+                                  style=discord.ButtonStyle.secondary, emoji="⚙️")
+        setup.callback = self.show_channel_choice
+        self.add_item(setup)
         guide = discord.ui.Button(label="Setup Guide", style=discord.ButtonStyle.secondary, emoji="📘")
         guide.callback = self.show_guide
         self.add_item(guide)
@@ -4993,6 +5082,15 @@ class NativeAdminView(discord.ui.View):
 
     async def show_guide(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(embed=build_bot_setup_guide_embed(), ephemeral=True)
+
+    async def show_channel_choice(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="How should channels be set up?",
+            description=("Choose **Let the bot set up channels** to make one channel for every feature you turn on. "
+                         "Choose **I will set up channels** if you want to pick the channels yourself."),
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.edit_message(embed=embed, view=ChannelSetupChoiceView(self.modules))
 
 
 @admin_group.command(name="panel", description="Open this server's native bot administration panel.")
@@ -5007,9 +5105,18 @@ async def admin_panel_command(interaction: discord.Interaction) -> None:
     stored = await bot.cache.guild_bot_settings(interaction.guild.id)
     modules = normalize_module_settings(stored.get("modules") if stored else None,
                                         enabled_default=interaction.guild.id == bot.settings.discord_guild_id)
+    if stored is None and interaction.guild.id != bot.settings.discord_guild_id:
+        embed = discord.Embed(
+            title="Welcome to SC Companion",
+            description=("First, choose how you want to set up channels. The bot can make them for you, "
+                         "or you can pick each channel yourself."),
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(embed=embed, view=ChannelSetupChoiceView(modules), ephemeral=True)
+        return
     pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
     await interaction.response.send_message(embed=build_native_admin_embed(interaction.guild, modules, pending),
-                                            view=NativeAdminView(modules), ephemeral=True)
+                                            view=NativeAdminView(modules, str((stored or {}).get("channel_setup_mode") or "manual")), ephemeral=True)
 
 
 @admin_group.command(name="guide", description="Show simple steps for setting up the bot.")
