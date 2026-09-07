@@ -776,6 +776,7 @@ class GameAssistBot(commands.Bot):
         self.application_review_channel_id: int | None = None
         self.loot_review_channel_id: int | None = None
         self._membership_application_lock = asyncio.Lock()
+        self._visitor_access_lock = asyncio.Lock()
         self.hub_role_ids: dict[str, int] = {}
         self.changelog_channels: dict[str, int] = {}
         self._exec_status_task: asyncio.Task | None = None
@@ -2027,10 +2028,8 @@ class GameAssistBot(commands.Bot):
             return False, message[:500]
 
     async def on_guild_channel_update(self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel) -> None:
-        changes = []
-        for label, old, new in (("Name", before.name, after.name), ("Category", before.category_id, after.category_id), ("Position", before.position, after.position)):
-            if old != new:
-                changes.append(f"{label}: `{old}` → `{new}`")
+        # Channel order is intentionally owner-controlled. Only recover settings
+        # that affect the Hub's identity, placement, instructions, or access.
         protected_settings_changed = any(
             getattr(before, attribute, None) != getattr(after, attribute, None)
             for attribute in ("name", "category_id", "topic", "overwrites")
@@ -2077,6 +2076,10 @@ class GameAssistBot(commands.Bot):
         return {configured} if configured else set()
 
     async def ensure_visitor_access(self) -> None:
+        async with self._visitor_access_lock:
+            await self._ensure_visitor_access()
+
+    async def _ensure_visitor_access(self) -> None:
         guild = self.get_guild(self.settings.discord_guild_id or 0)
         if guild is None:
             logging.error("Could not resolve the configured guild for Visitor onboarding")
@@ -2224,10 +2227,18 @@ class GameAssistBot(commands.Bot):
         visitor_role: discord.Role,
         me: discord.Member,
     ) -> None:
-        replaced = [
-            channel for channel in active_category.channels
+        replaced_by_id = {
+            channel.id: channel for channel in active_category.channels
             if channel.name in VISITOR_ARCHIVE_CHANNEL_NAMES
-        ]
+        }
+        for name in VISITOR_CHANNEL_SPECS:
+            matches = sorted(
+                (channel for channel in active_category.channels if channel.name == name),
+                key=lambda channel: channel.id,
+            )
+            for duplicate in matches[1:]:
+                replaced_by_id[duplicate.id] = duplicate
+        replaced = list(replaced_by_id.values())
         if not replaced:
             return
         archive = discord.utils.find(

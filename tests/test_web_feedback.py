@@ -102,6 +102,13 @@ def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
     assert not any(name.startswith("admin") or name.startswith("audit") for name in VISITOR_COMMAND_CHANNELS)
 
 
+def test_archived_hub_channels_and_manual_order_are_not_restored() -> None:
+    assert VISITOR_ARCHIVE_CHANNEL_NAMES.isdisjoint(VISITOR_CHANNEL_SPECS)
+    source = inspect.getsource(GameAssistBot.on_guild_channel_update)
+    assert 'for attribute in ("name", "category_id", "topic", "overwrites")' in source
+    assert "position" not in source.casefold()
+
+
 def test_every_visitor_command_channel_has_a_response_example() -> None:
     examples = build_visitor_command_example_embeds()
 
