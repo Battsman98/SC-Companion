@@ -121,6 +121,12 @@ VISITOR_CHANNEL_TOPICS = {
     "general-chat": "General conversation for Discord Bot Hub visitors.",
 }
 FEEDBACK_FORUM_TOPIC = "Submit website feedback, bug reports, screenshots, and reproducible examples."
+FEEDBACK_FORUM_TAGS = (
+    ("completed", True),
+    ("in-progress", True),
+    ("bug", False),
+    ("request", False),
+)
 TRADING_FORUM_TOPIC = "Trade in-game items. Select WTS, WTB, or WTT; use the item name as the title and include your price in aUEC."
 TRADING_FORUM_TAGS = ("WTS", "WTB", "WTT")
 TRADING_GUIDE_TAG = "GUIDE"
@@ -1074,7 +1080,38 @@ class GameAssistBot(commands.Bot):
         if forum is None:
             forum = await guild.create_forum("feedback-and-issues", topic=FEEDBACK_FORUM_TOPIC,
                                              reason="Create the SC Companion feedback ticket forum")
+        await self.configure_feedback_forum(forum)
         await self.cache.set(f"guild:{guild.id}:feedback-forum", forum.id, 315360000)
+
+    async def configure_feedback_forum(self, forum: discord.ForumChannel) -> None:
+        required_names = {name for name, _ in FEEDBACK_FORUM_TAGS}
+        for attempt in range(2):
+            existing = {tag.name.casefold() for tag in forum.available_tags}
+            missing = required_names - existing
+            if not missing:
+                return
+            tags = list(forum.available_tags)
+            tags.extend(
+                discord.ForumTag(name=name, moderated=moderated)
+                for name, moderated in FEEDBACK_FORUM_TAGS
+                if name not in existing
+            )
+            if len(tags) > 20:
+                tags = [tag for tag in tags if tag.name.casefold() in required_names] + [
+                    tag for tag in tags if tag.name.casefold() not in required_names
+                ][: 20 - len(required_names)]
+            await forum.edit(
+                available_tags=tags,
+                reason="Create the SC Companion feedback and issue tags",
+            )
+            fetched = await self.fetch_channel(forum.id)
+            if isinstance(fetched, discord.ForumChannel):
+                forum = fetched
+        missing = required_names - {tag.name.casefold() for tag in forum.available_tags}
+        if missing:
+            raise RuntimeError(
+                f"Discord did not save feedback tags in guild {forum.guild.id}: {', '.join(sorted(missing))}"
+            )
 
     async def sync_guild_command_examples(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
