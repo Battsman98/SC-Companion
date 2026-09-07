@@ -88,6 +88,7 @@ def test_trade_store_records_are_persistent(tmp_path) -> None:
                 "thread_id": 100,
                 "message_id": 101,
                 "owner_id": 200,
+                "guild_id": 300,
                 "store_name": "Test Store",
                 "description": "Test inventory",
                 "sheet_url": "https://docs.google.com/spreadsheets/d/test/edit",
@@ -105,6 +106,9 @@ def test_trade_store_records_are_persistent(tmp_path) -> None:
         assert stores[0]["store_name"] == "Test Store"
         assert stores[0]["content_hash"] == "abc"
         assert stores[0]["source_type"] == "google_sheet"
+        assert stores[0]["guild_id"] == 300
+        assert len(await cache.trade_stores(owner_id=200, guild_id=300)) == 1
+        assert await cache.trade_stores(owner_id=200, guild_id=301) == []
         await cache.close()
 
     asyncio.run(run())

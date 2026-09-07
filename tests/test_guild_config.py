@@ -23,8 +23,8 @@ def test_normalization_fills_missing_modules_and_validates_channel_ids() -> None
     modules = normalize_module_settings({"ship_search": {"enabled": True, "channel_id": "123"}})
 
     assert set(modules) == set(BOT_MODULES)
-    assert modules["ship_search"] == {"enabled": True, "channel_id": 123}
-    assert modules["trade_tools"] == {"enabled": False, "channel_id": None}
+    assert modules["ship_search"] == {"enabled": True, "channel_id": 123, "resource_channel_id": None}
+    assert modules["trade_tools"] == {"enabled": False, "channel_id": None, "resource_channel_id": None}
     assert all(item["enabled"] for item in default_module_settings().values())
 
 
@@ -76,7 +76,7 @@ def test_management_api_saves_only_a_users_managed_guild(monkeypatch, tmp_path) 
         monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
         verify = AsyncMock()
         monkeypatch.setattr(web, "_verify_live_guild_manager", verify)
-        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=[{"id": 456, "name": "ships"}]))
+        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=[{"id": 456, "name": "ships", "type": 0}]))
         user = SimpleNamespace(id=99, username="pilot")
         payload = GuildBotSettingsRequest(modules={
             "ship_search": GuildModuleRequest(enabled=True, channel_id=456),
@@ -85,10 +85,22 @@ def test_management_api_saves_only_a_users_managed_guild(monkeypatch, tmp_path) 
         result = await web.save_guild_bot_configuration(123, payload, user)
 
         assert result["status"] == "saved"
-        assert result["modules"]["ship_search"] == {"enabled": True, "channel_id": 456}
+        assert result["modules"]["ship_search"] == {"enabled": True, "channel_id": 456, "resource_channel_id": None}
         verify.assert_awaited_once_with(123, 99)
         saved = await cache.guild_bot_settings(123)
         assert saved is not None and saved["guild_name"] == "Test Server"
         await cache.close()
 
     asyncio.run(scenario())
+
+
+def test_trade_module_keeps_marketplace_forum_separate_from_command_channel() -> None:
+    modules = normalize_module_settings({
+        "trade_tools": {"enabled": True, "channel_id": 100, "resource_channel_id": 200}
+    })
+
+    assert modules["trade_tools"] == {
+        "enabled": True,
+        "channel_id": 100,
+        "resource_channel_id": 200,
+    }

@@ -302,6 +302,7 @@ class SQLiteCache:
                 thread_id INTEGER PRIMARY KEY,
                 message_id INTEGER NOT NULL,
                 owner_id INTEGER NOT NULL,
+                guild_id INTEGER,
                 store_name TEXT NOT NULL,
                 description TEXT NOT NULL,
                 sheet_url TEXT NOT NULL,
@@ -347,6 +348,7 @@ class SQLiteCache:
             """
         )
         cls._ensure_column(connection, "trade_store_listings", "source_type", "TEXT NOT NULL DEFAULT 'google_sheet'")
+        cls._ensure_column(connection, "trade_store_listings", "guild_id", "INTEGER")
         cls._ensure_column(connection, "user_ships", "image_url", "TEXT")
         cls._ensure_column(connection, "user_ships", "notes", "TEXT")
         cls._ensure_column(connection, "user_ships", "loaner_for", "TEXT")
@@ -1566,13 +1568,14 @@ class SQLiteCache:
         self._connection.execute(
             """
             INSERT INTO trade_store_listings (
-                thread_id, message_id, owner_id, store_name, description, sheet_url, source_type,
+                thread_id, message_id, owner_id, guild_id, store_name, description, sheet_url, source_type,
                 location, availability, content_hash, last_synced_at, last_error,
                 active, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
             ON CONFLICT(thread_id) DO UPDATE SET
                 message_id = excluded.message_id,
                 owner_id = excluded.owner_id,
+                guild_id = excluded.guild_id,
                 store_name = excluded.store_name,
                 description = excluded.description,
                 sheet_url = excluded.sheet_url,
@@ -1586,7 +1589,7 @@ class SQLiteCache:
                 updated_at = excluded.updated_at
             """,
             (
-                values["thread_id"], values["message_id"], values["owner_id"],
+                values["thread_id"], values["message_id"], values["owner_id"], values.get("guild_id"),
                 values["store_name"], values["description"], values["sheet_url"], values.get("source_type", "google_sheet"),
                 values.get("location"), values.get("availability"), values.get("content_hash"),
                 values.get("last_synced_at"), values.get("last_error"), now, now,
@@ -1594,15 +1597,20 @@ class SQLiteCache:
         )
         self._connection.commit()
 
-    async def trade_stores(self, owner_id: int | None = None) -> list[dict[str, Any]]:
+    async def trade_stores(
+        self, owner_id: int | None = None, guild_id: int | None = None, include_legacy: bool = False,
+    ) -> list[dict[str, Any]]:
         where = "WHERE active = 1"
         parameters: tuple[Any, ...] = ()
         if owner_id is not None:
             where += " AND owner_id = ?"
             parameters = (owner_id,)
+        if guild_id is not None:
+            where += " AND (guild_id = ? OR guild_id IS NULL)" if include_legacy else " AND guild_id = ?"
+            parameters = (*parameters, guild_id)
         rows = self._connection.execute(
             f"""
-            SELECT thread_id, message_id, owner_id, store_name, description, sheet_url, source_type,
+            SELECT thread_id, message_id, owner_id, guild_id, store_name, description, sheet_url, source_type,
                    location, availability, content_hash, last_synced_at, last_error,
                    active, created_at, updated_at
             FROM trade_store_listings
@@ -1612,7 +1620,7 @@ class SQLiteCache:
             parameters,
         ).fetchall()
         keys = (
-            "thread_id", "message_id", "owner_id", "store_name", "description", "sheet_url", "source_type",
+            "thread_id", "message_id", "owner_id", "guild_id", "store_name", "description", "sheet_url", "source_type",
             "location", "availability", "content_hash", "last_synced_at", "last_error",
             "active", "created_at", "updated_at",
         )

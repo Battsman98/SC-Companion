@@ -1365,9 +1365,26 @@ class GameAssistBot(commands.Bot):
             )
 
     async def on_thread_create(self, thread: discord.Thread) -> None:
-        if thread.parent_id != self.settings.trading_forum_channel_id:
+        forum_id = await self.marketplace_forum_id(thread.guild.id)
+        if thread.parent_id != forum_id:
             return
         await self.enrich_trading_post(thread)
+
+    async def marketplace_forum_id(self, guild_id: int | None) -> int | None:
+        if guild_id is None:
+            return None
+        configured = await self.cache.guild_bot_settings(guild_id)
+        if configured is not None:
+            modules = normalize_module_settings(configured.get("modules"))
+            channel_id = modules["trade_tools"].get("resource_channel_id")
+            if channel_id:
+                return int(channel_id)
+            if guild_id == self.settings.discord_guild_id:
+                return self.settings.trading_forum_channel_id
+            return None
+        if guild_id == self.settings.discord_guild_id:
+            return self.settings.trading_forum_channel_id
+        return None
 
     async def ensure_trading_forum(self) -> None:
         channel_id = self.settings.trading_forum_channel_id
@@ -4352,10 +4369,11 @@ async def trade_listing_command(
         )
         return
 
-    forum = bot.get_channel(bot.settings.trading_forum_channel_id or 0)
-    if forum is None and bot.settings.trading_forum_channel_id:
+    forum_id = await bot.marketplace_forum_id(interaction.guild_id)
+    forum = bot.get_channel(forum_id or 0)
+    if forum is None and forum_id:
         try:
-            forum = await bot.fetch_channel(bot.settings.trading_forum_channel_id)
+            forum = await bot.fetch_channel(forum_id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             forum = None
     if not isinstance(forum, discord.ForumChannel):
@@ -4367,16 +4385,9 @@ async def trade_listing_command(
         forum.available_tags,
     )
     if tag is None:
-        await bot.ensure_trading_forum()
-        refreshed = bot.get_channel(forum.id)
-        if isinstance(refreshed, discord.ForumChannel):
-            forum = refreshed
-        tag = discord.utils.find(
-            lambda candidate: candidate.name.casefold() == listing_type.value.casefold(),
-            forum.available_tags,
+        await interaction.followup.send(
+            f"The marketplace forum needs a **{listing_type.value}** tag. Ask a server manager to add it.", ephemeral=True
         )
-    if tag is None:
-        await interaction.followup.send("The selected trading tag is currently unavailable.", ephemeral=True)
         return
 
     listing_content = _trade_listing_content(interaction.user, listing_type.value, price, quantity, notes)
@@ -4461,10 +4472,11 @@ async def trade_store_command(
         await interaction.followup.send(f"I couldn't import that inventory: {exc}", ephemeral=True)
         return
 
-    forum = bot.get_channel(bot.settings.trading_forum_channel_id or 0)
+    forum_id = await bot.marketplace_forum_id(interaction.guild_id)
+    forum = bot.get_channel(forum_id or 0)
     if not isinstance(forum, discord.ForumChannel):
         try:
-            forum = await bot.fetch_channel(bot.settings.trading_forum_channel_id or 0)
+            forum = await bot.fetch_channel(forum_id or 0)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             forum = None
     if not isinstance(forum, discord.ForumChannel):
@@ -4472,13 +4484,9 @@ async def trade_store_command(
         return
     tag = discord.utils.find(lambda item: item.name.casefold() == TRADING_STORE_TAG.casefold(), forum.available_tags)
     if tag is None:
-        await bot.ensure_trading_forum()
-        refreshed = await bot.fetch_channel(forum.id)
-        if isinstance(refreshed, discord.ForumChannel):
-            forum = refreshed
-        tag = discord.utils.find(lambda item: item.name.casefold() == TRADING_STORE_TAG.casefold(), forum.available_tags)
-    if tag is None:
-        await interaction.followup.send("The STORE forum tag is currently unavailable.", ephemeral=True)
+        await interaction.followup.send(
+            "The marketplace forum needs a **STORE** tag. Ask a server manager to add it.", ephemeral=True
+        )
         return
 
     now = int(discord.utils.utcnow().timestamp())
@@ -4509,6 +4517,7 @@ async def trade_store_command(
     await bot.cache.save_trade_store(
         {
             **store,
+            "guild_id": interaction.guild_id,
             "thread_id": created.thread.id,
             "message_id": created.message.id,
             "content_hash": inventory.content_hash,
@@ -4540,6 +4549,12 @@ async def trade_store_refresh_command(interaction: discord.Interaction, store: s
     if record is None:
         await interaction.followup.send("That active store could not be found.", ephemeral=True)
         return
+    if record.get("guild_id") is not None and int(record["guild_id"]) != interaction.guild_id:
+        await interaction.followup.send("That store belongs to another Discord server.", ephemeral=True)
+        return
+    if record.get("guild_id") is None and interaction.guild_id != bot.settings.discord_guild_id:
+        await interaction.followup.send("That legacy store belongs to the primary Discord server.", ephemeral=True)
+        return
     if int(record["owner_id"]) != interaction.user.id and not _can_manage_admin_commands(interaction, bot.settings):
         await interaction.followup.send("Only the store owner or a Bot Manager can refresh this store.", ephemeral=True)
         return
@@ -4555,7 +4570,11 @@ async def trade_store_refresh_autocomplete(
     bot = interaction.client
     if not isinstance(bot, GameAssistBot):
         return []
-    stores = await bot.cache.trade_stores(owner_id=interaction.user.id)
+    stores = await bot.cache.trade_stores(
+        owner_id=interaction.user.id,
+        guild_id=interaction.guild_id,
+        include_legacy=interaction.guild_id == bot.settings.discord_guild_id,
+    )
     normalized = current.strip().casefold()
     matches = [store for store in stores if not normalized or normalized in str(store["store_name"]).casefold()]
     return [
