@@ -961,9 +961,14 @@ async def _discord_guild_channels(guild_id: int) -> list[dict[str, Any]]:
             if response.status >= 400 or not isinstance(payload, list):
                 raise HTTPException(status_code=503, detail="Discord channels are temporarily unavailable.")
             return [
-                {"id": int(channel["id"]), "name": str(channel.get("name") or "channel"), "type": int(channel.get("type", -1))}
+                {
+                    "id": int(channel["id"]),
+                    "name": str(channel.get("name") or "channel"),
+                    "type": int(channel.get("type", -1)),
+                    "parent_id": int(channel["parent_id"]) if channel.get("parent_id") else None,
+                }
                 for channel in payload
-                if int(channel.get("type", -1)) in {0, 5, 15, 16}
+                if int(channel.get("type", -1)) in {0, 4, 5, 15, 16}
             ]
 
 
@@ -1259,24 +1264,34 @@ def _provided_feedback_images(images: list[UploadFile]) -> list[UploadFile]:
     return [upload for upload in images if (upload.filename or "").strip()]
 
 
-async def _main_feedback_forum_id() -> int:
+async def _main_feedback_forum_ids() -> list[int]:
     settings = state().settings
     if not settings.discord_guild_id:
         raise HTTPException(status_code=503, detail="The primary Discord server is not configured.")
     try:
         channels = await _discord_guild_channels(settings.discord_guild_id)
-        forum = next(
-            (item for item in channels if item["name"] == "feedback-and-issues" and item["type"] in {15, 16}),
-            None,
-        )
-        if forum:
-            return int(forum["id"])
+        hub_ids = {
+            int(item["id"])
+            for item in channels
+            if item["type"] == 4 and item["name"].casefold() == "discord bot hub"
+        }
+        forums = [
+            item for item in channels
+            if item["name"].casefold() == "feedback-and-issues" and item["type"] in {15, 16}
+        ]
+        forums.sort(key=lambda item: (item.get("parent_id") not in hub_ids, -int(item["id"])))
+        if forums:
+            return [int(item["id"]) for item in forums]
     except HTTPException:
         if not settings.feedback_forum_channel_id:
             raise
     if settings.feedback_forum_channel_id:
-        return settings.feedback_forum_channel_id
+        return [settings.feedback_forum_channel_id]
     raise HTTPException(status_code=503, detail="The main Discord feedback forum could not be found.")
+
+
+async def _main_feedback_forum_id() -> int:
+    return (await _main_feedback_forum_ids())[0]
 
 
 @app.post("/api/me/feedback")
@@ -1441,7 +1456,7 @@ async def _send_discord_channel_message(channel_id: int, content: str) -> dict[s
 
 async def _require_feedback_thread(thread_id: int) -> dict[str, Any]:
     thread = await _discord_api("GET", f"/channels/{thread_id}")
-    if int(thread.get("parent_id") or 0) != await _main_feedback_forum_id():
+    if int(thread.get("parent_id") or 0) not in await _main_feedback_forum_ids():
         raise HTTPException(status_code=404, detail="That feedback ticket was not found.")
     return thread
 
@@ -1471,13 +1486,17 @@ async def send_discord_message(channel_id: int, payload: DiscordMessageRequest) 
 @app.get("/api/admin/feedback/tickets", dependencies=[Depends(require_bot_admin)])
 async def feedback_tickets() -> list[dict[str, Any]]:
     settings = state().settings
-    forum_id = await _main_feedback_forum_id()
+    forum_ids = await _main_feedback_forum_ids()
     active = await _discord_api("GET", f"/guilds/{settings.discord_guild_id}/threads/active")
-    archived = await _discord_api("GET", f"/channels/{forum_id}/threads/archived/public?limit=50")
+    archived_pages = await asyncio.gather(*(
+        _discord_api("GET", f"/channels/{forum_id}/threads/archived/public?limit=50")
+        for forum_id in forum_ids
+    ))
+    archived_threads = [thread for page in archived_pages for thread in page.get("threads", [])]
     by_id = {
         str(item["id"]): item
-        for item in [*active.get("threads", []), *archived.get("threads", [])]
-        if int(item.get("parent_id") or 0) == forum_id
+        for item in [*active.get("threads", []), *archived_threads]
+        if int(item.get("parent_id") or 0) in forum_ids
     }
     threads = list(by_id.values())
     statuses = await state().cache.discord_ticket_statuses([int(item["id"]) for item in threads])
