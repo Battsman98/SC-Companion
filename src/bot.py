@@ -5048,7 +5048,7 @@ def build_bot_setup_guide_embed() -> discord.Embed:
     )
     embed.add_field(
         name="4. Finish and test",
-        value="For manual setup, use `/admin channel` to pick channels. Then type `/admin health` and try one enabled command.",
+        value="For manual setup, select **Next: Assign Channels** and choose a channel for each feature. Then type `/admin health` and try one enabled command.",
         inline=False,
     )
     embed.add_field(
@@ -5142,6 +5142,98 @@ class ChannelSetupChoiceView(discord.ui.View):
         await self.save_choice(interaction, "manual")
 
 
+def manual_channel_steps(modules: dict[str, dict[str, object]]) -> list[tuple[str, str]]:
+    steps: list[tuple[str, str]] = []
+    for key, item in modules.items():
+        if not item["enabled"]:
+            continue
+        steps.append((key, "channel_id"))
+        if key == "trade_tools":
+            steps.append((key, "resource_channel_id"))
+    return steps
+
+
+class ManualChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, module_key: str, field_name: str) -> None:
+        channel_types = ([discord.ChannelType.forum] if field_name == "resource_channel_id"
+                         else [discord.ChannelType.text, discord.ChannelType.news])
+        label = "Choose the marketplace forum" if field_name == "resource_channel_id" else "Choose a command channel"
+        super().__init__(placeholder=label, min_values=1, max_values=1, channel_types=channel_types)
+        self.module_key = module_key
+        self.field_name = field_name
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if isinstance(view, ManualChannelWizardView):
+            await view.save_selection(interaction, int(self.values[0].id))
+
+
+class ManualChannelWizardView(discord.ui.View):
+    def __init__(self, modules: dict[str, dict[str, object]], step_index: int = 0) -> None:
+        super().__init__(timeout=900)
+        self.modules = modules
+        self.steps = manual_channel_steps(modules)
+        self.step_index = step_index
+        if self.steps and step_index < len(self.steps):
+            module_key, field_name = self.steps[step_index]
+            self.add_item(ManualChannelSelect(module_key, field_name))
+        is_marketplace = bool(self.steps and self.steps[step_index][1] == "resource_channel_id")
+        any_channel = discord.ui.Button(
+            label="Disable Marketplace" if is_marketplace else "Use Any Channel",
+            style=discord.ButtonStyle.secondary,
+        )
+        any_channel.callback = self.use_any_channel
+        any_channel.disabled = not bool(self.steps)
+        self.add_item(any_channel)
+        back = discord.ui.Button(label="Back to Panel", style=discord.ButtonStyle.secondary)
+        back.callback = self.back_to_panel
+        self.add_item(back)
+
+    def embed(self) -> discord.Embed:
+        if not self.steps:
+            return discord.Embed(title="No features selected",
+                                 description="Go back and select at least one feature first.",
+                                 color=discord.Color.orange())
+        module_key, field_name = self.steps[self.step_index]
+        label = str(BOT_MODULES[module_key]["label"])
+        destination = "marketplace forum" if field_name == "resource_channel_id" else "command channel"
+        return discord.Embed(
+            title=f"Assign Channels — Step {self.step_index + 1} of {len(self.steps)}",
+            description=f"Choose the **{destination}** for **{label}**.",
+            color=discord.Color.blurple(),
+        )
+
+    async def save_selection(self, interaction: discord.Interaction, channel_id: int | None) -> None:
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
+            await interaction.response.send_message("You need Manage Server permission to assign channels.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        module_key, field_name = self.steps[self.step_index]
+        self.modules[module_key][field_name] = channel_id
+        await bot.cache.save_guild_bot_settings(
+            interaction.guild.id, interaction.guild.name, self.modules, interaction.user.id, "manual"
+        )
+        next_index = self.step_index + 1
+        if next_index < len(self.steps):
+            next_view = ManualChannelWizardView(self.modules, next_index)
+            await interaction.edit_original_response(embed=next_view.embed(), view=next_view)
+            return
+        await bot.ensure_about_panel(interaction.guild)
+        embed = build_native_admin_embed(interaction.guild, self.modules)
+        embed.description = "Manual channel setup is complete. You can change these choices at any time."
+        await interaction.edit_original_response(embed=embed, view=NativeAdminView(self.modules, "manual"))
+
+    async def use_any_channel(self, interaction: discord.Interaction) -> None:
+        await self.save_selection(interaction, None)
+
+    async def back_to_panel(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(
+            embed=build_native_admin_embed(interaction.guild, self.modules),
+            view=NativeAdminView(self.modules, "manual"),
+        )
+
+
 class NativeAdminView(discord.ui.View):
     def __init__(self, modules: dict[str, dict[str, object]], setup_mode: str = "manual") -> None:
         super().__init__(timeout=900)
@@ -5151,6 +5243,10 @@ class NativeAdminView(discord.ui.View):
                                   style=discord.ButtonStyle.secondary, emoji="⚙️")
         setup.callback = self.show_channel_choice
         self.add_item(setup)
+        if setup_mode == "manual":
+            assign = discord.ui.Button(label="Next: Assign Channels", style=discord.ButtonStyle.primary, emoji="➡️")
+            assign.callback = self.assign_channels
+            self.add_item(assign)
         guide = discord.ui.Button(label="Setup Guide", style=discord.ButtonStyle.secondary, emoji="📘")
         guide.callback = self.show_guide
         self.add_item(guide)
@@ -5158,6 +5254,10 @@ class NativeAdminView(discord.ui.View):
 
     async def show_guide(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(embed=build_bot_setup_guide_embed(), ephemeral=True)
+
+    async def assign_channels(self, interaction: discord.Interaction) -> None:
+        view = ManualChannelWizardView(self.modules)
+        await interaction.response.edit_message(embed=view.embed(), view=view)
 
     async def show_channel_choice(self, interaction: discord.Interaction) -> None:
         embed = discord.Embed(
