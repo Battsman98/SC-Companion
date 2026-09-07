@@ -326,26 +326,87 @@ def _trade_seller_terms(content: str) -> str | None:
     return "\n".join(fields) or None
 
 
-def build_marketplace_guide_embed() -> discord.Embed:
+def build_marketplace_guide_embed(command_channel_id: int | None = None, forum_id: int | None = None) -> discord.Embed:
+    command_location = f"<#{command_channel_id}>" if command_channel_id else "your server's Trade Tools channel"
+    forum_location = f"<#{forum_id}>" if forum_id else "this marketplace forum"
     embed = discord.Embed(
-        title="How to use the marketplace",
-        description="Choose one listing tag when you make a post. Use the exact in-game item name as the post title.",
+        title="How to Use the Trading Forum",
+        description=("The easiest way to create a listing is the `/trade listing` command. It provides item-name "
+                     "suggestions and creates a correctly formatted post for you."),
         color=discord.Color.blurple(),
     )
-    embed.add_field(name="WTS — Want to Sell", value="Use this when you have an item to sell. Add the price in aUEC.", inline=False)
-    embed.add_field(name="WTB — Want to Buy", value="Use this when you want to buy an item. Add the price you will pay.", inline=False)
-    embed.add_field(name="WTT — Want to Trade", value="Use this when you want to trade one item for another. Say what you offer and want.", inline=False)
     embed.add_field(
-        name="Bot-managed tags",
-        value="**STORE** marks a player store made with `/trade store`. **GUIDE** marks this help page.",
+        name="Where to run the command",
+        value=(f"Go to {command_location} and type `/trade listing`. The finished listing will be created "
+               f"automatically here in {forum_location}."),
         inline=False,
     )
     embed.add_field(
-        name="Before you post",
-        value="Check the item name, price, quantity, meeting place, and trade details. Never share account passwords.",
+        name="Create a listing",
+        value=("1. Type `/trade listing` in Discord and select the command.\n"
+               "2. Choose **WTS** (want to sell), **WTB** (want to buy), or **WTT** (want to trade).\n"
+               "3. Begin typing the in-game item name and select the exact suggestion.\n"
+               "4. Enter the price per item in aUEC.\n"
+               "5. Enter the quantity. The default is 1.\n"
+               "6. Add optional notes such as condition, availability, meetup location, or desired trade.\n"
+               "7. Submit. The bot creates the post and adds the item image and description."),
         inline=False,
     )
-    embed.set_footer(text="Required listing tags: WTS, WTB, or WTT")
+    embed.add_field(
+        name="Example",
+        value="`/trade listing listing_type:WTS item:Overlord Core Polarity price:100000 quantity:1 notes:Meet at Seraphim Station`",
+        inline=False,
+    )
+    embed.add_field(
+        name="Posting manually",
+        value=("You may also create a forum post yourself. Select exactly one **WTS**, **WTB**, or **WTT** tag, "
+               "use the item's exact in-game name as the title, and include the price in aUEC. The command is "
+               "recommended because its name suggestions prevent catalog-match errors."),
+        inline=False,
+    )
+    embed.add_field(
+        name="Trading safety",
+        value=("• Confirm the item, quantity, price, and meetup location before exchanging anything.\n"
+               "• Never share passwords, authentication codes, API keys, or account credentials.\n"
+               "• Keep negotiations in the listing thread when practical.\n"
+               "• This forum is for in-game items and aUEC; follow server rules and Star Citizen's terms."),
+        inline=False,
+    )
+    embed.set_footer(text="Need help? Ask a moderator or Bot Manager in the server.")
+    return embed
+
+
+def build_marketplace_store_guide_embed(command_channel_id: int | None = None) -> discord.Embed:
+    command_location = f"<#{command_channel_id}>" if command_channel_id else "your server's Trade Tools channel"
+    embed = discord.Embed(
+        title="Listing a player store",
+        description=(f"Run `/trade store` in {command_location}. Add the store name, description, and exactly one "
+                     "inventory source."),
+        color=discord.Color.from_rgb(155, 89, 182),
+    )
+    embed.add_field(
+        name="Google Sheets",
+        value=("• Add a view-only Google Sheets link in `sheet_url`.\n"
+               "• The bot checks the sheet for changes once per day.\n"
+               "• Use `/trade store-refresh` for an immediate update."),
+        inline=False,
+    )
+    embed.add_field(
+        name="Inventory Scanner Excel download",
+        value=("• On the website Inventory Scanner, export the inventory as an `.xlsx` file.\n"
+               "• Enable **Prepare this Excel file for selling items** so the file includes UEX selling costs.\n"
+               "• Attach that file in `inventory_file`.\n"
+               "• The store imports item name, quantity, quality, notes, category, location, and costs.\n"
+               "• Pricing uses Average UEX Player Seller Price first, then Average UEX Terminal Sell Price.\n"
+               "• An uploaded workbook is a snapshot. Upload a new workbook when inventory changes."),
+        inline=False,
+    )
+    embed.add_field(
+        name="Optional details",
+        value=("Add a default meetup location and availability. The bot creates the **STORE**-tagged forum post "
+               "and attaches the uploaded workbook when one is used."),
+        inline=False,
+    )
     return embed
 
 
@@ -1710,7 +1771,7 @@ class GameAssistBot(commands.Bot):
         if not isinstance(channel, discord.ForumChannel):
             logging.error("TRADING_FORUM_CHANNEL_ID %s is not a Discord forum channel", channel_id)
             return
-        await self.configure_marketplace_forum(channel)
+        await self.configure_marketplace_forum(channel, self.visitor_channels.get("trade-tools"))
 
     async def ensure_guild_marketplace(
         self,
@@ -1726,9 +1787,11 @@ class GameAssistBot(commands.Bot):
                 fetched = await self.fetch_channel(int(trade["resource_channel_id"]))
                 forum = fetched if isinstance(fetched, discord.ForumChannel) else None
         if isinstance(forum, discord.ForumChannel):
-            await self.configure_marketplace_forum(forum)
+            await self.configure_marketplace_forum(forum, int(trade["channel_id"]) if trade.get("channel_id") else None)
 
-    async def configure_marketplace_forum(self, channel: discord.ForumChannel) -> None:
+    async def configure_marketplace_forum(
+        self, channel: discord.ForumChannel, command_channel_id: int | None = None,
+    ) -> None:
         existing = {tag.name.upper(): tag for tag in channel.available_tags}
         required = (*TRADING_FORUM_TAGS, TRADING_STORE_TAG, TRADING_GUIDE_TAG)
         tags = list(channel.available_tags)
@@ -1758,10 +1821,10 @@ class GameAssistBot(commands.Bot):
             with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                 candidate = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
                 thread = candidate if isinstance(candidate, discord.Thread) else None
-        embed = build_marketplace_guide_embed()
+        embed = build_marketplace_guide_embed(command_channel_id, channel.id)
         if thread is None:
             created = await channel.create_thread(
-                name="Marketplace Guide — Read Before Posting",
+                name="How to Use the Trading Forum",
                 embed=embed,
                 applied_tags=[guide_tag] if guide_tag else [],
                 reason="Create the SC Companion marketplace guide",
@@ -1771,8 +1834,26 @@ class GameAssistBot(commands.Bot):
         else:
             if thread.archived:
                 await thread.edit(archived=False, reason="Refresh the marketplace guide")
+            if thread.name != "How to Use the Trading Forum" or guide_tag not in thread.applied_tags:
+                await thread.edit(
+                    name="How to Use the Trading Forum",
+                    applied_tags=[guide_tag] if guide_tag else thread.applied_tags,
+                    reason="Refresh the marketplace guide",
+                )
             starter = await thread.fetch_message(thread.id)
             await starter.edit(embed=embed)
+        store_cache_key = f"{cache_key}:store-instructions"
+        store_message_id = await self.cache.get(store_cache_key)
+        store_message = None
+        if isinstance(store_message_id, int):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                store_message = await thread.fetch_message(store_message_id)
+        store_embed = build_marketplace_store_guide_embed(command_channel_id)
+        if store_message is None:
+            store_message = await thread.send(embed=store_embed)
+            await self.cache.set(store_cache_key, store_message.id, 315360000)
+        else:
+            await store_message.edit(embed=store_embed)
         with suppress(discord.Forbidden, discord.HTTPException):
             await thread.edit(pinned=True, reason="Keep the marketplace guide visible")
 
