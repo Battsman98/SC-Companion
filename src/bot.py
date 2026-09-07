@@ -85,6 +85,7 @@ VISITOR_ARCHIVE_CHANNEL_NAMES = {
     "executive-hangar-status",
     "contested-zone-timers",
 }
+VISITOR_REMOVED_CHANNEL_NAMES = {"bot-start-here", "bot-status"}
 AUDIT_LOG_CATEGORY_ID = 1516295744603164732
 AUDIT_LOG_CATEGORY_NAME = "audit log"
 LOOT_REVIEW_CHANNEL_NAME = "loot-report-reviews"
@@ -96,9 +97,7 @@ WEBSITE_HEALTH_URL = os.getenv(
     "https://star-citizen-game-assist.onrender.com/api/health",
 ).strip()
 VISITOR_CHANNEL_SPECS = {
-    "bot-start-here": "text",
     "member-applications": "text",
-    "bot-status": "text",
     "ship-search": "text",
     "trade-tools": "text",
     "mining-tools": "text",
@@ -111,10 +110,8 @@ VISITOR_CHANNEL_SPECS = {
     "visitor-lounge": "voice",
 }
 VISITOR_CHANNEL_TOPICS = {
-    "bot-start-here": "Start here for Discord Bot Hub guidance and quick lookup commands.",
     "member-applications": "Apply to become a full community member.",
     "bot-commands": "Permanent command directory for the Star Citizen Companion bot.",
-    "bot-status": "Check bot availability and connected data-provider health.",
     "ship-search": "Search Star Citizen ships and vehicles with /ship.",
     "trade-tools": "Commodity prices and trade-route planning commands.",
     "mining-tools": "Mining locations, community reports, crew splits, refinery orders, and operation briefs.",
@@ -157,8 +154,8 @@ ANNIVERSARY_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 APPLICATION_REVIEW_CHANNEL_NAME = "membership-application-reviews"
 APPLICATION_PENDING_CACHE_PREFIX = "discord:membership-application-pending"
 VISITOR_COMMAND_CHANNELS = {
-    "status": "bot-status",
-    "lookup": "bot-start-here",
+    "status": "general-chat",
+    "lookup": "general-chat",
     "ship": "ship-search",
     "commodity": "trade-tools",
     "trade listing": "trade-tools",
@@ -2300,6 +2297,14 @@ class GameAssistBot(commands.Bot):
 
         await self.remove_legacy_star_citizen_bot_channels(guild)
 
+        for removed_name in VISITOR_REMOVED_CHANNEL_NAMES:
+            for removed_channel in list(guild.text_channels):
+                if removed_channel.name == removed_name:
+                    await removed_channel.delete(
+                        reason="Consolidate Discord Bot Hub information into about-the-bot"
+                    )
+            self.visitor_channels.pop(removed_name, None)
+
         allowed_ids = {category.id, *self.visitor_channels.values()}
         if isinstance(feedback, discord.ForumChannel):
             allowed_ids.add(feedback.id)
@@ -2312,7 +2317,7 @@ class GameAssistBot(commands.Bot):
                 overwrite.view_channel = False
                 await channel.set_permissions(role, overwrite=overwrite, reason="Isolate Visitor access")
 
-        welcome = self.get_channel(self.visitor_channels.get("bot-start-here", 0))
+        welcome = self.get_channel(self.visitor_channels.get("about-the-bot", 0))
         if isinstance(welcome, discord.TextChannel):
             await self.sync_visitor_welcome(welcome, role)
 
@@ -2449,11 +2454,14 @@ class GameAssistBot(commands.Bot):
         if isinstance(message_id, int):
             with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                 message = await channel.fetch_message(message_id)
+        if message is None:
+            message = await self.find_recent_embed_message(channel, embed.title or "")
         if message:
             await message.edit(embed=embed)
         else:
             message = await channel.send(embed=embed)
-            await self.cache.set(cache_key, message.id, 315360000)
+        await self.cache.set(cache_key, message.id, 315360000)
+        await self.delete_recent_duplicate_embed_messages(channel, embed.title or "", message.id, limit=250)
 
     async def ensure_membership_applications(self) -> None:
         """Serialize startup and recovery provisioning to prevent duplicate channels/messages."""
@@ -2977,7 +2985,7 @@ class GameAssistBot(commands.Bot):
 
     async def sync_commands_reference_message(self) -> None:
         channel_ids = []
-        visitor_channel_id = self.visitor_channels.get("bot-start-here")
+        visitor_channel_id = self.visitor_channels.get("about-the-bot")
         if self.settings.commands_channel_id and not visitor_channel_id:
             channel_ids.append(self.settings.commands_channel_id)
         if visitor_channel_id and visitor_channel_id not in channel_ids:
@@ -2999,9 +3007,9 @@ class GameAssistBot(commands.Bot):
             logging.warning("Commands reference channel %s is not messageable", channel_id)
             return
 
-        directory_only = directory_only or getattr(channel, "name", None) == "bot-start-here"
+        directory_only = directory_only or getattr(channel, "name", None) == "about-the-bot"
         embeds = (
-            [build_command_channel_directory_embed(self.settings)]
+            [build_visitor_channel_directory_embed(self.visitor_channels)]
             if directory_only
             else build_commands_reference_embeds(self.settings)
         )
@@ -3273,7 +3281,7 @@ class GameAssistBot(commands.Bot):
 
     async def sync_visitor_command_examples(self) -> None:
         for channel_name, embed in build_visitor_command_example_embeds().items():
-            if channel_name == "bot-start-here":
+            if channel_name in VISITOR_REMOVED_CHANNEL_NAMES:
                 continue
             channel = self.get_channel(self.visitor_channels.get(channel_name, 0))
             if not isinstance(channel, discord.TextChannel):
@@ -6313,17 +6321,14 @@ def _visitor_example_embed(
 def build_visitor_command_example_embeds() -> dict[str, discord.Embed]:
     """Return one durable, realistic response example for every Visitor command channel."""
     return {
-        "bot-start-here": _visitor_example_embed(
-            "Example /lookup Response",
+        "general-chat": _visitor_example_embed(
+            "Example General Commands",
             "/lookup query: Port Tressler",
-            "Type `/lookup`, select the `query` option, enter `Port Tressler`, then submit. The response provides a concise description and source link.",
-            (("Port Tressler", "Space station above microTech · Stanton system\nIncludes services, shops, and local landing information."),),
-        ),
-        "bot-status": _visitor_example_embed(
-            "Example /status Response",
-            "/status",
-            "Type `/status`, select the command from Peep, then submit. It shows whether the bot and its data providers are ready.",
-            (("Bot", "Online"), ("Game data", "Ready · cached results available"), ("Uptime", "2 hours, 18 minutes")),
+            "Use `/lookup` for a concise description and source link. Use `/status` to check whether the bot and its data providers are ready.",
+            (
+                ("Lookup example", "Port Tressler · Space station above microTech in the Stanton system"),
+                ("Status example", "Bot online · Game data ready · Cached results available"),
+            ),
         ),
         "ship-search": _visitor_example_embed(
             "Example /ship Response",
@@ -7682,6 +7687,24 @@ def build_command_channel_directory_embed(settings: Settings) -> discord.Embed:
         color=discord.Color.blurple(),
     )
     embed.set_footer(text="Channel names are rendered by Discord from the configured channel IDs")
+    return embed
+
+
+def build_visitor_channel_directory_embed(visitor_channels: dict[str, int]) -> discord.Embed:
+    grouped: dict[str, list[str]] = {}
+    for command_name, channel_name in VISITOR_COMMAND_CHANNELS.items():
+        if channel_name in visitor_channels:
+            grouped.setdefault(channel_name, []).append(f"/{command_name}")
+    lines = [
+        f"<#{visitor_channels[channel_name]}>: {', '.join(sorted(commands))}"
+        for channel_name, commands in grouped.items()
+    ]
+    embed = discord.Embed(
+        title="Discord Bot Commands - Channel Directory",
+        description="\n".join(lines) if lines else "No command channels are available.",
+        color=discord.Color.blurple(),
+    )
+    embed.set_footer(text="Each command is limited to its listed channel")
     return embed
 
 
