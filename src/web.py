@@ -979,7 +979,7 @@ def _bot_invite_url(guild_id: int | None = None) -> str:
     # View/send messages, embed links, attach files, read history, use commands,
     # manage messages/threads, and create public threads. Server owners retain
     # control and can grant additional channel-management access separately.
-    permissions = 397821234176
+    permissions = 397821234192
     url = (
         "https://discord.com/oauth2/authorize"
         f"?client_id={client_id}&scope=bot%20applications.commands"

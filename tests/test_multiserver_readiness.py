@@ -42,6 +42,8 @@ def test_first_run_notice_points_to_admin_panel_and_has_persistent_button() -> N
     button = FirstRunSetupView().children[0]
     assert button.label == "Open Admin Panel"
     assert button.custom_id == "sc-companion:first-run-admin-panel"
+    missing_permission = build_first_run_setup_embed(can_manage_channels=False)
+    assert any(field.name == "One permission is still needed" for field in missing_permission.fields)
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
