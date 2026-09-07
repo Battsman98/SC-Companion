@@ -836,6 +836,7 @@ class GameAssistBot(commands.Bot):
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
 
     async def on_ready(self) -> None:
+        await self._run_startup_step("backfill shared feedback tickets", self.backfill_feedback_tickets)
         for guild in self.guilds:
             await self._run_startup_step(
                 f"publish first-run setup notice in {guild.id}",
@@ -855,7 +856,6 @@ class GameAssistBot(commands.Bot):
         await self._run_startup_step("provision membership applications", self.ensure_membership_applications)
         await self._run_startup_step("refresh Bot Manager channel access", self.ensure_bot_manager_role)
         await self._run_startup_step("prepare feedback forum", self.ensure_feedback_forum)
-        await self._run_startup_step("backfill shared feedback tickets", self.backfill_feedback_tickets)
         await self._run_startup_step("prepare trading forum", self.ensure_trading_forum)
         await self._run_startup_step("verify inventory channel", self.ensure_inventory_search_channel)
         await self._run_startup_step("sync command references", self.sync_commands_reference_message)
@@ -947,6 +947,10 @@ class GameAssistBot(commands.Bot):
             )
             central_thread = getattr(created, "thread", created)
             await self.cache.save_feedback_mirror(f"discord:{thread.id}", central_thread.id, thread.guild.id, thread.id)
+            logging.info(
+                "Mirrored feedback ticket %s from guild %s into primary thread %s",
+                thread.id, thread.guild.id, central_thread.id,
+            )
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
             logging.exception("Could not mirror feedback thread %s", thread.id)
 
