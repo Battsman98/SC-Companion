@@ -982,6 +982,43 @@ def _snowflake(value: int | None) -> str | None:
     return str(value) if value is not None else None
 
 
+_EXISTING_MODULE_ROUTES: dict[str, dict[str, str]] = {
+    "ship_search": {"ship": "ship-search"},
+    "mining_tools": {
+        "mining": "mining-tools", "miningadd": "mining-tools",
+        "industry split": "industry-operations", "industry refinery": "industry-operations",
+        "industry brief": "industry-operations",
+    },
+    "blueprints": {"blueprint": "blueprints-and-missions", "myblueprints": "blueprints-and-missions"},
+    "missions_wikelo": {"mission": "blueprints-and-missions", "wikelo": "blueprints-and-missions"},
+    "item_locator": {
+        "item search": "item-locator", "loot search": "item-locator",
+        "loot found": "item-locator", "loot report": "item-locator",
+    },
+    "inventory_search": {"inventory search": "inventory-search"},
+    "trade_tools": {
+        "commodity": "trade-tools", "trade routing": "trade-tools", "trade listing": "trade-tools",
+        "trade store": "trade-tools", "trade store-refresh": "trade-tools",
+    },
+    "timers": {
+        "exec": "executive-hangar-status", "execset": "executive-hangar-status",
+        "execclear": "executive-hangar-status", "cztimer": "contested-zone-timers",
+    },
+}
+
+
+def _discover_existing_routes(channels: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    by_name = {str(channel["name"]): channel for channel in channels}
+    return {
+        module_key: [
+            {"command": command, "channel_id": _snowflake(by_name[channel_name]["id"]), "channel_name": channel_name}
+            for command, channel_name in command_routes.items()
+            if channel_name in by_name
+        ]
+        for module_key, command_routes in _EXISTING_MODULE_ROUTES.items()
+    }
+
+
 @app.get("/api/bot-management/guilds")
 async def manageable_bot_guilds(user=Depends(require_user)) -> list[dict[str, Any]]:
     configured_guilds = []
@@ -1004,12 +1041,29 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     stored = await state().cache.guild_bot_settings(guild_id)
     enabled_default = guild_id == state().settings.discord_guild_id and stored is None
     modules = normalize_module_settings(stored.get("modules") if stored else None, enabled_default=enabled_default)
+    channels = await _discord_guild_channels(guild_id) if bot_guild is not None else []
+    detected_routes = _discover_existing_routes(channels)
+    if stored is None:
+        for key, routes in detected_routes.items():
+            if routes:
+                modules[key]["enabled"] = True
+                modules[key]["channel_id"] = int(routes[0]["channel_id"])
+        marketplace = next((channel for channel in channels
+                            if channel["id"] == state().settings.trading_forum_channel_id), None)
+        if marketplace is None:
+            marketplace = next((channel for channel in channels if channel["name"] in {"marketplace", "trading"}
+                                and channel["type"] in {15, 16}), None)
+        if marketplace is not None:
+            modules["trade_tools"]["resource_channel_id"] = int(marketplace["id"])
     return {
         "guild": {"id": _snowflake(guild["id"]), "name": guild["name"], "icon_url": guild["icon_url"]},
         "bot_installed": bot_guild is not None,
         "invite_url": _bot_invite_url(guild_id),
         "configured": stored is not None,
-        "channel_setup_mode": stored.get("channel_setup_mode", "manual") if stored else None,
+        "channel_setup_mode": stored.get("channel_setup_mode", "manual") if stored else (
+            "manual" if any(detected_routes.values()) else None
+        ),
+        "setup_source": "saved" if stored else ("detected" if any(detected_routes.values()) else "new"),
         "modules": [
             {
                 "key": key,
@@ -1019,12 +1073,13 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
                 **modules[key],
                 "channel_id": _snowflake(modules[key]["channel_id"]),
                 "resource_channel_id": _snowflake(modules[key]["resource_channel_id"]),
+                "detected_routes": detected_routes.get(key, []),
             }
             for key, definition in BOT_MODULES.items()
         ],
         "channels": [
             {**channel, "id": _snowflake(channel["id"])}
-            for channel in (await _discord_guild_channels(guild_id) if bot_guild is not None else [])
+            for channel in channels
         ],
         "updated_at": stored.get("updated_at") if stored else None,
     }

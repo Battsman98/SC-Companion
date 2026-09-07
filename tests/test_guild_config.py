@@ -73,6 +73,16 @@ def test_discord_ids_are_sent_to_browsers_without_number_rounding() -> None:
     assert web._snowflake(discord_id) == "1533026212463775754"
 
 
+def test_existing_primary_mining_routes_are_discovered() -> None:
+    routes = web._discover_existing_routes([
+        {"id": 1001, "name": "mining-tools", "type": 0},
+        {"id": 1002, "name": "industry-operations", "type": 0},
+    ])
+    mining = routes["mining_tools"]
+    assert {route["channel_name"] for route in mining} == {"mining-tools", "industry-operations"}
+    assert next(route for route in mining if route["command"] == "mining")["channel_id"] == "1001"
+
+
 def test_management_api_saves_only_a_users_managed_guild(monkeypatch, tmp_path) -> None:
     async def scenario() -> None:
         cache = await SQLiteCache.create(str(tmp_path / "management-api.sqlite3"))

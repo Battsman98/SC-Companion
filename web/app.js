@@ -1165,11 +1165,11 @@ async function loadGuildBotConfiguration(guildId) {
       </fieldset>
       <div class="bot-module-list">
         ${config.modules.map((module) => `<div class="bot-module-row" data-module-key="${escapeAttribute(module.key)}">
-          <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small></span></label>
+          <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small>${module.detected_routes?.length ? `<small class="bot-detected-routes"><strong>Current Discord setup</strong>${module.detected_routes.map((route) => `<span><code>/${escapeHtml(route.command)}</code> → #${escapeHtml(route.channel_name)}</span>`).join("")}</small>` : ""}</span></label>
           <div><label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>${module.key === "trade_tools" ? `<label>Marketplace forum<select data-module-resource-channel>${forumOptions(module.resource_channel_id)}</select></label>` : ""}</div>
         </div>`).join("")}
       </div>
-      <div class="bot-management-actions"><button type="submit">Save Bot Settings</button><span data-bot-management-status>${config.configured ? "Settings loaded." : "Choose modules, then save to complete setup."}</span></div>
+      <div class="bot-management-actions"><button type="submit">Save Bot Settings</button><span data-bot-management-status>${config.setup_source === "detected" ? "Existing Discord setup found. Review it before saving changes." : config.configured ? "Saved settings loaded." : "Choose modules, then save to complete setup."}</span></div>
     </form>`;
     outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
     const managementForm = outputs.botManagement.querySelector("[data-bot-management-form]");
