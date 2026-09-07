@@ -18,7 +18,7 @@ from src.bot import (
     build_visitor_command_example_embeds,
 )
 from src.web import _feedback_embed, _provided_feedback_images
-from src.web import update_feedback_ticket_status
+from src.web import _add_feedback_attachments_to_embed, update_feedback_ticket_status
 from src.web_auth import WebUser
 
 
@@ -90,6 +90,19 @@ def test_resolving_a_website_ticket_applies_completed_tag_and_archives() -> None
     assert "await _apply_feedback_ticket_state(thread, payload.status)" in source
     assert "feedback_mirror_for_central_thread(thread_id)" in source
     assert "await _apply_feedback_ticket_state(origin_thread, payload.status)" in source
+
+
+def test_mirrored_feedback_displays_image_attachments() -> None:
+    embed = {"fields": []}
+    _add_feedback_attachments_to_embed(embed, [{
+        "filename": "broken-screen.png",
+        "url": "https://cdn.discordapp.com/attachments/example/broken-screen.png",
+        "content_type": "image/png",
+    }])
+
+    assert embed["image"]["url"].endswith("broken-screen.png")
+    assert embed["fields"][-1]["name"] == "Attachments"
+    assert "[broken-screen.png]" in embed["fields"][-1]["value"]
 
 
 def test_main_about_channel_only_keeps_welcome_and_directory() -> None:

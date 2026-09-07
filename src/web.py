@@ -1514,9 +1514,11 @@ async def _sync_installed_server_feedback() -> int:
                     thread_id = int(thread["id"])
                     if str(thread.get("name") or "").casefold().startswith("example:"):
                         continue
-                    if await state().cache.feedback_mirror_for_origin_thread(thread_id):
-                        continue
                     starter = await _discord_api("GET", f"/channels/{thread_id}/messages/{thread_id}")
+                    existing_mirror = await state().cache.feedback_mirror_for_origin_thread(thread_id)
+                    if existing_mirror:
+                        await _sync_mirrored_feedback_attachments(starter, int(existing_mirror["central_thread_id"]))
+                        continue
                     author = starter.get("author", {})
                     if author.get("bot"):
                         continue
@@ -1532,6 +1534,7 @@ async def _sync_installed_server_feedback() -> int:
                             "inline": False,
                         }, {"name": "Reported by", "value": author_name[:1024], "inline": True}],
                     }
+                    _add_feedback_attachments_to_embed(embed, starter.get("attachments", []))
                     payload: dict[str, Any] = {
                         "name": f"[{guild.get('name') or 'Discord'}] {thread.get('name') or 'Ticket'}"[:100],
                         "message": {"embeds": [embed], "allowed_mentions": {"parse": []}},
@@ -1549,6 +1552,33 @@ async def _sync_installed_server_feedback() -> int:
             except HTTPException:
                 logging.exception("Could not synchronize feedback tickets for guild %s", guild_id)
         return mirrored
+
+
+def _add_feedback_attachments_to_embed(embed: dict[str, Any], attachments: list[dict[str, Any]]) -> None:
+    if not attachments:
+        return
+    image = next((item for item in attachments if str(item.get("content_type") or "").startswith("image/")), None)
+    if image and image.get("url"):
+        embed["image"] = {"url": str(image["url"])}
+    links = "\n".join(
+        f"[{item.get('filename') or 'Attachment'}]({item['url']})"
+        for item in attachments if item.get("url")
+    )
+    if links:
+        embed.setdefault("fields", []).append({"name": "Attachments", "value": links[:1024], "inline": False})
+
+
+async def _sync_mirrored_feedback_attachments(starter: dict[str, Any], central_thread_id: int) -> None:
+    attachments = starter.get("attachments", [])
+    if not attachments:
+        return
+    central_starter = await _discord_api("GET", f"/channels/{central_thread_id}/messages/{central_thread_id}")
+    embeds = central_starter.get("embeds", [])
+    if not embeds or embeds[0].get("image") or any(field.get("name") == "Attachments" for field in embeds[0].get("fields", [])):
+        return
+    embed = embeds[0]
+    _add_feedback_attachments_to_embed(embed, attachments)
+    await _discord_api("PATCH", f"/channels/{central_thread_id}/messages/{central_thread_id}", json_payload={"embeds": [embed]})
 
 
 async def _require_feedback_thread(thread_id: int) -> dict[str, Any]:

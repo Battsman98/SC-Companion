@@ -922,7 +922,9 @@ class GameAssistBot(commands.Bot):
     async def mirror_feedback_thread(self, thread: discord.Thread) -> None:
         if thread.name.casefold().startswith("example:") or (self.user and thread.owner_id == self.user.id):
             return
-        if await self.cache.feedback_mirror_for_origin_thread(thread.id):
+        existing = await self.cache.feedback_mirror_for_origin_thread(thread.id)
+        if existing:
+            await self.sync_mirrored_feedback_attachments(thread, int(existing["central_thread_id"]))
             return
         try:
             starter = await thread.fetch_message(thread.id)
@@ -938,6 +940,7 @@ class GameAssistBot(commands.Bot):
             mirror_embed.add_field(name="Origin", value=f"[{thread.name}]({thread.jump_url})", inline=False)
             if starter.embeds:
                 mirror_embed.add_field(name="Original report", value=(starter.embeds[0].description or starter.embeds[0].title or "Embedded report")[:1024], inline=False)
+            self.add_feedback_attachments(mirror_embed, starter.attachments)
             mirror_tag = discord.utils.find(
                 lambda item: item.name.casefold() == "bug", central.available_tags
             )
@@ -955,6 +958,36 @@ class GameAssistBot(commands.Bot):
             )
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
             logging.exception("Could not mirror feedback thread %s", thread.id)
+
+    @staticmethod
+    def add_feedback_attachments(embed: discord.Embed, attachments: list[discord.Attachment]) -> None:
+        if not attachments:
+            return
+        image = next((item for item in attachments if (item.content_type or "").startswith("image/")), None)
+        if image:
+            embed.set_image(url=image.url)
+        links = "\n".join(f"[{item.filename}]({item.url})" for item in attachments)
+        embed.add_field(name="Attachments", value=links[:1024], inline=False)
+
+    async def sync_mirrored_feedback_attachments(self, thread: discord.Thread, central_thread_id: int) -> None:
+        try:
+            starter = await thread.fetch_message(thread.id)
+            if not starter.attachments:
+                return
+            central = await self.fetch_channel(central_thread_id)
+            if not isinstance(central, discord.Thread):
+                return
+            central_starter = await central.fetch_message(central.id)
+            if not central_starter.embeds:
+                return
+            embed = central_starter.embeds[0]
+            if embed.image.url or any(field.name == "Attachments" for field in embed.fields):
+                return
+            self.add_feedback_attachments(embed, starter.attachments)
+            await central_starter.edit(embed=embed)
+            logging.info("Added feedback attachments to mirrored ticket %s", central_thread_id)
+        except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            logging.exception("Could not synchronize attachments for feedback thread %s", thread.id)
 
     async def backfill_feedback_tickets(self) -> None:
         await self.remove_mirrored_feedback_examples()
