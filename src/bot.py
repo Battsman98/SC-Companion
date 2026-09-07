@@ -5370,6 +5370,15 @@ def timer_dashboard_channel_id(modules: dict[str, dict[str, object]]) -> int | N
     return int(timers["channel_id"])
 
 
+def automatic_cleanup_channel_ids(modules: dict[str, dict[str, object]]) -> set[int]:
+    return {
+        int(channel_id)
+        for item in modules.values()
+        for channel_id in (item.get("channel_id"), item.get("resource_channel_id"))
+        if channel_id
+    }
+
+
 class ManualChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, module_key: str, field_name: str) -> None:
         channel_types = ([discord.ChannelType.forum] if field_name == "resource_channel_id"
@@ -5462,6 +5471,56 @@ class ManualChannelWizardView(discord.ui.View):
         )
 
 
+class ConfirmBotUninstallView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=300)
+
+    @discord.ui.button(label="Delete Bot Setup and Uninstall", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
+            await interaction.response.send_message("You need Manage Server permission to uninstall the bot.", ephemeral=True)
+            return
+        guild = interaction.guild
+        stored = await bot.cache.guild_bot_settings(guild.id)
+        modules = normalize_module_settings(stored.get("modules") if stored else None)
+        automatic = bool(stored and stored.get("channel_setup_mode") == "automatic")
+        await interaction.response.edit_message(
+            content="Uninstalling SC Companion and cleaning up its automatic channels…", embed=None, view=None
+        )
+        if automatic:
+            category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+            cleanup_ids = automatic_cleanup_channel_ids(modules)
+            if category is not None:
+                original_children = list(category.channels)
+                for channel in original_children:
+                    if channel.id in cleanup_ids:
+                        with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            await channel.delete(reason="SC Companion confirmed uninstall")
+                if not any(channel.id not in cleanup_ids for channel in original_children):
+                    with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        await category.delete(reason="SC Companion confirmed uninstall")
+        await bot.cache.record_guild_installation(guild.id, guild.name, guild.member_count, active=False)
+        await bot.cache.purge_guild_data(guild.id)
+        await guild.leave()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await interaction.response.edit_message(content="Uninstall canceled. Nothing was changed.", embed=None, view=None)
+
+
+def build_uninstall_warning_embed() -> discord.Embed:
+    return discord.Embed(
+        title="Uninstall SC Companion?",
+        description=("This removes the bot's saved settings. If the bot used automatic setup, it also deletes the "
+                     "feature channels and marketplace it created inside the **SC Companion** category, then removes "
+                     "the bot from this Discord. Manually selected channels are not deleted."),
+        color=discord.Color.red(),
+    )
+
+
 class NativeAdminView(discord.ui.View):
     def __init__(self, modules: dict[str, dict[str, object]], setup_mode: str = "manual") -> None:
         super().__init__(timeout=900)
@@ -5479,9 +5538,17 @@ class NativeAdminView(discord.ui.View):
         guide.callback = self.show_guide
         self.add_item(guide)
         self.add_item(discord.ui.Button(label="Open full website panel", style=discord.ButtonStyle.link, url="https://sccompanion.org"))
+        uninstall = discord.ui.Button(label="Uninstall Bot", style=discord.ButtonStyle.danger, emoji="🗑️")
+        uninstall.callback = self.show_uninstall
+        self.add_item(uninstall)
 
     async def show_guide(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(embed=build_bot_setup_guide_embed(), ephemeral=True)
+
+    async def show_uninstall(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            embed=build_uninstall_warning_embed(), view=ConfirmBotUninstallView(), ephemeral=True
+        )
 
     async def assign_channels(self, interaction: discord.Interaction) -> None:
         view = ManualChannelWizardView(self.modules)
@@ -5550,6 +5617,17 @@ async def admin_guide_command(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("You need Manage Server permission to open the setup guide.", ephemeral=True)
         return
     await interaction.response.send_message(embed=build_bot_setup_guide_embed(), ephemeral=True)
+
+
+@admin_group.command(name="uninstall", description="Remove this server's bot setup before uninstalling the bot.")
+async def admin_uninstall_command(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
+        await interaction.response.send_message("You need Manage Server permission to uninstall the bot.", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        embed=build_uninstall_warning_embed(), view=ConfirmBotUninstallView(), ephemeral=True
+    )
 
 
 @admin_group.command(name="channel", description="Assign a feature's commands to a channel in this server.")
