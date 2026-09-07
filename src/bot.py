@@ -1081,6 +1081,7 @@ class GameAssistBot(commands.Bot):
             forum = await guild.create_forum("feedback-and-issues", topic=FEEDBACK_FORUM_TOPIC,
                                              reason="Create the SC Companion feedback ticket forum")
         await self.configure_feedback_forum(forum)
+        await self.sync_feedback_template(forum)
         await self.cache.set(f"guild:{guild.id}:feedback-forum", forum.id, 315360000)
 
     async def configure_feedback_forum(self, forum: discord.ForumChannel) -> None:

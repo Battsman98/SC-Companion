@@ -1,10 +1,12 @@
 from io import BytesIO
+import inspect
 
 from fastapi import UploadFile
 
 from src.bot import (
     BOT_MANAGER_ROLE_NAME,
     FEEDBACK_FORUM_TAGS,
+    GameAssistBot,
     VISITOR_CATEGORY_NAME,
     VISITOR_CHANNEL_SPECS,
     VISITOR_COMMAND_CHANNELS,
@@ -74,6 +76,15 @@ def test_shared_feedback_forums_copy_the_main_discord_tags() -> None:
         ("bug", False),
         ("request", False),
     )
+
+
+def test_shared_feedback_forums_publish_the_main_example_post() -> None:
+    source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
+    assert "await self.sync_feedback_template(forum)" in source
+
+    embed = build_feedback_template_embed()
+    assert embed.title == "Example: Guide button does not display the selected information"
+    assert embed.footer.text == "This is an example. Create a new forum post for your own report."
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
