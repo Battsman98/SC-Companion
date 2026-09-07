@@ -762,7 +762,7 @@ class GameAssistBot(commands.Bot):
         await self._run_startup_step("assign one-year member roles", self.sync_anniversary_roles)
         self._commands_reference_synced = True
 
-        if (self.settings.exec_status_channel_id or self.visitor_channels.get("executive-hangar-status")) and self._exec_status_task is None:
+        if self._exec_status_task is None:
             self._exec_status_task = asyncio.create_task(self._exec_status_loop())
         if self._cz_timers_task is None:
             self._cz_timers_task = asyncio.create_task(self._cz_timers_loop())
@@ -1020,6 +1020,11 @@ class GameAssistBot(commands.Bot):
         channel_id = timer_dashboard_channel_id(modules)
         if channel_id is None:
             return
+        try:
+            status_context = await self.resolve_exec_status_context(timer_scope(self, guild.id))
+            await self._sync_exec_status_channel(channel_id, build_exec_status_embed(status_context))
+        except Exception:
+            logging.warning("Could not populate Executive Hangar timer in guild %s", guild.id)
         timers = await get_cz_dashboard_timers(self.cache, timer_scope(self, guild.id))
         await self._sync_cz_timers_channel(channel_id, build_cz_dashboard_embed(timers))
 
@@ -2641,18 +2646,29 @@ class GameAssistBot(commands.Bot):
         visitor_channel_id = self.visitor_channels.get("executive-hangar-status")
         channel_ids = {visitor_channel_id} if visitor_channel_id else {self.settings.exec_status_channel_id}
         channel_ids.discard(None)
-        if not channel_ids:
-            return
-
-        try:
-            status_context = await self.resolve_exec_status_context()
-        except Exception:
-            logging.warning("Could not fetch Executive Hangar timer for status message")
-            return
-
-        embed = build_exec_status_embed(status_context)
-        for channel_id in channel_ids:
-            await self._sync_exec_status_channel(channel_id, embed)
+        if channel_ids:
+            try:
+                status_context = await self.resolve_exec_status_context()
+                embed = build_exec_status_embed(status_context)
+                for channel_id in channel_ids:
+                    await self._sync_exec_status_channel(channel_id, embed)
+            except Exception:
+                logging.warning("Could not fetch Executive Hangar timer for primary status message")
+        for guild in self.guilds:
+            if guild.id == self.settings.discord_guild_id:
+                continue
+            configured = await self.cache.guild_bot_settings(guild.id)
+            if configured is None:
+                continue
+            modules = normalize_module_settings(configured.get("modules"))
+            channel_id = timer_dashboard_channel_id(modules)
+            if channel_id is None:
+                continue
+            try:
+                guild_context = await self.resolve_exec_status_context(timer_scope(self, guild.id))
+                await self._sync_exec_status_channel(channel_id, build_exec_status_embed(guild_context))
+            except Exception:
+                logging.warning("Could not refresh Executive Hangar timer in guild %s", guild.id)
 
     async def _sync_exec_status_channel(self, channel_id: int, embed: discord.Embed) -> None:
         try:
