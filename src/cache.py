@@ -320,6 +320,32 @@ class SQLiteCache:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_trade_stores_owner_active ON trade_store_listings(owner_id, active, updated_at)"
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS guild_bot_settings (
+                guild_id INTEGER PRIMARY KEY,
+                guild_name TEXT NOT NULL,
+                modules_json TEXT NOT NULL,
+                configured_by INTEGER NOT NULL,
+                configured_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_managed_guilds (
+                user_id INTEGER NOT NULL,
+                guild_id INTEGER NOT NULL,
+                guild_name TEXT NOT NULL,
+                icon_url TEXT,
+                permissions INTEGER NOT NULL,
+                is_owner INTEGER NOT NULL DEFAULT 0,
+                refreshed_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, guild_id)
+            )
+            """
+        )
         cls._ensure_column(connection, "trade_store_listings", "source_type", "TEXT NOT NULL DEFAULT 'google_sheet'")
         cls._ensure_column(connection, "user_ships", "image_url", "TEXT")
         cls._ensure_column(connection, "user_ships", "notes", "TEXT")
@@ -347,6 +373,93 @@ class SQLiteCache:
             )
         connection.commit()
         return cls(connection)
+
+    async def guild_bot_settings(self, guild_id: int) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT guild_id, guild_name, modules_json, configured_by, configured_at, updated_at "
+            "FROM guild_bot_settings WHERE guild_id = ?",
+            (guild_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "guild_id": int(row[0]),
+            "guild_name": str(row[1]),
+            "modules": json.loads(row[2]),
+            "configured_by": int(row[3]),
+            "configured_at": int(row[4]),
+            "updated_at": int(row[5]),
+        }
+
+    async def save_guild_bot_settings(
+        self,
+        guild_id: int,
+        guild_name: str,
+        modules: dict[str, dict[str, object]],
+        configured_by: int,
+    ) -> None:
+        now = int(time.time())
+        self._connection.execute(
+            """
+            INSERT INTO guild_bot_settings (
+                guild_id, guild_name, modules_json, configured_by, configured_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                guild_name = excluded.guild_name,
+                modules_json = excluded.modules_json,
+                configured_by = excluded.configured_by,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, guild_name, json.dumps(modules), configured_by, now, now),
+        )
+        self._connection.commit()
+
+    async def replace_user_managed_guilds(self, user_id: int, guilds: list[dict[str, Any]]) -> None:
+        now = int(time.time())
+        self._connection.execute("DELETE FROM user_managed_guilds WHERE user_id = ?", (user_id,))
+        if guilds:
+            self._connection.executemany(
+                """
+                INSERT INTO user_managed_guilds (
+                    user_id, guild_id, guild_name, icon_url, permissions, is_owner, refreshed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        user_id,
+                        int(guild["id"]),
+                        str(guild.get("name") or "Discord Server"),
+                        guild.get("icon_url"),
+                        int(guild.get("permissions", 0)),
+                        int(bool(guild.get("owner"))),
+                        now,
+                    )
+                    for guild in guilds
+                ],
+            )
+        self._connection.commit()
+
+    async def user_managed_guilds(self, user_id: int) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            """
+            SELECT guild_id, guild_name, icon_url, permissions, is_owner, refreshed_at
+            FROM user_managed_guilds
+            WHERE user_id = ?
+            ORDER BY LOWER(guild_name), guild_id
+            """,
+            (user_id,),
+        ).fetchall()
+        return [
+            {
+                "id": int(row[0]),
+                "name": str(row[1]),
+                "icon_url": row[2],
+                "permissions": int(row[3]),
+                "owner": bool(row[4]),
+                "refreshed_at": int(row[5]),
+            }
+            for row in rows
+        ]
 
     async def save_inventory_scan_diagnostic(
         self,

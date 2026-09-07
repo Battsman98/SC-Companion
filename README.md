@@ -97,6 +97,8 @@ python -m uvicorn src.web:app --host 127.0.0.1 --port 8000
 
 Open `http://127.0.0.1:8000/`.
 
+Discord server owners and users with **Manage Server** permission can use the website's **Bot Management** tab to invite the hosted bot, enable feature modules, and assign their command channels. See `docs/multi-server-management.md` for setup, security, and operational details.
+
 To link website permissions to Discord, create an OAuth2 redirect for the Discord application and set:
 
 ```env

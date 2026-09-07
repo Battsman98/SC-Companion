@@ -27,6 +27,7 @@ const outputs = {
   rsiImportHealth: document.querySelector("#rsiImportHealthOutput"),
   intel: document.querySelector("#intelOutput"),
   warbonds: document.querySelector("#warbondOutput"),
+  botManagement: document.querySelector("#botManagementOutput"),
 };
 
 const appShell = document.querySelector(".app-shell");
@@ -70,6 +71,7 @@ const mfdThemes = {
   timers: { theme: "misc", label: "MISC INDUSTRIAL" },
   intel: { theme: "aegis-intel", label: "AEGIS DYNAMICS INTELLIGENCE" },
   admin: { theme: "security", label: "SECURITY AUDIT" },
+  "bot-management": { theme: "security", label: "DISCORD BOT CONTROL" },
 };
 
 function activateTab(tabId) {
@@ -90,6 +92,7 @@ function activateTab(tabId) {
     void loadWarbonds();
   }
   if (tabId === "intel") void loadIntel();
+  if (tabId === "bot-management") void loadManageableGuilds();
 }
 
 document.querySelectorAll(".tabs button").forEach((button) => {
@@ -213,6 +216,8 @@ document.querySelector("[data-action-button='clearExec']").addEventListener("cli
 });
 
 document.querySelector("[data-action-button='refreshAudit']").addEventListener("click", loadAudit);
+document.querySelector("[data-action-button='refreshBotManagement']")?.addEventListener("click", loadManageableGuilds);
+document.querySelector("#managedGuildSelect")?.addEventListener("change", (event) => loadGuildBotConfiguration(event.target.value));
 document.querySelector("[data-action-button='refreshIntel']")?.addEventListener("click", () => loadIntel(true));
 document.querySelector("[data-action-button='refreshWarbonds']")?.addEventListener("click", () => loadWarbonds(true));
 document.querySelector("#auditActionType")?.addEventListener("change", loadAudit);
@@ -1051,6 +1056,7 @@ async function loadMe() {
     currentUser = await api("/api/me");
     setAdminVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_admin));
     setChangeAdminVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_changes));
+    setBotManagementVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_guilds));
     if (!currentUser.authenticated) {
       userPanel.innerHTML = `<div class="user-row">
         <span>${currentUser.discord_auth_enabled ? "Not signed in" : "Discord OAuth needs setup"}</span>
@@ -1080,7 +1086,103 @@ async function loadMe() {
   } catch (error) {
     setAdminVisibility(false);
     setChangeAdminVisibility(false);
+    setBotManagementVisibility(false);
     userPanel.innerHTML = `<span>${escapeHtml(error.message)}</span>`;
+  }
+}
+
+function setBotManagementVisibility(canManageGuilds) {
+  document.querySelectorAll("[data-bot-management-only]").forEach((element) => element.remove());
+  if (!canManageGuilds) {
+    if (document.querySelector("#bot-management.tab-panel.active")) activateTab("overview");
+    return;
+  }
+  const tabButton = document.querySelector("#botManagementTabTemplate")?.content.firstElementChild.cloneNode(true);
+  const overviewButton = document.querySelector("#botManagementOverviewTemplate")?.content.firstElementChild.cloneNode(true);
+  if (tabButton) {
+    tabButton.addEventListener("click", () => activateTab("bot-management"));
+    document.querySelector(".tabs")?.append(tabButton);
+  }
+  if (overviewButton) {
+    overviewButton.addEventListener("click", () => activateTab("bot-management"));
+    document.querySelector(".overview-options")?.append(overviewButton);
+  }
+}
+
+async function loadManageableGuilds() {
+  const select = document.querySelector("#managedGuildSelect");
+  if (!select || !currentUser.authenticated || !currentUser.can_manage_guilds) return;
+  const selected = select.value;
+  outputs.botManagement.innerHTML = stateMessage("Loading Discord servers...");
+  try {
+    const guilds = await api("/api/bot-management/guilds");
+    select.innerHTML = '<option value="">Choose a server...</option>';
+    guilds.forEach((guild) => {
+      const option = document.createElement("option");
+      option.value = String(guild.id);
+      option.textContent = `${guild.name}${guild.bot_installed ? "" : " — invite required"}`;
+      select.append(option);
+    });
+    if (!guilds.length) {
+      outputs.botManagement.innerHTML = stateMessage("No Discord servers with Manage Server permission were found. Log out and back in if your permissions recently changed.");
+      return;
+    }
+    const next = guilds.some((guild) => String(guild.id) === selected) ? selected : String(guilds[0].id);
+    select.value = next;
+    await loadGuildBotConfiguration(next);
+  } catch (error) {
+    outputs.botManagement.innerHTML = errorMessage(error.message);
+  }
+}
+
+async function loadGuildBotConfiguration(guildId) {
+  if (!guildId) {
+    outputs.botManagement.innerHTML = stateMessage("Choose a Discord server to configure.");
+    return;
+  }
+  outputs.botManagement.innerHTML = stateMessage("Loading bot settings...");
+  try {
+    const config = await api(`/api/bot-management/guilds/${encodeURIComponent(guildId)}`);
+    if (!config.bot_installed) {
+      outputs.botManagement.innerHTML = `<div class="state"><strong>SC Companion is not in ${escapeHtml(config.guild.name)} yet.</strong><p>Invite the bot, approve the requested permissions, then return here and choose Refresh.</p>${config.invite_url ? `<a class="button-link" href="${escapeAttribute(config.invite_url)}" target="_blank" rel="noopener">Invite Bot</a>` : ""}</div>`;
+      return;
+    }
+    const channelOptions = (selected) => [
+      '<option value="">Any channel</option>',
+      ...config.channels.map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
+    ].join("");
+    outputs.botManagement.innerHTML = `<form data-bot-management-form data-guild-id="${config.guild.id}">
+      <div class="bot-module-list">
+        ${config.modules.map((module) => `<div class="bot-module-row" data-module-key="${escapeAttribute(module.key)}">
+          <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></label>
+          <label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>
+        </div>`).join("")}
+      </div>
+      <div class="bot-management-actions"><button type="submit">Save Bot Settings</button><span data-bot-management-status>${config.configured ? "Settings loaded." : "Choose modules, then save to complete setup."}</span></div>
+    </form>`;
+    outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
+  } catch (error) {
+    outputs.botManagement.innerHTML = errorMessage(error.message);
+  }
+}
+
+async function saveGuildBotConfiguration(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = form.querySelector("[data-bot-management-status]");
+  const modules = {};
+  form.querySelectorAll("[data-module-key]").forEach((row) => {
+    modules[row.dataset.moduleKey] = {
+      enabled: row.querySelector("[data-module-enabled]").checked,
+      channel_id: row.querySelector("[data-module-channel]").value || null,
+    };
+  });
+  status.textContent = "Saving...";
+  try {
+    await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: { modules } });
+    status.textContent = "Bot settings saved.";
+  } catch (error) {
+    status.textContent = error.message;
   }
 }
 

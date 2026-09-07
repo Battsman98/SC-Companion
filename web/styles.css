@@ -458,6 +458,66 @@ button:hover, .button-link:hover, .tabs button.active {
   color: var(--muted);
 }
 
+.bot-management-server-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+  margin: 8px 0 18px;
+}
+
+.bot-module-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bot-module-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr);
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+}
+
+.bot-module-copy {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.bot-module-copy input {
+  width: 20px;
+  min-height: 20px;
+  margin-top: 2px;
+}
+
+.bot-module-copy strong,
+.bot-module-copy small {
+  display: block;
+}
+
+.bot-module-copy small {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.bot-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+@media (max-width: 680px) {
+  .bot-management-server-row,
+  .bot-module-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .app-shell.overview-mode {
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
