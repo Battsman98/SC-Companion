@@ -38,6 +38,7 @@ class Settings:
     public_discord_client_id: str = ""
     discord_support_guild_id: int | None = None
     approval_authority: bool = True
+    runtime_profile: str = "peep"
 
     @classmethod
     def from_env(cls, load_env_file: bool = True, require_discord_token: bool = True) -> "Settings":
@@ -82,6 +83,10 @@ class Settings:
             if user_id.strip()
         )
 
+        runtime_profile = os.getenv("BOT_RUNTIME_PROFILE", "peep").strip().casefold()
+        if runtime_profile not in {"peep", "public"}:
+            raise RuntimeError("BOT_RUNTIME_PROFILE must be either 'peep' or 'public'.")
+
         return cls(
             discord_token=discord_token,
             discord_client_id=discord_client_id,
@@ -120,6 +125,7 @@ class Settings:
             discord_support_guild_id=int(support_guild_id) if support_guild_id else None,
             approval_authority=os.getenv("BOT_APPROVAL_AUTHORITY", "true").strip().casefold()
             not in {"0", "false", "no", "off"},
+            runtime_profile=runtime_profile,
         )
 
 

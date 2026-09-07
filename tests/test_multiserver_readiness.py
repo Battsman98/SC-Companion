@@ -165,6 +165,14 @@ def test_peep_approval_sync_runs_once_per_minute() -> None:
     assert "asyncio.sleep(60)" in source
 
 
+def test_runtime_profiles_split_private_and_public_commands() -> None:
+    source = inspect.getsource(GameAssistBot.setup_hook)
+    assert 'runtime_profile == "peep"' in source
+    assert "Clear legacy global game commands" in source
+    assert "self.tree.add_command(admin_group, guild=guild)" in source
+    assert "for command in public_commands" in source
+
+
 async def _exercise_review_queue_and_server_analytics(tmp_path) -> None:
     cache = await SQLiteCache.create(str(tmp_path / "readiness.sqlite3"))
     review_id = await cache.submit_review_request(

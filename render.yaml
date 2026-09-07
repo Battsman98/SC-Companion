@@ -181,6 +181,8 @@ services:
         sync: false
       - key: BOT_APPROVAL_AUTHORITY
         value: "false"
+      - key: BOT_RUNTIME_PROFILE
+        value: public
       - key: UEX_API_TOKEN
         sync: false
       - key: DISCORD_GUILD_ID

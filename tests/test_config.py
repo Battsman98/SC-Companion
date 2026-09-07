@@ -18,6 +18,20 @@ def test_settings_can_skip_discord_token_for_web(monkeypatch: pytest.MonkeyPatch
     assert settings.discord_token == ""
 
 
+def test_public_runtime_profile_is_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("BOT_RUNTIME_PROFILE", "public")
+    settings = Settings.from_env(load_env_file=False)
+    assert settings.runtime_profile == "public"
+
+
+def test_invalid_runtime_profile_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("BOT_RUNTIME_PROFILE", "both")
+    with pytest.raises(RuntimeError, match="BOT_RUNTIME_PROFILE"):
+        Settings.from_env(load_env_file=False)
+
+
 def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     monkeypatch.setenv("DISCORD_GUILD_ID", "123")

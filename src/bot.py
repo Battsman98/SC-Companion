@@ -794,28 +794,34 @@ class GameAssistBot(commands.Bot):
         )
 
     async def setup_hook(self) -> None:
-        self.add_view(CZTimerDashboardView())
-        self.add_view(MembershipApplicationPanelView())
-        if self.settings.approval_authority:
+        if self.settings.runtime_profile == "public":
+            self.add_view(CZTimerDashboardView())
+            self.add_view(FirstRunSetupView())
+        else:
+            self.add_view(MembershipApplicationPanelView())
             self.add_view(MembershipReviewView())
-        self.add_view(FirstRunSetupView())
-        self.tree.add_command(ship_command)
-        self.tree.add_command(commodity_command)
-        self.tree.add_command(mining_command)
-        self.tree.add_command(industry_group)
-        self.tree.add_command(miningadd_command)
-        self.tree.add_command(blueprint_command)
-        self.tree.add_command(my_blueprints_command)
-        self.tree.add_command(mission_command)
-        self.tree.add_command(wikelo_command)
-        self.tree.add_command(item_group)
-        self.tree.add_command(loot_group)
-        self.tree.add_command(inventory_group)
-        self.tree.add_command(exec_command)
-        self.tree.add_command(execset_command)
-        self.tree.add_command(execclear_command)
-        self.tree.add_command(cztimer_command)
-        self.tree.add_command(trade_group)
+        public_commands = (
+            ship_command, commodity_command, mining_command, industry_group,
+            miningadd_command, blueprint_command, my_blueprints_command,
+            mission_command, wikelo_command, item_group, loot_group,
+            inventory_group, exec_command, execset_command, execclear_command,
+            cztimer_command, trade_group,
+        )
+
+        if self.settings.runtime_profile == "peep":
+            # Clear legacy global game commands from the private Peep application.
+            await self.tree.sync()
+            if not self.settings.discord_guild_id:
+                raise RuntimeError("Peep requires DISCORD_GUILD_ID for private command registration.")
+            guild = discord.Object(id=self.settings.discord_guild_id)
+            self.tree.add_command(admin_group, guild=guild)
+            self.tree.add_command(audit_group, guild=guild)
+            await self.tree.sync(guild=guild)
+            logging.info("Synced Peep admin commands to guild %s", self.settings.discord_guild_id)
+            return
+
+        for command in public_commands:
+            self.tree.add_command(command)
         self.tree.add_command(admin_group)
 
         # Primary-community maintenance commands are deliberately excluded
@@ -850,6 +856,24 @@ class GameAssistBot(commands.Bot):
                 f"publish About panel in {guild.id}", lambda guild=guild: self.ensure_about_panel(guild)
             )
         if self._commands_reference_synced:
+            return
+
+        if self.settings.runtime_profile == "peep":
+            await self._run_startup_step("create Bot Manager role", self.ensure_bot_manager_role)
+            await self._run_startup_step("provision membership applications", self.ensure_membership_applications)
+            await self._run_startup_step("prepare feedback forum", self.ensure_feedback_forum)
+            await self._run_startup_step("provision loot report reviews", self.ensure_loot_review_channel)
+            await self._run_startup_step("restore pending loot reviews", self.restore_pending_loot_reviews)
+            await self._run_startup_step("assign one-year member roles", self.sync_anniversary_roles)
+            self._commands_reference_synced = True
+            if self._website_deployment_task is None:
+                self._website_deployment_task = asyncio.create_task(self._website_deployment_monitor_loop())
+            if self._anniversary_task is None:
+                self._anniversary_task = asyncio.create_task(self._anniversary_role_loop())
+            if self._guild_sync_task is None:
+                self._guild_sync_task = asyncio.create_task(self._guild_sync_loop())
+            if self._loot_review_task is None:
+                self._loot_review_task = asyncio.create_task(self._loot_review_sync_loop())
             return
 
         await self._run_startup_step("create Bot Manager role", self.ensure_bot_manager_role)
