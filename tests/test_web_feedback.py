@@ -18,7 +18,7 @@ from src.bot import (
     build_visitor_command_example_embeds,
 )
 from src.web import _feedback_embed, _provided_feedback_images
-from src.web import _add_feedback_attachments_to_embed, update_feedback_ticket_status
+from src.web import _add_feedback_attachments_to_embed, feedback_ticket_messages, update_feedback_ticket_status
 from src.web_auth import WebUser
 
 
@@ -111,6 +111,20 @@ def test_reporter_updates_are_forwarded_to_the_main_ticket() -> None:
     assert "feedback_mirror_for_origin_thread(message.channel.id)" in source
     assert 'title=f"Reporter update from {message.author.display_name}"' in source
     assert "self.add_feedback_attachments(embed, message.attachments)" in source
+
+
+def test_website_reads_the_original_mirrored_ticket_conversation() -> None:
+    source = inspect.getsource(feedback_ticket_messages)
+
+    assert "feedback_mirror_for_central_thread(thread_id)" in source
+    assert "conversation_thread_id = origin_thread_id or thread_id" in source
+
+
+def test_edited_ticket_messages_refresh_mirrored_images() -> None:
+    source = inspect.getsource(GameAssistBot.on_raw_message_edit)
+
+    assert "feedback_mirror_for_origin_thread(payload.channel_id)" in source
+    assert "await self.sync_mirrored_feedback_attachments" in source
 
 
 def test_main_about_channel_only_keeps_welcome_and_directory() -> None:

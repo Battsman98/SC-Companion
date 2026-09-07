@@ -1582,10 +1582,19 @@ async def _sync_mirrored_feedback_attachments(starter: dict[str, Any], central_t
         return
     central_starter = await _discord_api("GET", f"/channels/{central_thread_id}/messages/{central_thread_id}")
     embeds = central_starter.get("embeds", [])
-    if not embeds or embeds[0].get("image") or any(field.get("name") == "Attachments" for field in embeds[0].get("fields", [])):
+    if not embeds or embeds[0].get("image"):
         return
     embed = embeds[0]
-    _add_feedback_attachments_to_embed(embed, attachments, embedded_images)
+    has_attachment_field = any(field.get("name") == "Attachments" for field in embed.get("fields", []))
+    if has_attachment_field:
+        image = next((item for item in attachments if str(item.get("content_type") or "").startswith("image/")
+                      or re.search(r"\.(?:png|jpe?g|gif|webp)$", str(item.get("filename") or ""), re.IGNORECASE)), None)
+        if image and image.get("url"):
+            embed["image"] = {"url": str(image["url"])}
+        elif embedded_images:
+            embed["image"] = {"url": embedded_images[0]}
+    else:
+        _add_feedback_attachments_to_embed(embed, attachments, embedded_images)
     await _discord_api("PATCH", f"/channels/{central_thread_id}/messages/{central_thread_id}", json_payload={"embeds": [embed]})
 
 
@@ -1653,7 +1662,10 @@ async def feedback_tickets() -> list[dict[str, Any]]:
 @app.get("/api/admin/feedback/tickets/{thread_id}/messages", dependencies=[Depends(require_bot_admin)])
 async def feedback_ticket_messages(thread_id: int) -> list[dict[str, Any]]:
     await _require_feedback_thread(thread_id)
-    messages = await _discord_api("GET", f"/channels/{thread_id}/messages?limit=50")
+    mirror = await state().cache.feedback_mirror_for_central_thread(thread_id)
+    origin_thread_id = int(mirror.get("origin_thread_id") or 0) if mirror else 0
+    conversation_thread_id = origin_thread_id or thread_id
+    messages = await _discord_api("GET", f"/channels/{conversation_thread_id}/messages?limit=50")
     return [{
         "id": str(item["id"]), "content": str(item.get("content") or ""),
         "author": str(item.get("author", {}).get("global_name") or item.get("author", {}).get("username") or "Unknown"),

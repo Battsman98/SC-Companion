@@ -985,9 +985,16 @@ class GameAssistBot(commands.Bot):
             if not central_starter.embeds:
                 return
             embed = central_starter.embeds[0]
-            if embed.image.url or any(field.name == "Attachments" for field in embed.fields):
+            if embed.image.url:
                 return
-            self.add_feedback_attachments(embed, attachments)
+            has_attachment_field = any(field.name == "Attachments" for field in embed.fields)
+            if has_attachment_field:
+                image = next((item for item in attachments if (item.content_type or "").startswith("image/")
+                              or re.search(r"\.(?:png|jpe?g|gif|webp)$", item.filename, re.IGNORECASE)), None)
+                if image:
+                    embed.set_image(url=image.url)
+            else:
+                self.add_feedback_attachments(embed, attachments)
             if not embed.image.url and embedded_image:
                 embed.set_image(url=embedded_image)
             await central_starter.edit(embed=embed)
@@ -1062,6 +1069,19 @@ class GameAssistBot(commands.Bot):
                 await origin.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
             logging.exception("Could not sync official feedback response from thread %s", message.channel.id)
+
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        if payload.guild_id is None or payload.guild_id == self.settings.discord_guild_id:
+            return
+        mirror = await self.cache.feedback_mirror_for_origin_thread(payload.channel_id)
+        if not mirror:
+            return
+        try:
+            thread = await self.fetch_channel(payload.channel_id)
+            if isinstance(thread, discord.Thread):
+                await self.sync_mirrored_feedback_attachments(thread, int(mirror["central_thread_id"]))
+        except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            logging.exception("Could not sync edited feedback message from thread %s", payload.channel_id)
 
     async def _guild_sync_loop(self) -> None:
         await self.wait_until_ready()
