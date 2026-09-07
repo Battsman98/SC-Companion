@@ -1,25 +1,5 @@
 # Discord Bot Commands
 
-## `/status`
-
-Checks whether the bot is online.
-
-Response visibility: private to the user.
-
-Options: none.
-
-## `/lookup`
-
-Searches general Star Citizen game information.
-
-Response visibility: private to the user.
-
-Options:
-
-| Option | Required | Purpose |
-| --- | --- | --- |
-| `query` | Yes | Ship, item, location, mission, company, or topic to search for. |
-
 ## `/ship`
 
 Looks up a Star Citizen ship or vehicle.

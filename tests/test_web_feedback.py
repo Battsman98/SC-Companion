@@ -91,7 +91,8 @@ def test_main_about_channel_only_keeps_welcome_and_directory() -> None:
     assert 'title.startswith("Discord Bot Commands - ")' in source
 
     directory = build_visitor_channel_directory_embed({"general-chat": 123, "ship-search": 456})
-    assert "<#123>: /lookup, /status" in directory.description
+    assert "/lookup" not in directory.description
+    assert "/status" not in directory.description
     assert "<#456>: /ship" in directory.description
 
 
@@ -115,8 +116,8 @@ def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
     assert VISITOR_CHANNEL_SPECS["general-chat"] == "text"
     assert VISITOR_CHANNEL_SPECS["visitor-lounge"] == "voice"
     assert VISITOR_COMMAND_CHANNELS["ship"] == "ship-search"
-    assert VISITOR_COMMAND_CHANNELS["lookup"] == "general-chat"
-    assert VISITOR_COMMAND_CHANNELS["status"] == "general-chat"
+    assert "lookup" not in VISITOR_COMMAND_CHANNELS
+    assert "status" not in VISITOR_COMMAND_CHANNELS
     assert VISITOR_COMMAND_CHANNELS["trade routing"] == "trade-tools"
     assert VISITOR_COMMAND_CHANNELS["miningadd"] == "mining-tools"
     assert not any(name.startswith("admin") or name.startswith("audit") for name in VISITOR_COMMAND_CHANNELS)
