@@ -1533,8 +1533,16 @@ async def _sync_installed_server_feedback() -> int:
                     thread_id = int(thread["id"])
                     if str(thread.get("name") or "").casefold().startswith("example:"):
                         continue
-                    starter = await _discord_api(
+                    placeholder = await _discord_api(
                         "GET", f"/channels/{thread_id}/messages/{thread_id}", bot_token=public_token
+                    )
+                    messages = await _discord_api(
+                        "GET", f"/channels/{thread_id}/messages?limit=50", bot_token=public_token
+                    )
+                    starter = next(
+                        (item for item in reversed(messages)
+                         if item.get("content") or item.get("attachments") or item.get("embeds")),
+                        placeholder,
                     )
                     existing_mirror = await state().cache.feedback_mirror_for_origin_thread(thread_id)
                     if existing_mirror:
@@ -1546,7 +1554,7 @@ async def _sync_installed_server_feedback() -> int:
                     if author.get("bot"):
                         continue
                     author_name = str(author.get("global_name") or author.get("username") or "Discord user")
-                    description = str(starter.get("content") or "Discord forum ticket")[:4000]
+                    description = _discord_message_description(starter)
                     embed = {
                         "title": f"Mirrored ticket from {guild.get('name') or 'Discord server'}",
                         "description": description,
@@ -1557,7 +1565,14 @@ async def _sync_installed_server_feedback() -> int:
                             "inline": False,
                         }, {"name": "Reported by", "value": author_name[:1024], "inline": True}],
                     }
-                    _add_feedback_attachments_to_embed(embed, starter.get("attachments", []))
+                    all_attachments = [
+                        attachment for message in messages for attachment in message.get("attachments", [])
+                    ]
+                    embedded_images = [
+                        str(image["url"]) for message in messages for item in message.get("embeds", [])
+                        for image in [item.get("image") or item.get("thumbnail")] if image and image.get("url")
+                    ]
+                    _add_feedback_attachments_to_embed(embed, all_attachments, embedded_images)
                     payload: dict[str, Any] = {
                         "name": f"[{guild.get('name') or 'Discord'}] {thread.get('name') or 'Ticket'}"[:100],
                         "message": {"embeds": [embed], "allowed_mentions": {"parse": []}},
@@ -1596,6 +1611,25 @@ def _add_feedback_attachments_to_embed(
         embed.setdefault("fields", []).append({"name": "Attachments", "value": links[:1024], "inline": False})
 
 
+def _discord_message_description(message: dict[str, Any]) -> str:
+    content = str(message.get("content") or "").strip()
+    if content:
+        return content[:4000]
+    sections: list[str] = []
+    for embed in message.get("embeds", []):
+        description = str(embed.get("description") or "").strip()
+        if description:
+            sections.append(description)
+        fields = embed.get("fields", [])
+        sections.extend(
+            f"**{str(field.get('name') or 'Details')}**\n{str(field.get('value') or '').strip()}"
+            for field in fields if str(field.get("value") or "").strip()
+        )
+        if not description and not fields and embed.get("title"):
+            sections.append(str(embed["title"]))
+    return "\n\n".join(sections)[:4000] or "Discord forum ticket"
+
+
 async def _sync_mirrored_feedback_attachments(
     starter: dict[str, Any], central_thread_id: int, origin_bot_token: str
 ) -> None:
@@ -1605,13 +1639,20 @@ async def _sync_mirrored_feedback_attachments(
     attachments = [attachment for message in messages for attachment in message.get("attachments", [])]
     embedded_images = [str(image["url"]) for message in messages for item in message.get("embeds", [])
                        for image in [item.get("image") or item.get("thumbnail")] if image and image.get("url")]
-    if not attachments and not embedded_images:
+    report_message = next(
+        (item for item in reversed(messages)
+         if item.get("content") or item.get("attachments") or item.get("embeds")),
+        None,
+    )
+    if not report_message and not attachments and not embedded_images:
         return
     central_starter = await _discord_api("GET", f"/channels/{central_thread_id}/messages/{central_thread_id}")
     embeds = central_starter.get("embeds", [])
-    if not embeds or embeds[0].get("image"):
+    if not embeds:
         return
     embed = embeds[0]
+    if report_message:
+        embed["description"] = _discord_message_description(report_message)
     has_attachment_field = any(field.get("name") == "Attachments" for field in embed.get("fields", []))
     if has_attachment_field:
         image = next((item for item in attachments if str(item.get("content_type") or "").startswith("image/")

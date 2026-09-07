@@ -17,7 +17,7 @@ from src.bot import (
     build_visitor_channel_directory_embed,
     build_visitor_command_example_embeds,
 )
-from src.web import _feedback_embed, _provided_feedback_images
+from src.web import _discord_message_description, _feedback_embed, _provided_feedback_images
 from src.web import _add_feedback_attachments_to_embed, feedback_ticket_messages, update_feedback_ticket_status
 from src.web_auth import WebUser
 
@@ -105,6 +105,21 @@ def test_mirrored_feedback_displays_image_attachments() -> None:
     assert "[broken-screen.png]" in embed["fields"][-1]["value"]
 
 
+def test_embedded_ticket_fields_become_the_mirrored_description() -> None:
+    description = _discord_message_description({"content": "", "embeds": [{
+        "title": "Issue",
+        "description": "The button did not respond.",
+        "fields": [{"name": "Steps", "value": "Open the panel and click Trade."}],
+    }]})
+
+    assert "The button did not respond." in description
+    assert "**Steps**" in description
+    assert "Open the panel and click Trade." in description
+
+    bot_source = inspect.getsource(GameAssistBot.mirror_feedback_thread)
+    assert "self.feedback_message_description(report_message)" in bot_source
+
+
 def test_bot_copies_mirrored_images_into_peep() -> None:
     mirror_source = inspect.getsource(GameAssistBot.mirror_feedback_thread)
     sync_source = inspect.getsource(GameAssistBot.sync_mirrored_feedback_attachments)
@@ -184,9 +199,20 @@ def test_website_feedback_sync_reads_origins_as_sc_companion() -> None:
     submission_source = inspect.getsource(web.submit_feedback)
     assert "public_token = _public_bot_token()" in sync_source
     assert "bot_token=public_token" in sync_source
+    assert 'f"/channels/{thread_id}/messages?limit=50"' in sync_source
+    assert "_discord_message_description(starter)" in sync_source
+    assert 'embed["description"] = _discord_message_description(report_message)' in inspect.getsource(
+        web._sync_mirrored_feedback_attachments
+    )
     assert "bot_token=_public_bot_token() if origin_thread_id else None" in message_source
     assert "bot_token=_public_bot_token()" in status_source
     assert 'f"Bot {_public_bot_token()}"' in submission_source
+
+
+def test_discord_bot_requests_message_content_for_feedback_mirroring() -> None:
+    source = inspect.getsource(GameAssistBot.__init__)
+
+    assert "intents.message_content = True" in source
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:

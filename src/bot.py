@@ -753,7 +753,10 @@ class MembershipReviewView(discord.ui.View):
 class GameAssistBot(commands.Bot):
     def __init__(self, settings: Settings, cache: SQLiteCache, sources: SourceRegistry) -> None:
         intents = discord.Intents.default()
-        intents.message_content = False
+        # Required to mirror user-authored feedback text and attachments from
+        # SC Companion forums into Peep. Without this privileged intent,
+        # Discord deliberately returns those message fields as empty.
+        intents.message_content = True
         intents.members = True
 
         super().__init__(
@@ -961,6 +964,10 @@ class GameAssistBot(commands.Bot):
         try:
             starter = await thread.fetch_message(thread.id)
             messages = [message async for message in thread.history(limit=50, oldest_first=True)]
+            report_message = next(
+                (message for message in messages if message.content or message.attachments or message.embeds),
+                starter,
+            )
             attachments = [attachment for message in messages for attachment in message.attachments]
             embedded_image = next(
                 (embed.image.url for message in messages for embed in message.embeds if embed.image.url),
@@ -972,12 +979,10 @@ class GameAssistBot(commands.Bot):
                 return
             mirror_embed = discord.Embed(
                 title=f"Mirrored ticket from {thread.guild.name}",
-                description=(starter.content or "Discord forum ticket")[:4000],
+                description=self.feedback_message_description(report_message),
                 color=discord.Color.blurple(),
             )
             mirror_embed.add_field(name="Origin", value=f"[{thread.name}]({thread.jump_url})", inline=False)
-            if starter.embeds:
-                mirror_embed.add_field(name="Original report", value=(starter.embeds[0].description or starter.embeds[0].title or "Embedded report")[:1024], inline=False)
             self.add_feedback_attachments(mirror_embed, attachments)
             mirror_files: list[discord.File] = []
             image_attachment = self.feedback_image_attachment(attachments)
@@ -1007,6 +1012,19 @@ class GameAssistBot(commands.Bot):
             logging.exception("Could not mirror feedback thread %s", thread.id)
 
     @staticmethod
+    def feedback_message_description(message: discord.Message) -> str:
+        if message.content.strip():
+            return message.content.strip()[:4000]
+        sections: list[str] = []
+        for embed in message.embeds:
+            if embed.description:
+                sections.append(embed.description)
+            sections.extend(f"**{field.name}**\n{field.value}" for field in embed.fields if field.value)
+            if not embed.description and not embed.fields and embed.title:
+                sections.append(embed.title)
+        return "\n\n".join(sections)[:4000] or "Discord forum ticket"
+
+    @staticmethod
     def feedback_image_attachment(attachments: list[discord.Attachment]) -> discord.Attachment | None:
         return next((item for item in attachments if (item.content_type or "").startswith("image/")
                      or re.search(r"\.(?:png|jpe?g|gif|webp)$", item.filename, re.IGNORECASE)), None)
@@ -1026,7 +1044,11 @@ class GameAssistBot(commands.Bot):
             messages = [message async for message in thread.history(limit=50, oldest_first=True)]
             attachments = [attachment for message in messages for attachment in message.attachments]
             embedded_image = next((embed.image.url for message in messages for embed in message.embeds if embed.image.url), None)
-            if not attachments and not embedded_image:
+            report_message = next(
+                (message for message in messages if message.content or message.attachments or message.embeds),
+                None,
+            )
+            if not report_message and not attachments and not embedded_image:
                 return
             central = await self.fetch_channel(central_thread_id)
             if not isinstance(central, discord.Thread):
@@ -1035,8 +1057,8 @@ class GameAssistBot(commands.Bot):
             if not central_starter.embeds:
                 return
             embed = central_starter.embeds[0]
-            if embed.image.url and str(embed.image.url).startswith("attachment://"):
-                return
+            if report_message:
+                embed.description = self.feedback_message_description(report_message)
             has_attachment_field = any(field.name == "Attachments" for field in embed.fields)
             if has_attachment_field:
                 image = self.feedback_image_attachment(attachments)
