@@ -154,8 +154,6 @@ ANNIVERSARY_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 APPLICATION_REVIEW_CHANNEL_NAME = "membership-application-reviews"
 APPLICATION_PENDING_CACHE_PREFIX = "discord:membership-application-pending"
 VISITOR_COMMAND_CHANNELS = {
-    "status": "general-chat",
-    "lookup": "general-chat",
     "ship": "ship-search",
     "commodity": "trade-tools",
     "trade listing": "trade-tools",
@@ -799,8 +797,6 @@ class GameAssistBot(commands.Bot):
         self.add_view(MembershipApplicationPanelView())
         self.add_view(MembershipReviewView())
         self.add_view(FirstRunSetupView())
-        self.tree.add_command(status_command)
-        self.tree.add_command(lookup_command)
         self.tree.add_command(ship_command)
         self.tree.add_command(commodity_command)
         self.tree.add_command(mining_command)
@@ -3507,11 +3503,6 @@ def _truncate_audit_value(value: object) -> str:
     return text if len(text) <= 1024 else f"{text[:1021].rstrip()}..."
 
 
-@app_commands.command(name="status", description="Check whether the assistance bot is online.")
-async def status_command(interaction: discord.Interaction) -> None:
-    await interaction.response.send_message("Online and ready.", ephemeral=True)
-
-
 SUPPORT_URL = "https://square.link/u/g43WPEyN?src=embed"
 SUPPORT_QR_URL = "https://sccompanion.org/assets/media/support-square-qr.png"
 
@@ -3575,12 +3566,6 @@ def build_guild_command_guide_embed(module_keys: list[str]) -> discord.Embed:
         )
     embed.set_footer(text="Examples are updated automatically from this server's Bot Management settings")
     return embed
-
-
-@app_commands.command(name="lookup", description="Search Star Citizen game information.")
-@app_commands.describe(query="The ship, item, location, mission, company, or topic to search for.")
-async def lookup_command(interaction: discord.Interaction, query: str) -> None:
-    await send_lookup(interaction, query)
 
 
 @app_commands.command(name="ship", description="Look up a Star Citizen ship or vehicle.")
@@ -6321,15 +6306,6 @@ def _visitor_example_embed(
 def build_visitor_command_example_embeds() -> dict[str, discord.Embed]:
     """Return one durable, realistic response example for every Visitor command channel."""
     return {
-        "general-chat": _visitor_example_embed(
-            "Example General Commands",
-            "/lookup query: Port Tressler",
-            "Use `/lookup` for a concise description and source link. Use `/status` to check whether the bot and its data providers are ready.",
-            (
-                ("Lookup example", "Port Tressler · Space station above microTech in the Stanton system"),
-                ("Status example", "Bot online · Game data ready · Cached results available"),
-            ),
-        ),
         "ship-search": _visitor_example_embed(
             "Example /ship Response",
             "/ship name: Carrack",
@@ -6709,29 +6685,6 @@ def _format_cz_timer_value(timer: object, duration: int) -> str:
 def _format_duration(seconds: int) -> str:
     minutes = seconds // 60
     return f"{minutes} min"
-
-
-async def send_lookup(interaction: discord.Interaction, query: str) -> None:
-    bot = interaction.client
-    if not isinstance(bot, GameAssistBot):
-        await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
-        return
-
-    await interaction.response.defer(thinking=True, ephemeral=True)
-    result = await bot.sources.lookup(query)
-
-    if result is None:
-        await interaction.followup.send(f"No result found for `{query}`.", ephemeral=True)
-        return
-
-    embed = discord.Embed(
-        title=result.title,
-        description=result.summary,
-        url=result.url,
-        color=discord.Color.blurple(),
-    )
-    embed.set_footer(text=f"Source: {result.source_name}")
-    await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 def build_ship_embed(result: ShipResult) -> discord.Embed:
