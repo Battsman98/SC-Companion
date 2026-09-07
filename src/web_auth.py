@@ -25,6 +25,15 @@ BOT_MANAGER_ROLE_NAME = "Bot Manager"
 
 
 @dataclass(frozen=True)
+class ManagedGuild:
+    id: int
+    name: str
+    icon_url: str | None
+    permissions: int
+    owner: bool
+
+
+@dataclass(frozen=True)
 class WebUser:
     id: int
     username: str
@@ -34,6 +43,7 @@ class WebUser:
     guild_permissions: int
     can_manage_changes: bool
     can_manage_admin: bool
+    managed_guilds: tuple[ManagedGuild, ...] = ()
 
 
 def discord_auth_configured(settings: Settings) -> bool:
@@ -55,7 +65,7 @@ def build_discord_authorize_url(settings: Settings, state: str) -> str:
         "client_id": settings.discord_client_id,
         "redirect_uri": settings.discord_redirect_uri,
         "response_type": "code",
-        "scope": "identify guilds.join",
+        "scope": "identify guilds guilds.join",
         "state": state,
     }
     query = "&".join(f"{key}={_quote(value)}" for key, value in params.items())
@@ -91,6 +101,14 @@ async def fetch_web_user(settings: Settings, access_token: str) -> WebUser:
             if response.status >= 400:
                 raise HTTPException(status_code=401, detail="Could not read Discord user.")
 
+        async with session.get(
+            f"{DISCORD_API_BASE_URL}/users/@me/guilds",
+            headers={"Authorization": f"Bearer {access_token}"},
+        ) as response:
+            guild_payload = await response.json()
+            if response.status >= 400 or not isinstance(guild_payload, list):
+                raise HTTPException(status_code=401, detail="Could not read your Discord servers.")
+
         user_id = int(user_payload["id"])
         member_payload = await _fetch_or_join_guild_member(session, settings, user_id, access_token)
         role_ids = tuple(int(role_id) for role_id in member_payload.get("roles", []))
@@ -115,6 +133,17 @@ async def fetch_web_user(settings: Settings, access_token: str) -> WebUser:
         guild_permissions=permissions,
         can_manage_changes=is_bot_manager or can_manage_change_commands(settings, role_ids, permissions),
         can_manage_admin=is_bot_manager or can_manage_admin_commands(settings, user_id, role_ids, permissions),
+        managed_guilds=tuple(
+            ManagedGuild(
+                id=int(guild["id"]),
+                name=str(guild.get("name") or "Discord Server"),
+                icon_url=_guild_icon_url(guild),
+                permissions=int(guild.get("permissions", "0")),
+                owner=bool(guild.get("owner")),
+            )
+            for guild in guild_payload
+            if bool(guild.get("owner")) or has_manage_guild(int(guild.get("permissions", "0")))
+        ),
     )
 
 
@@ -334,6 +363,14 @@ def _avatar_url(user_payload: dict[str, Any]) -> str | None:
         return None
     extension = "gif" if str(avatar).startswith("a_") else "png"
     return f"https://cdn.discordapp.com/avatars/{user_payload['id']}/{avatar}.{extension}?size=128"
+
+
+def _guild_icon_url(guild_payload: dict[str, Any]) -> str | None:
+    icon = guild_payload.get("icon")
+    if not icon:
+        return None
+    extension = "gif" if str(icon).startswith("a_") else "png"
+    return f"https://cdn.discordapp.com/icons/{guild_payload['id']}/{icon}.{extension}?size=128"
 
 
 def _sign(payload_text: str, secret: str) -> str:

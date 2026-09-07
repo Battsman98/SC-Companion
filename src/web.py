@@ -39,6 +39,7 @@ from src.shared import (
 )
 from src.cache import AUDIT_ACTION_TYPES, SCANNER_DIAGNOSTIC_RETENTION_SECONDS, SQLiteCache
 from src.config import Settings
+from src.guild_config import BOT_MODULES, default_module_settings, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.sources.base import ItemLocatorResult
 from src.sources.citizen_updates import CitizenUpdatesSource
@@ -355,6 +356,15 @@ class InventoryTextImportRequest(BaseModel):
 
 class LanguageMeasurementRequest(BaseModel):
     language: str = Field(min_length=2, max_length=3, pattern="^[A-Za-z]{2,3}$")
+
+
+class GuildModuleRequest(BaseModel):
+    enabled: bool = False
+    channel_id: int | None = None
+
+
+class GuildBotSettingsRequest(BaseModel):
+    modules: dict[str, GuildModuleRequest]
 
 
 async def _warm_inventory_scanner(sources: SourceRegistry) -> None:
@@ -855,7 +865,177 @@ async def me(request: Request) -> dict[str, Any]:
         "guild_permissions": user.guild_permissions,
         "can_manage_changes": user.can_manage_changes,
         "can_manage_admin": user.can_manage_admin,
+        "can_manage_guilds": bool(await state().cache.user_managed_guilds(user.id)),
     }
+
+
+async def _managed_guild(user: Any, guild_id: int) -> dict[str, Any]:
+    guilds = await state().cache.user_managed_guilds(user.id)
+    guild = next((item for item in guilds if item["id"] == guild_id), None)
+    if guild is None:
+        raise HTTPException(status_code=403, detail="You need Manage Server permission for this Discord server.")
+    return guild
+
+
+async def _discord_bot_guild(guild_id: int) -> dict[str, Any] | None:
+    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}", headers=headers) as response:
+            if response.status in {403, 404}:
+                return None
+            payload = await response.json()
+            if response.status >= 400:
+                raise HTTPException(status_code=503, detail="Discord server details are temporarily unavailable.")
+            return payload
+
+
+async def _discord_bot_guild_ids() -> set[int]:
+    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
+    guild_ids: set[int] = set()
+    after: int | None = None
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        while True:
+            suffix = f"&after={after}" if after else ""
+            async with session.get(
+                f"https://discord.com/api/v10/users/@me/guilds?limit=200{suffix}", headers=headers
+            ) as response:
+                payload = await response.json()
+                if response.status >= 400 or not isinstance(payload, list):
+                    raise HTTPException(status_code=503, detail="Discord server availability is temporarily unavailable.")
+            page_ids = [int(guild["id"]) for guild in payload if guild.get("id")]
+            guild_ids.update(page_ids)
+            if len(payload) < 200 or not page_ids:
+                return guild_ids
+            after = page_ids[-1]
+
+
+async def _discord_guild_channels(guild_id: int) -> list[dict[str, Any]]:
+    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers=headers) as response:
+            payload = await response.json()
+            if response.status >= 400 or not isinstance(payload, list):
+                raise HTTPException(status_code=503, detail="Discord channels are temporarily unavailable.")
+            return [
+                {"id": int(channel["id"]), "name": str(channel.get("name") or "channel")}
+                for channel in payload
+                if int(channel.get("type", -1)) in {0, 5, 15, 16}
+            ]
+
+
+async def _verify_live_guild_manager(guild_id: int, user_id: int) -> None:
+    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}", headers=headers) as response:
+            guild = await response.json()
+            if response.status >= 400:
+                raise HTTPException(status_code=409, detail="Invite the bot to this server before saving settings.")
+        if int(guild.get("owner_id", 0)) == user_id:
+            return
+        async with session.get(
+            f"https://discord.com/api/v10/guilds/{guild_id}/members/{user_id}", headers=headers
+        ) as response:
+            member = await response.json()
+            if response.status >= 400:
+                raise HTTPException(status_code=403, detail="Your current server permissions could not be verified.")
+        async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}/roles", headers=headers) as response:
+            roles = await response.json()
+            if response.status >= 400 or not isinstance(roles, list):
+                raise HTTPException(status_code=503, detail="Discord role permissions are temporarily unavailable.")
+    role_ids = {guild_id, *(int(role_id) for role_id in member.get("roles", []))}
+    permissions = 0
+    for role in roles:
+        if int(role.get("id", 0)) in role_ids:
+            permissions |= int(role.get("permissions", "0"))
+    if not permissions & (0x8 | 0x20):
+        raise HTTPException(status_code=403, detail="You no longer have Manage Server permission for this server.")
+
+
+def _bot_invite_url(guild_id: int) -> str:
+    client_id = state().settings.discord_client_id
+    if not client_id:
+        return ""
+    # View/send messages, embed links, attach files, read history, use commands,
+    # manage messages/threads, and create public threads. Server owners retain
+    # control and can grant additional channel-management access separately.
+    permissions = 397821234176
+    return (
+        "https://discord.com/oauth2/authorize"
+        f"?client_id={client_id}&scope=bot%20applications.commands"
+        f"&permissions={permissions}&guild_id={guild_id}&disable_guild_select=true"
+    )
+
+
+@app.get("/api/bot-management/guilds")
+async def manageable_bot_guilds(user=Depends(require_user)) -> list[dict[str, Any]]:
+    configured_guilds = []
+    bot_guild_ids = await _discord_bot_guild_ids()
+    for guild in await state().cache.user_managed_guilds(user.id):
+        configured_guilds.append({
+            "id": guild["id"],
+            "name": guild["name"],
+            "icon_url": guild["icon_url"],
+            "bot_installed": guild["id"] in bot_guild_ids,
+            "invite_url": _bot_invite_url(guild["id"]),
+        })
+    return configured_guilds
+
+
+@app.get("/api/bot-management/guilds/{guild_id}")
+async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> dict[str, Any]:
+    guild = await _managed_guild(user, guild_id)
+    bot_guild = await _discord_bot_guild(guild_id)
+    stored = await state().cache.guild_bot_settings(guild_id)
+    enabled_default = guild_id == state().settings.discord_guild_id and stored is None
+    modules = normalize_module_settings(stored.get("modules") if stored else None, enabled_default=enabled_default)
+    return {
+        "guild": {"id": guild["id"], "name": guild["name"], "icon_url": guild["icon_url"]},
+        "bot_installed": bot_guild is not None,
+        "invite_url": _bot_invite_url(guild_id),
+        "configured": stored is not None,
+        "modules": [
+            {
+                "key": key,
+                "label": definition["label"],
+                "description": definition["description"],
+                **modules[key],
+            }
+            for key, definition in BOT_MODULES.items()
+        ],
+        "channels": await _discord_guild_channels(guild_id) if bot_guild is not None else [],
+        "updated_at": stored.get("updated_at") if stored else None,
+    }
+
+
+@app.put("/api/bot-management/guilds/{guild_id}")
+async def save_guild_bot_configuration(
+    guild_id: int,
+    payload: GuildBotSettingsRequest,
+    user=Depends(require_user),
+) -> dict[str, Any]:
+    guild = await _managed_guild(user, guild_id)
+    await _verify_live_guild_manager(guild_id, user.id)
+    channels = await _discord_guild_channels(guild_id)
+    channel_ids = {channel["id"] for channel in channels}
+    unknown_modules = set(payload.modules).difference(BOT_MODULES)
+    if unknown_modules:
+        raise HTTPException(status_code=422, detail="One or more bot modules are not recognized.")
+    modules = normalize_module_settings(
+        {key: value.model_dump() for key, value in payload.modules.items()},
+        enabled_default=False,
+    )
+    if any(item["channel_id"] and item["channel_id"] not in channel_ids for item in modules.values()):
+        raise HTTPException(status_code=422, detail="One or more selected channels are unavailable.")
+    await state().cache.save_guild_bot_settings(guild_id, guild["name"], modules, user.id)
+    await state().cache.add_audit_event(
+        "Bot Configuration Updated",
+        {"Server": guild["name"], "Server ID": str(guild_id), "Updated By": user.username},
+    )
+    return {"status": "saved", "guild_id": guild_id, "modules": modules}
 
 
 def _feedback_embed(
@@ -1077,6 +1257,10 @@ async def discord_callback(
         raise HTTPException(status_code=400, detail="Discord login state did not match.")
     token_payload = await exchange_discord_code(settings, code)
     user = await fetch_web_user(settings, str(token_payload.get("access_token")))
+    await state().cache.replace_user_managed_guilds(
+        user.id,
+        [asdict(guild) for guild in user.managed_guilds],
+    )
     secret = session_secret(settings)
     if not secret:
         raise HTTPException(status_code=503, detail="WEB_SESSION_SECRET or DISCORD_CLIENT_SECRET is required.")

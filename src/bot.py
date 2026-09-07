@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.guild_config import module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.sources.base import (
     BlueprintIngredient,
@@ -397,8 +398,8 @@ class GameAssistCommandTree(app_commands.CommandTree):
         if interaction.type == discord.InteractionType.autocomplete:
             return True
 
-        if bot.settings.discord_guild_id and interaction.guild_id != bot.settings.discord_guild_id:
-            await interaction.response.send_message("This bot is not available in this server.", ephemeral=True)
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Use this command inside a Discord server.", ephemeral=True)
             return False
 
         allowed, retry_after = bot.command_limiter.allow(str(interaction.user.id))
@@ -409,7 +410,36 @@ class GameAssistCommandTree(app_commands.CommandTree):
             return False
 
         command_name = _interaction_command_name(interaction)
-        allowed_channel_ids = bot.allowed_command_channel_ids(command_name)
+        configured = await bot.cache.guild_bot_settings(interaction.guild_id)
+        is_primary_guild = interaction.guild_id == bot.settings.discord_guild_id
+        if configured is None and not is_primary_guild:
+            await interaction.response.send_message(
+                "This server has not configured SC Companion yet. A server manager can finish setup at sccompanion.org.",
+                ephemeral=True,
+            )
+            return False
+
+        allowed_channel_ids: set[int] = set()
+        module_key = module_for_command(command_name)
+        if configured is not None and not is_primary_guild and module_key is None and command_name != "status":
+            await interaction.response.send_message(
+                f"`/{command_name}` is not available in the shared bot yet.",
+                ephemeral=True,
+            )
+            return False
+        if configured is not None and module_key:
+            modules = normalize_module_settings(configured.get("modules"))
+            module = modules[module_key]
+            if not module["enabled"]:
+                await interaction.response.send_message(
+                    f"`/{command_name}` is disabled for this server. A server manager can enable it at sccompanion.org.",
+                    ephemeral=True,
+                )
+                return False
+            if module["channel_id"]:
+                allowed_channel_ids.add(int(module["channel_id"]))
+        elif is_primary_guild:
+            allowed_channel_ids = bot.allowed_command_channel_ids(command_name)
         if allowed_channel_ids and interaction.channel_id not in allowed_channel_ids:
             allowed_channel_id = min(allowed_channel_ids)
             await interaction.response.send_message(
@@ -668,14 +698,13 @@ class GameAssistBot(commands.Bot):
         self.tree.add_command(admin_group)
         self.tree.add_command(audit_group)
 
+        await self.tree.sync()
+        logging.info("Synced global slash commands")
         if self.settings.discord_guild_id:
             guild = discord.Object(id=self.settings.discord_guild_id)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
-        else:
-            await self.tree.sync()
-            logging.info("Synced global slash commands")
 
     async def on_ready(self) -> None:
         if self._commands_reference_synced:

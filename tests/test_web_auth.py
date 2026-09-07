@@ -7,7 +7,7 @@ from src import web
 from src.config import Settings
 from dataclasses import replace
 
-from src.web_auth import WebUser, build_discord_authorize_url, can_manage_admin_commands, can_manage_change_commands, decode_session, encode_session, human_verification_configured
+from src.web_auth import ManagedGuild, WebUser, build_discord_authorize_url, can_manage_admin_commands, can_manage_change_commands, decode_session, encode_session, human_verification_configured
 
 
 def settings(
@@ -68,12 +68,14 @@ def test_session_round_trip() -> None:
         guild_permissions=0x20,
         can_manage_changes=True,
         can_manage_admin=False,
+        managed_guilds=(ManagedGuild(id=123, name="Test Server", icon_url=None, permissions=0x20, owner=False),),
     )
 
     encoded = encode_session(user, "secret")
     decoded = decode_session(encoded, "secret")
 
-    assert decoded == user
+    assert decoded == replace(user, managed_guilds=())
+    assert "Test Server" not in encoded
     assert decode_session(encoded, "wrong-secret") is None
 
 
@@ -81,6 +83,7 @@ def test_discord_authorization_can_join_new_visitors() -> None:
     url = build_discord_authorize_url(settings(), "state-token")
 
     assert "guilds.join" in url
+    assert "guilds" in url
     assert "identify" in url
     assert "state=state-token" in url
 

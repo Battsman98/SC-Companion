@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Star Citizen Companion</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20260801-mining-permissions-v3-wikelo-search-v2">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260801-mining-permissions-v3-multi-server-v1">
   <link rel="stylesheet" href="/assets/hotfix-overlay.css?v=20260815-scanner-errors">
 </head>
 <body data-mfd-theme="overview">
@@ -663,6 +663,24 @@
       </article>
     </section>
 
+    <section id="bot-management" class="tab-panel">
+      <div class="section-heading">
+        <p class="guide-kicker">DISCORD CONTROL PANEL</p>
+        <h2>Bot Management</h2>
+        <p>Invite SC Companion to a Discord server you manage, choose the tools available there, and optionally route each tool to a specific channel.</p>
+      </div>
+      <article class="tool-card bot-management-card">
+        <label for="managedGuildSelect">Discord server</label>
+        <div class="bot-management-server-row">
+          <select id="managedGuildSelect">
+            <option value="">Choose a server...</option>
+          </select>
+          <button type="button" data-action-button="refreshBotManagement">Refresh</button>
+        </div>
+        <div id="botManagementOutput" class="results"></div>
+      </article>
+    </section>
+
     <section id="admin" class="tab-panel">
         <article class="panel">
           <div class="panel-heading">
@@ -748,6 +766,12 @@
   <template id="auditTabTemplate">
     <button data-tab="admin" data-admin-only>Audit</button>
   </template>
+  <template id="botManagementTabTemplate">
+    <button data-tab="bot-management" data-bot-management-only>Bot Management</button>
+  </template>
+  <template id="botManagementOverviewTemplate">
+    <button type="button" data-overview-tab="bot-management" data-bot-management-only><span>Bot Management</span><small>Install and configure the bot for your server</small></button>
+  </template>
   <template id="auditOverviewTemplate">
     <button type="button" data-overview-tab="admin" data-admin-only><span>Audit</span><small>Review recent audit events</small></button>
   </template>
@@ -802,6 +826,6 @@
   </div>
 
   <script src="/assets/hotfix-overlay.js?v=20260815-scanner-errors" defer></script>
-  <script src="/assets/app.js?v=20260828-scanner-distinct-queue" defer></script>
+  <script src="/assets/app.js?v=20260906-multi-server-panel-v1" defer></script>
 </body>
 </html>
