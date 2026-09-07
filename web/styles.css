@@ -558,6 +558,18 @@ button:hover, .button-link:hover, .tabs button.active {
   margin: 0.15rem 0.2rem 0 0;
 }
 
+.bot-detected-routes {
+  display: block;
+  margin-top: 0.55rem;
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--accent);
+}
+
+.bot-detected-routes span {
+  display: block;
+  margin-top: 0.2rem;
+}
+
 .bot-module-copy small {
   color: var(--muted);
   margin-top: 3px;
