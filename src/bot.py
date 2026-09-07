@@ -787,6 +787,8 @@ class GameAssistBot(commands.Bot):
         self._anniversary_task: asyncio.Task | None = None
         self._trade_store_sync_task: asyncio.Task | None = None
         self._guild_sync_task: asyncio.Task | None = None
+        self._shared_setup_locks: dict[int, asyncio.Lock] = {}
+        self._shared_recovery_tasks: dict[int, asyncio.Task] = {}
         self._hub_last_recovery_monotonic = 0.0
         self._hub_incident_count = 0
         self._hub_pending_incident: tuple[str, discord.AuditLogAction | None, int | None] | None = None
@@ -953,7 +955,10 @@ class GameAssistBot(commands.Bot):
         if guild.me is None or not guild.me.guild_permissions.manage_channels:
             logging.warning("Manage Channels is required to create the About page in guild %s", guild.id)
             return
-        channel = discord.utils.find(lambda item: item.name == "about-the-bot", guild.text_channels)
+        tracked_channel_id = await self.cache.get(f"guild:{guild.id}:about-channel")
+        channel = guild.get_channel(tracked_channel_id) if isinstance(tracked_channel_id, int) else None
+        if not isinstance(channel, discord.TextChannel):
+            channel = discord.utils.find(lambda item: item.name == "about-the-bot", guild.text_channels)
         if channel is None:
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False),
@@ -962,6 +967,8 @@ class GameAssistBot(commands.Bot):
             channel = await guild.create_text_channel(
                 "about-the-bot", overwrites=overwrites, reason="Create the SC Companion information page"
             )
+        elif channel.name != "about-the-bot":
+            await channel.edit(name="about-the-bot", reason="Recover the SC Companion information page")
         cache_key = f"guild:{guild.id}:about-panel-message"
         message_id = await self.cache.get(cache_key)
         message = None
@@ -1032,6 +1039,11 @@ class GameAssistBot(commands.Bot):
         await self.cache.delete(cache_key)
 
     async def ensure_automatic_module_channels(self, guild: discord.Guild) -> None:
+        lock = self._shared_setup_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            await self._ensure_automatic_module_channels(guild)
+
+    async def _ensure_automatic_module_channels(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
         if configured is None or configured.get("channel_setup_mode") != "automatic" or guild.me is None:
             return
@@ -1058,6 +1070,18 @@ class GameAssistBot(commands.Bot):
                     channel_name, category=category, topic=f"SC Companion {BOT_MODULES[key]['label']} commands and examples.",
                     reason="Automatic SC Companion channel setup",
                 )
+            elif (
+                channel.name != channel_name
+                or channel.category_id != category.id
+                or channel.topic != f"SC Companion {BOT_MODULES[key]['label']} commands and examples."
+            ):
+                await channel.edit(
+                    name=channel_name,
+                    category=category,
+                    topic=f"SC Companion {BOT_MODULES[key]['label']} commands and examples.",
+                    sync_permissions=True,
+                    reason="Recover SC Companion automatic channel",
+                )
             if item["channel_id"] != channel.id:
                 item["channel_id"] = channel.id
                 changed = True
@@ -1072,6 +1096,13 @@ class GameAssistBot(commands.Bot):
                     forum = await guild.create_forum("marketplace", category=category,
                                                      topic="Marketplace listings for this Discord server.",
                                                      reason="Automatic SC Companion marketplace setup")
+                elif forum.name != "marketplace" or forum.category_id != category.id:
+                    await forum.edit(
+                        name="marketplace",
+                        category=category,
+                        sync_permissions=True,
+                        reason="Recover SC Companion marketplace forum",
+                    )
                 if item["resource_channel_id"] != forum.id:
                     item["resource_channel_id"] = forum.id
                     changed = True
@@ -1084,10 +1115,19 @@ class GameAssistBot(commands.Bot):
     async def ensure_guild_feedback_forum(self, guild: discord.Guild) -> None:
         if guild.id == self.settings.discord_guild_id or guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
-        forum = discord.utils.find(lambda item: item.name == "feedback-and-issues", guild.forums)
+        tracked_forum_id = await self.cache.get(f"guild:{guild.id}:feedback-forum")
+        forum = guild.get_channel(tracked_forum_id) if isinstance(tracked_forum_id, int) else None
+        if not isinstance(forum, discord.ForumChannel):
+            forum = discord.utils.find(lambda item: item.name == "feedback-and-issues", guild.forums)
         if forum is None:
             forum = await guild.create_forum("feedback-and-issues", topic=FEEDBACK_FORUM_TOPIC,
                                              reason="Create the SC Companion feedback ticket forum")
+        elif forum.name != "feedback-and-issues" or forum.topic != FEEDBACK_FORUM_TOPIC:
+            await forum.edit(
+                name="feedback-and-issues",
+                topic=FEEDBACK_FORUM_TOPIC,
+                reason="Recover the SC Companion feedback forum",
+            )
         await self.configure_feedback_forum(forum)
         await self.sync_feedback_template(forum)
         await self.cache.set(f"guild:{guild.id}:feedback-forum", forum.id, 315360000)
@@ -1578,6 +1618,49 @@ class GameAssistBot(commands.Bot):
             self._schedule_hub_recovery(
                 f"deleted channel {channel.name}", discord.AuditLogAction.channel_delete, channel.id
             )
+            return
+        if await self._is_shared_setup_channel(channel):
+            self._schedule_shared_channel_recovery(channel.guild.id, f"deleted #{channel.name}")
+
+    async def _is_shared_setup_channel(self, channel: discord.abc.GuildChannel) -> bool:
+        guild = channel.guild
+        if guild.id == self.settings.discord_guild_id:
+            return False
+        configured = await self.cache.guild_bot_settings(guild.id)
+        if configured is None:
+            return False
+        tracked_ids: set[int] = set()
+        for cache_key in (f"guild:{guild.id}:about-channel", f"guild:{guild.id}:feedback-forum"):
+            tracked = await self.cache.get(cache_key)
+            if isinstance(tracked, int):
+                tracked_ids.add(tracked)
+        if channel.id in tracked_ids or channel.name in {"about-the-bot", "feedback-and-issues"}:
+            return True
+        if configured.get("channel_setup_mode") != "automatic":
+            return False
+        modules = normalize_module_settings(configured.get("modules"))
+        automatic_ids = automatic_cleanup_channel_ids(modules)
+        automatic_names = {
+            key.replace("_", "-") for key, item in modules.items() if item["enabled"]
+        }
+        automatic_names.update({"SC Companion", "marketplace"})
+        return channel.id in automatic_ids or channel.name in automatic_names
+
+    def _schedule_shared_channel_recovery(self, guild_id: int, reason: str) -> None:
+        running = self._shared_recovery_tasks.get(guild_id)
+        if running is not None and not running.done():
+            return
+        self._shared_recovery_tasks[guild_id] = asyncio.create_task(
+            self._recover_shared_channels(guild_id, reason)
+        )
+
+    async def _recover_shared_channels(self, guild_id: int, reason: str) -> None:
+        await asyncio.sleep(2)
+        guild = self.get_guild(guild_id)
+        if guild is None:
+            return
+        logging.warning("Recovering SC Companion channels in guild %s after %s", guild_id, reason)
+        await self.ensure_about_panel(guild)
 
     def _is_discord_bot_hub_channel(self, channel: discord.abc.GuildChannel) -> bool:
         if self.settings.discord_guild_id and channel.guild.id != self.settings.discord_guild_id:
@@ -2040,6 +2123,10 @@ class GameAssistBot(commands.Bot):
             self._schedule_hub_recovery(
                 f"modified channel {before.name}", discord.AuditLogAction.channel_update, after.id
             )
+        elif protected_settings_changed and (
+            await self._is_shared_setup_channel(before) or await self._is_shared_setup_channel(after)
+        ):
+            self._schedule_shared_channel_recovery(after.guild.id, f"modified #{before.name}")
 
     async def on_guild_role_create(self, role: discord.Role) -> None:
         return
@@ -3264,6 +3351,8 @@ class GameAssistBot(commands.Bot):
             self._trade_store_sync_task.cancel()
         if self._guild_sync_task:
             self._guild_sync_task.cancel()
+        for task in self._shared_recovery_tasks.values():
+            task.cancel()
         await self.sources.close()
         await self.cache.close()
         await super().close()

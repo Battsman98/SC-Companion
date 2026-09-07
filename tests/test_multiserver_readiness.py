@@ -1,10 +1,12 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from src.bot import (
     _automatic_module_channel_id,
     FirstRunSetupView,
     ConfirmBotUninstallView,
+    GameAssistBot,
     NativeAdminView,
     ManualChannelWizardView,
     build_bot_setup_guide_embed,
@@ -107,6 +109,33 @@ def test_timer_dashboard_uses_the_enabled_servers_timer_channel() -> None:
     assert timer_dashboard_channel_id(modules) == 1234
     modules["timers"]["enabled"] = False
     assert timer_dashboard_channel_id(modules) is None
+
+
+def test_shared_recovery_only_protects_bot_owned_or_automatic_channels() -> None:
+    async def scenario() -> None:
+        modules = {
+            key: {"enabled": key == "ship_search", "channel_id": 101 if key == "ship_search" else None,
+                  "resource_channel_id": None}
+            for key in BOT_MODULES
+        }
+        configured = {"channel_setup_mode": "automatic", "modules": modules}
+        bot = GameAssistBot.__new__(GameAssistBot)
+        bot.settings = SimpleNamespace(discord_guild_id=1)
+        bot.cache = SimpleNamespace(
+            guild_bot_settings=AsyncMock(return_value=configured),
+            get=AsyncMock(return_value=None),
+        )
+        guild = SimpleNamespace(id=2)
+
+        assert await bot._is_shared_setup_channel(SimpleNamespace(guild=guild, id=101, name="renamed"))
+        assert await bot._is_shared_setup_channel(SimpleNamespace(guild=guild, id=500, name="SC Companion"))
+        assert not await bot._is_shared_setup_channel(SimpleNamespace(guild=guild, id=999, name="general"))
+
+        configured["channel_setup_mode"] = "manual"
+        assert not await bot._is_shared_setup_channel(SimpleNamespace(guild=guild, id=101, name="renamed"))
+        assert await bot._is_shared_setup_channel(SimpleNamespace(guild=guild, id=700, name="about-the-bot"))
+
+    asyncio.run(scenario())
 
 
 def test_uninstall_only_targets_channels_recorded_in_automatic_settings() -> None:
