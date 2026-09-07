@@ -215,6 +215,15 @@ def test_discord_bot_requests_message_content_for_feedback_mirroring() -> None:
     assert "intents.message_content = True" in source
 
 
+def test_forwarded_staff_messages_do_not_repeat_official_response_label() -> None:
+    import src.web as web
+
+    bot_source = inspect.getsource(GameAssistBot.on_message)
+    website_source = inspect.getsource(web._send_discord_channel_message)
+    assert "Official SC Companion response" not in bot_source
+    assert "Official SC Companion response" not in website_source
+
+
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
     assert VISITOR_CATEGORY_NAME == "SC Companion Hub"
     assert "bot-commands" not in VISITOR_CHANNEL_SPECS

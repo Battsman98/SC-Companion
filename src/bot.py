@@ -1150,8 +1150,8 @@ class GameAssistBot(commands.Bot):
             origin = await self.fetch_channel(int(mirror["origin_thread_id"]))
             if isinstance(origin, discord.Thread):
                 content = message.content.strip() or "The SC Companion team posted an update."
-                embed = discord.Embed(title="Official SC Companion response", description=content[:4000],
-                                      color=discord.Color.green(), timestamp=message.created_at)
+                embed = discord.Embed(description=content[:4000], color=discord.Color.green(),
+                                      timestamp=message.created_at)
                 if message.attachments:
                     embed.add_field(name="Attachments", value="\n".join(item.url for item in message.attachments)[:1024], inline=False)
                 await origin.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())

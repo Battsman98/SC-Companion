@@ -1491,7 +1491,7 @@ async def _send_discord_channel_message(channel_id: int, content: str) -> dict[s
     origin_thread_id = int(mirror.get("origin_thread_id") or 0) if mirror else 0
     if origin_thread_id and origin_thread_id != channel_id:
         await _discord_api("POST", f"/channels/{origin_thread_id}/messages", bot_token=_public_bot_token(), json_payload={
-            "content": f"**Official SC Companion response**\n{content.strip()}",
+            "content": content.strip(),
             "allowed_mentions": {"parse": []},
         })
     return message
