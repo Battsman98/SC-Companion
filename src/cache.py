@@ -558,6 +558,22 @@ class SQLiteCache:
         )
         self._connection.commit()
 
+    async def purge_guild_data(self, guild_id: int) -> None:
+        """Remove server-owned configuration and transient data after uninstall."""
+        guild_prefix = f"guild:{guild_id}:%"
+        guild_suffix = f"%:guild:{guild_id}"
+        statements = (
+            ("DELETE FROM guild_bot_settings WHERE guild_id = ?", (guild_id,)),
+            ("DELETE FROM user_managed_guilds WHERE guild_id = ?", (guild_id,)),
+            ("DELETE FROM feedback_ticket_mirrors WHERE origin_guild_id = ?", (guild_id,)),
+            ("DELETE FROM global_review_requests WHERE origin_guild_id = ?", (guild_id,)),
+            ("DELETE FROM trade_store_listings WHERE guild_id = ?", (guild_id,)),
+            ("DELETE FROM cache_entries WHERE cache_key LIKE ? OR cache_key LIKE ?", (guild_prefix, guild_suffix)),
+        )
+        for statement, parameters in statements:
+            self._connection.execute(statement, parameters)
+        self._connection.commit()
+
     async def guild_installation_stats(self) -> dict[str, int]:
         row = self._connection.execute(
             "SELECT COUNT(*), COALESCE(SUM(member_count), 0) FROM guild_installations WHERE active = 1"
