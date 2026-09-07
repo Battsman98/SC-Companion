@@ -960,6 +960,12 @@ class GameAssistBot(commands.Bot):
             return
         try:
             starter = await thread.fetch_message(thread.id)
+            messages = [message async for message in thread.history(limit=50, oldest_first=True)]
+            attachments = [attachment for message in messages for attachment in message.attachments]
+            embedded_image = next(
+                (embed.image.url for message in messages for embed in message.embeds if embed.image.url),
+                None,
+            )
             central = self.primary_feedback_forum()
             if not isinstance(central, discord.ForumChannel):
                 logging.error("Could not find the current primary feedback forum")
@@ -972,15 +978,15 @@ class GameAssistBot(commands.Bot):
             mirror_embed.add_field(name="Origin", value=f"[{thread.name}]({thread.jump_url})", inline=False)
             if starter.embeds:
                 mirror_embed.add_field(name="Original report", value=(starter.embeds[0].description or starter.embeds[0].title or "Embedded report")[:1024], inline=False)
-            self.add_feedback_attachments(mirror_embed, starter.attachments)
+            self.add_feedback_attachments(mirror_embed, attachments)
             mirror_files: list[discord.File] = []
-            image_attachment = self.feedback_image_attachment(starter.attachments)
+            image_attachment = self.feedback_image_attachment(attachments)
             if image_attachment:
                 mirror_file = await image_attachment.to_file(use_cached=True)
                 mirror_files.append(mirror_file)
                 mirror_embed.set_image(url=f"attachment://{mirror_file.filename}")
-            if not mirror_embed.image.url and starter.embeds and starter.embeds[0].image.url:
-                mirror_embed.set_image(url=starter.embeds[0].image.url)
+            if not mirror_embed.image.url and embedded_image:
+                mirror_embed.set_image(url=embedded_image)
             mirror_tag = discord.utils.find(
                 lambda item: item.name.casefold() == "bug", central.available_tags
             )
@@ -1099,7 +1105,17 @@ class GameAssistBot(commands.Bot):
                         timestamp=message.created_at,
                     )
                     self.add_feedback_attachments(embed, message.attachments)
-                    await central.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                    files: list[discord.File] = []
+                    image_attachment = self.feedback_image_attachment(message.attachments)
+                    if image_attachment:
+                        mirror_file = await image_attachment.to_file(use_cached=True)
+                        files.append(mirror_file)
+                        embed.set_image(url=f"attachment://{mirror_file.filename}")
+                    await central.send(
+                        embed=embed,
+                        files=files,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
             except (discord.Forbidden, discord.HTTPException, discord.NotFound):
                 logging.exception("Could not sync reporter update from thread %s", message.channel.id)
             return
@@ -1409,7 +1425,7 @@ class GameAssistBot(commands.Bot):
             existing = {tag.name.casefold() for tag in forum.available_tags}
             missing = required_names - existing
             reaction_name = getattr(forum.default_reaction_emoji, "name", None)
-            if not missing and reaction_name == FEEDBACK_FORUM_DEFAULT_REACTION:
+            if not missing and reaction_name == FEEDBACK_FORUM_DEFAULT_REACTION and forum.flags.require_tag:
                 return
             tags = list(forum.available_tags)
             tags.extend(
@@ -1424,6 +1440,7 @@ class GameAssistBot(commands.Bot):
             await forum.edit(
                 available_tags=tags,
                 default_reaction_emoji=FEEDBACK_FORUM_DEFAULT_REACTION,
+                require_tag=True,
                 reason="Create the SC Companion feedback and issue tags",
             )
             fetched = await self.fetch_channel(forum.id)
@@ -1436,6 +1453,8 @@ class GameAssistBot(commands.Bot):
             )
         if getattr(forum.default_reaction_emoji, "name", None) != FEEDBACK_FORUM_DEFAULT_REACTION:
             raise RuntimeError(f"Discord did not save the feedback default reaction in guild {forum.guild.id}")
+        if not forum.flags.require_tag:
+            raise RuntimeError(f"Discord did not require a feedback tag in guild {forum.guild.id}")
 
     async def sync_guild_command_examples(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -2169,6 +2188,10 @@ class GameAssistBot(commands.Bot):
             and isinstance(thread.parent, discord.ForumChannel)
             and thread.parent.name == "feedback-and-issues"
         ):
+            # Discord can dispatch thread creation before the starter upload is
+            # fully visible. Give the message payload a moment to settle, then
+            # mirror the complete thread history.
+            await asyncio.sleep(1)
             await self.mirror_feedback_thread(thread)
 
         forum_id = await self.marketplace_forum_id(thread.guild.id)

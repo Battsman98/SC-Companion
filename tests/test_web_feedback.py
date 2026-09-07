@@ -122,6 +122,8 @@ def test_reporter_updates_are_forwarded_to_the_main_ticket() -> None:
     assert "feedback_mirror_for_origin_thread(message.channel.id)" in source
     assert 'title=f"Reporter update from {message.author.display_name}"' in source
     assert "self.add_feedback_attachments(embed, message.attachments)" in source
+    assert "await image_attachment.to_file(use_cached=True)" in source
+    assert "files=files" in source
 
 
 def test_website_reads_the_original_mirrored_ticket_conversation() -> None:
@@ -155,7 +157,10 @@ def test_main_about_channel_only_keeps_welcome_and_directory() -> None:
 
 def test_shared_feedback_forums_publish_the_main_example_post() -> None:
     source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
+    configure_source = inspect.getsource(GameAssistBot.configure_feedback_forum)
     assert "await self.sync_feedback_template(forum)" in source
+    assert "forum.flags.require_tag" in configure_source
+    assert "require_tag=True" in configure_source
 
     embed = build_feedback_template_embed()
     assert embed.title == "Example: Guide button does not display the selected information"
@@ -165,6 +170,7 @@ def test_shared_feedback_forums_publish_the_main_example_post() -> None:
 def test_thread_create_handles_feedback_and_marketplace_events() -> None:
     source = inspect.getsource(GameAssistBot.on_thread_create)
 
+    assert "await asyncio.sleep(1)" in source
     assert "await self.mirror_feedback_thread(thread)" in source
     assert "await self.enrich_trading_post(thread)" in source
 
