@@ -783,6 +783,7 @@ class GameAssistBot(commands.Bot):
         self._anniversary_task: asyncio.Task | None = None
         self._trade_store_sync_task: asyncio.Task | None = None
         self._guild_sync_task: asyncio.Task | None = None
+        self._loot_review_task: asyncio.Task | None = None
         self._shared_setup_locks: dict[int, asyncio.Lock] = {}
         self._shared_recovery_tasks: dict[int, asyncio.Task] = {}
         self._hub_last_recovery_monotonic = 0.0
@@ -795,7 +796,8 @@ class GameAssistBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.add_view(CZTimerDashboardView())
         self.add_view(MembershipApplicationPanelView())
-        self.add_view(MembershipReviewView())
+        if self.settings.approval_authority:
+            self.add_view(MembershipReviewView())
         self.add_view(FirstRunSetupView())
         self.tree.add_command(ship_command)
         self.tree.add_command(commodity_command)
@@ -851,7 +853,8 @@ class GameAssistBot(commands.Bot):
             return
 
         await self._run_startup_step("create Bot Manager role", self.ensure_bot_manager_role)
-        await self._run_startup_step("provision loot report reviews", self.ensure_loot_review_channel)
+        if self.settings.approval_authority:
+            await self._run_startup_step("provision loot report reviews", self.ensure_loot_review_channel)
         await self._run_startup_step("provision changelog channels", self.ensure_changelog_channels)
         await self._run_startup_step("record deployment changelog", self.record_deployment)
         await self._run_startup_step("provision Visitor hub", self.ensure_visitor_access)
@@ -863,7 +866,8 @@ class GameAssistBot(commands.Bot):
         await self._run_startup_step("sync command references", self.sync_commands_reference_message)
         await self._run_startup_step("sync Visitor command examples", self.sync_visitor_command_examples)
         await self._run_startup_step("sync loot command example", self.sync_loot_command_example)
-        await self._run_startup_step("restore pending loot reviews", self.restore_pending_loot_reviews)
+        if self.settings.approval_authority:
+            await self._run_startup_step("restore pending loot reviews", self.restore_pending_loot_reviews)
         await self._run_startup_step("sync Executive Hangar status", self.sync_exec_status_message)
         await self._run_startup_step("sync contested-zone timers", self.sync_cz_timers_message)
         await self._run_startup_step("assign one-year member roles", self.sync_anniversary_roles)
@@ -883,6 +887,8 @@ class GameAssistBot(commands.Bot):
             self._trade_store_sync_task = asyncio.create_task(self._trade_store_sync_loop())
         if self._guild_sync_task is None:
             self._guild_sync_task = asyncio.create_task(self._guild_sync_loop())
+        if self.settings.approval_authority and self._loot_review_task is None:
+            self._loot_review_task = asyncio.create_task(self._loot_review_sync_loop())
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
@@ -2906,6 +2912,8 @@ class GameAssistBot(commands.Bot):
         self.loot_review_channel_id = channel.id
 
     async def publish_loot_review(self, report: dict) -> None:
+        if not self.settings.approval_authority:
+            raise RuntimeError("This bot collects reports; Peep owns the approval queue.")
         channel = self.get_channel(self.loot_review_channel_id or 0)
         if not isinstance(channel, discord.TextChannel):
             await self.ensure_loot_review_channel()
@@ -2930,12 +2938,23 @@ class GameAssistBot(commands.Bot):
         for report in await self.cache.pending_loot_sighting_reports():
             await self.publish_loot_review(report)
 
+    async def _loot_review_sync_loop(self) -> None:
+        """Let Peep promptly publish reports saved by the public SC Companion worker."""
+        while not self.is_closed():
+            try:
+                await self.restore_pending_loot_reviews()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.exception("Could not synchronize pending loot reviews")
+            await asyncio.sleep(15)
+
     async def review_loot_sighting(
         self, interaction: discord.Interaction, report_id: int, approved: bool
     ) -> None:
-        if interaction.user.id not in self.settings.bot_admin_user_ids:
+        if not self.settings.approval_authority or interaction.user.id not in self.settings.bot_admin_user_ids:
             await interaction.response.send_message(
-                "Only the configured service owner can review item reports.",
+                "Only Peep's configured service owner can review item reports.",
                 ephemeral=True,
             )
             return
@@ -3526,6 +3545,8 @@ class GameAssistBot(commands.Bot):
             self._trade_store_sync_task.cancel()
         if self._guild_sync_task:
             self._guild_sync_task.cancel()
+        if self._loot_review_task:
+            self._loot_review_task.cancel()
         for task in self._shared_recovery_tasks.values():
             task.cancel()
         await self.sources.close()
@@ -4021,7 +4042,7 @@ async def miningadd_command(
         "location": location.strip(),
         "reported_by": str(interaction.user),
     }
-    if interaction.user.id not in bot.settings.bot_admin_user_ids:
+    if not bot.settings.approval_authority or interaction.user.id not in bot.settings.bot_admin_user_ids:
         review_id = await bot.cache.submit_review_request(
             "mining", entry, submitted_by=interaction.user.id, submitted_by_name=str(interaction.user),
             origin_guild_id=interaction.guild_id, origin_channel_id=interaction.channel_id,
@@ -4940,6 +4961,11 @@ async def loot_report_command(
         channel_id=interaction.channel_id,
     )
     report = await bot.cache.loot_sighting_report(report_id)
+    if not bot.settings.approval_authority:
+        await interaction.followup.send(
+            f"Loot sighting **#{report_id}** was sent to Peep's private approval queue.", ephemeral=True
+        )
+        return
     try:
         await bot.publish_loot_review(report or {})
     except (RuntimeError, discord.HTTPException):

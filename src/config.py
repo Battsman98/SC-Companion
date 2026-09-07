@@ -37,6 +37,7 @@ class Settings:
     public_discord_token: str = ""
     public_discord_client_id: str = ""
     discord_support_guild_id: int | None = None
+    approval_authority: bool = True
 
     @classmethod
     def from_env(cls, load_env_file: bool = True, require_discord_token: bool = True) -> "Settings":
@@ -117,6 +118,8 @@ class Settings:
             public_discord_token=public_discord_token,
             public_discord_client_id=public_discord_client_id,
             discord_support_guild_id=int(support_guild_id) if support_guild_id else None,
+            approval_authority=os.getenv("BOT_APPROVAL_AUTHORITY", "true").strip().casefold()
+            not in {"0", "false", "no", "off"},
         )
 
 

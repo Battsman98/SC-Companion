@@ -179,6 +179,8 @@ services:
           property: connectionString
       - key: DISCORD_TOKEN
         sync: false
+      - key: BOT_APPROVAL_AUTHORITY
+        value: "false"
       - key: UEX_API_TOKEN
         sync: false
       - key: DISCORD_GUILD_ID
