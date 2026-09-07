@@ -5,6 +5,7 @@ from fastapi import UploadFile
 
 from src.bot import (
     BOT_MANAGER_ROLE_NAME,
+    FEEDBACK_FORUM_DEFAULT_REACTION,
     FEEDBACK_FORUM_TAGS,
     GameAssistBot,
     VISITOR_CATEGORY_NAME,
@@ -77,6 +78,14 @@ def test_shared_feedback_forums_copy_the_main_discord_tags() -> None:
         ("bug", False),
         ("request", False),
     )
+    assert FEEDBACK_FORUM_DEFAULT_REACTION == "👍"
+
+
+def test_main_start_channel_only_keeps_welcome_and_directory() -> None:
+    source = inspect.getsource(GameAssistBot._sync_commands_reference_channel)
+    assert "directory_only" in source
+    assert 'title == "Example /lookup Response"' in source
+    assert 'title.startswith("Discord Bot Commands - ")' in source
 
 
 def test_shared_feedback_forums_publish_the_main_example_post() -> None:
