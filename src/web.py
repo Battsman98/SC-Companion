@@ -799,13 +799,19 @@ def require_change_admin(
     require_legacy_admin_token(x_admin_token)
 
 
-def require_bot_admin(
+async def require_bot_admin(
     request: Request,
     x_admin_token: str | None = Header(default=None),
 ) -> None:
     user = current_user_from_request(request, state().settings)
     if user and user.can_manage_admin:
         return
+    # The primary Discord owner is always the service creator, even when an
+    # explicit BOT_ADMIN role/user list or an older session says otherwise.
+    if user and state().settings.discord_guild_id:
+        guild = await _discord_bot_guild(state().settings.discord_guild_id)
+        if guild and int(guild.get("owner_id") or 0) == user.id:
+            return
     require_legacy_admin_token(x_admin_token)
 
 
@@ -878,6 +884,10 @@ async def me(request: Request) -> dict[str, Any]:
         except HTTPException:
             logging.warning("Could not check installed Discord servers while loading the user panel")
     can_manage_bot = any(guild["id"] in installed_guild_ids for guild in managed_guilds)
+    can_manage_admin = user.can_manage_admin
+    if not can_manage_admin and state().settings.discord_guild_id:
+        guild = await _discord_bot_guild(state().settings.discord_guild_id)
+        can_manage_admin = bool(guild and int(guild.get("owner_id") or 0) == user.id)
     return {
         "authenticated": True,
         "id": user.id,
@@ -887,7 +897,7 @@ async def me(request: Request) -> dict[str, Any]:
         "roles": user.roles,
         "guild_permissions": user.guild_permissions,
         "can_manage_changes": user.can_manage_changes,
-        "can_manage_admin": user.can_manage_admin,
+        "can_manage_admin": can_manage_admin,
         "can_manage_guilds": bool(managed_guilds),
         "can_manage_bot": can_manage_bot,
         "bot_invite_url": _bot_invite_url(),
@@ -1396,6 +1406,19 @@ async def _discord_api(method: str, path: str, *, json_payload: dict[str, Any] |
         raise HTTPException(status_code=502, detail="Discord could not be reached.") from error
 
 
+async def _send_discord_channel_message(channel_id: int, content: str) -> dict[str, Any]:
+    payload = {"content": content.strip(), "allowed_mentions": {"parse": []}}
+    message = await _discord_api("POST", f"/channels/{channel_id}/messages", json_payload=payload)
+    mirror = await state().cache.feedback_mirror_for_central_thread(channel_id)
+    origin_thread_id = int(mirror.get("origin_thread_id") or 0) if mirror else 0
+    if origin_thread_id and origin_thread_id != channel_id:
+        await _discord_api("POST", f"/channels/{origin_thread_id}/messages", json_payload={
+            "content": f"**Official SC Companion response**\n{content.strip()}",
+            "allowed_mentions": {"parse": []},
+        })
+    return message
+
+
 @app.get("/api/admin/discord/guilds", dependencies=[Depends(require_bot_admin)])
 async def discord_guilds() -> list[dict[str, str]]:
     guilds = await _discord_api("GET", "/users/@me/guilds")
@@ -1414,9 +1437,7 @@ async def discord_channels(guild_id: int) -> list[dict[str, str]]:
 
 @app.post("/api/admin/discord/channels/{channel_id}/messages", dependencies=[Depends(require_bot_admin)])
 async def send_discord_message(channel_id: int, payload: DiscordMessageRequest) -> dict[str, str]:
-    message = await _discord_api("POST", f"/channels/{channel_id}/messages", json_payload={
-        "content": payload.content.strip(), "allowed_mentions": {"parse": []},
-    })
+    message = await _send_discord_channel_message(channel_id, payload.content)
     return {"status": "sent", "message_id": str(message.get("id") or "")}
 
 
@@ -1456,9 +1477,7 @@ async def update_feedback_ticket_status(
         raise HTTPException(status_code=503, detail="Discord is not configured.")
     await state().cache.set_discord_ticket_status(thread_id, settings.discord_guild_id, payload.status, user.id)
     label = payload.status.replace("_", " ").title()
-    await _discord_api("POST", f"/channels/{thread_id}/messages", json_payload={
-        "content": f"**Ticket status updated: {label}**", "allowed_mentions": {"parse": []},
-    })
+    await _send_discord_channel_message(thread_id, f"**Ticket status updated: {label}**")
     return {"status": payload.status}
 
 
