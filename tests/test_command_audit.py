@@ -37,6 +37,7 @@ def test_about_panel_explains_scope_and_optional_support() -> None:
 
     assert embed.title == "About SC Companion"
     assert "Server managers" in (embed.description or "")
+    assert all(field.name != "Purpose & scope" for field in embed.fields)
     assert any("hosting, domains, storage, security" in field.value for field in embed.fields)
     assert embed.image.url.endswith("support-square-qr.png")
 
