@@ -764,7 +764,7 @@ class GameAssistBot(commands.Bot):
 
         if (self.settings.exec_status_channel_id or self.visitor_channels.get("executive-hangar-status")) and self._exec_status_task is None:
             self._exec_status_task = asyncio.create_task(self._exec_status_loop())
-        if (self.settings.cz_timers_channel_id or self.visitor_channels.get("contested-zone-timers")) and self._cz_timers_task is None:
+        if self._cz_timers_task is None:
             self._cz_timers_task = asyncio.create_task(self._cz_timers_loop())
         if self._item_catalog_task is None:
             self._item_catalog_task = asyncio.create_task(self._item_catalog_sync_loop())
@@ -1005,6 +1005,23 @@ class GameAssistBot(commands.Bot):
                 await self.cache.set(cache_key, message.id, 315360000)
             else:
                 await message.edit(embed=embed)
+        await self.sync_guild_timer_dashboard(guild, modules)
+
+    async def sync_guild_timer_dashboard(
+        self,
+        guild: discord.Guild,
+        modules: dict[str, dict[str, object]] | None = None,
+    ) -> None:
+        if modules is None:
+            configured = await self.cache.guild_bot_settings(guild.id)
+            if configured is None:
+                return
+            modules = normalize_module_settings(configured.get("modules"))
+        channel_id = timer_dashboard_channel_id(modules)
+        if channel_id is None:
+            return
+        timers = await get_cz_dashboard_timers(self.cache, timer_scope(self, guild.id))
+        await self._sync_cz_timers_channel(channel_id, build_cz_dashboard_embed(timers))
 
     async def _website_deployment_monitor_loop(self) -> None:
         """Record website-only Render revisions without restarting Discord."""
@@ -2756,6 +2773,9 @@ class GameAssistBot(commands.Bot):
         embed = build_cz_dashboard_embed(timers)
         for channel_id in channel_ids:
             await self._sync_cz_timers_channel(channel_id, embed)
+        for guild in self.guilds:
+            if guild.id != self.settings.discord_guild_id:
+                await self.sync_guild_timer_dashboard(guild)
 
     async def _sync_cz_timers_channel(self, channel_id: int, embed: discord.Embed) -> None:
         try:
@@ -5163,6 +5183,13 @@ def manual_channel_steps(modules: dict[str, dict[str, object]]) -> list[tuple[st
         if key == "trade_tools":
             steps.append((key, "resource_channel_id"))
     return steps
+
+
+def timer_dashboard_channel_id(modules: dict[str, dict[str, object]]) -> int | None:
+    timers = modules.get("timers")
+    if not timers or not timers.get("enabled") or not timers.get("channel_id"):
+        return None
+    return int(timers["channel_id"])
 
 
 class ManualChannelSelect(discord.ui.ChannelSelect):
