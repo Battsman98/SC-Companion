@@ -4,6 +4,7 @@ from fastapi import UploadFile
 
 from src.bot import (
     BOT_MANAGER_ROLE_NAME,
+    FEEDBACK_FORUM_TAGS,
     VISITOR_CATEGORY_NAME,
     VISITOR_CHANNEL_SPECS,
     VISITOR_COMMAND_CHANNELS,
@@ -64,6 +65,15 @@ def test_bot_feedback_template_gives_users_a_complete_example() -> None:
     assert "Getting Started" in fields["Issue / Feedback"]
     assert "Trade guide" in fields["Expected action or result"]
     assert "screenshots" in fields["Helpful attachments"]
+
+
+def test_shared_feedback_forums_copy_the_main_discord_tags() -> None:
+    assert FEEDBACK_FORUM_TAGS == (
+        ("completed", True),
+        ("in-progress", True),
+        ("bug", False),
+        ("request", False),
+    )
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
