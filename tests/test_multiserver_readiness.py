@@ -2,6 +2,7 @@ import asyncio
 
 from src.bot import (
     FirstRunSetupView,
+    ConfirmBotUninstallView,
     NativeAdminView,
     ManualChannelWizardView,
     build_bot_setup_guide_embed,
@@ -10,6 +11,7 @@ from src.bot import (
     exec_override_cache_key,
     manual_channel_steps,
     timer_dashboard_channel_id,
+    automatic_cleanup_channel_ids,
 )
 from src.cache import SQLiteCache
 from src.guild_config import BOT_MODULES, module_for_command
@@ -90,6 +92,19 @@ def test_timer_dashboard_uses_the_enabled_servers_timer_channel() -> None:
     assert timer_dashboard_channel_id(modules) == 1234
     modules["timers"]["enabled"] = False
     assert timer_dashboard_channel_id(modules) is None
+
+
+def test_uninstall_only_targets_channels_recorded_in_automatic_settings() -> None:
+    modules = {
+        key: {"enabled": True, "channel_id": index + 100, "resource_channel_id": None}
+        for index, key in enumerate(BOT_MODULES)
+    }
+    modules["trade_tools"]["resource_channel_id"] = 999
+    targets = automatic_cleanup_channel_ids(modules)
+    assert 999 in targets
+    assert len(targets) == len(BOT_MODULES) + 1
+    labels = [getattr(item, "label", None) for item in ConfirmBotUninstallView().children]
+    assert labels == ["Delete Bot Setup and Uninstall", "Cancel"]
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
