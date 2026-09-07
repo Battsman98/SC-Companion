@@ -1642,19 +1642,28 @@ async def update_feedback_ticket_status(
     await state().cache.set_discord_ticket_status(thread_id, settings.discord_guild_id, payload.status, user.id)
     label = payload.status.replace("_", " ").title()
     await _send_discord_channel_message(thread_id, f"**Ticket status updated: {label}**")
+    await _apply_feedback_ticket_state(thread, payload.status)
+    mirror = await state().cache.feedback_mirror_for_central_thread(thread_id)
+    origin_thread_id = int(mirror.get("origin_thread_id") or 0) if mirror else 0
+    if origin_thread_id and origin_thread_id != thread_id:
+        origin_thread = await _discord_api("GET", f"/channels/{origin_thread_id}")
+        await _apply_feedback_ticket_state(origin_thread, payload.status)
+    return {"status": payload.status}
+
+
+async def _apply_feedback_ticket_state(thread: dict[str, Any], status: str) -> None:
     tag_ids = await _feedback_forum_tag_ids(int(thread["parent_id"]))
     completed_tag = tag_ids.get("completed")
     in_progress_tag = tag_ids.get("in-progress")
     applied_tags = [str(tag_id) for tag_id in thread.get("applied_tags", [])]
     applied_tags = [tag_id for tag_id in applied_tags if tag_id not in {completed_tag, in_progress_tag}]
-    status_tag = completed_tag if payload.status == "resolved" else in_progress_tag if payload.status == "in_progress" else None
+    status_tag = completed_tag if status == "resolved" else in_progress_tag if status == "in_progress" else None
     if status_tag:
         applied_tags.append(status_tag)
-    await _discord_api("PATCH", f"/channels/{thread_id}", json_payload={
-        "archived": payload.status == "resolved",
+    await _discord_api("PATCH", f"/channels/{int(thread['id'])}", json_payload={
+        "archived": status == "resolved",
         "applied_tags": applied_tags[:5],
     })
-    return {"status": payload.status}
 
 
 @app.post("/api/activity", status_code=204)

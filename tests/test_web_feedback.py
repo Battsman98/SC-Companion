@@ -87,10 +87,9 @@ def test_shared_feedback_forums_copy_the_main_discord_tags() -> None:
 def test_resolving_a_website_ticket_applies_completed_tag_and_archives() -> None:
     source = inspect.getsource(update_feedback_ticket_status)
 
-    assert 'tag_ids.get("completed")' in source
-    assert 'payload.status == "resolved"' in source
-    assert '"archived": payload.status == "resolved"' in source
-    assert '"applied_tags": applied_tags[:5]' in source
+    assert "await _apply_feedback_ticket_state(thread, payload.status)" in source
+    assert "feedback_mirror_for_central_thread(thread_id)" in source
+    assert "await _apply_feedback_ticket_state(origin_thread, payload.status)" in source
 
 
 def test_main_about_channel_only_keeps_welcome_and_directory() -> None:
