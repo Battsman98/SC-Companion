@@ -1851,6 +1851,12 @@ class GameAssistBot(commands.Bot):
         await self.ensure_about_panel(guild)
 
     def _is_discord_bot_hub_channel(self, channel: discord.abc.GuildChannel) -> bool:
+        # Peep owns the primary server's administration, membership, and support
+        # workflows, but SC Companion owns the public command hub.  Treating the
+        # hub as Peep-protected would undo an owner's channel moves and recreate
+        # retired SC Companion channels.
+        if self.settings.runtime_profile == "peep":
+            return False
         if self.settings.discord_guild_id and channel.guild.id != self.settings.discord_guild_id:
             return False
         if channel.name == APPLICATION_REVIEW_CHANNEL_NAME:
@@ -1870,6 +1876,8 @@ class GameAssistBot(commands.Bot):
         audit_action: discord.AuditLogAction | None = None,
         target_id: int | None = None,
     ) -> None:
+        if self.settings.runtime_profile == "peep":
+            return
         self._hub_incident_count += 1
         self._hub_pending_incident = (reason, audit_action, target_id)
         if self._hub_recovery_task is not None and not self._hub_recovery_task.done():

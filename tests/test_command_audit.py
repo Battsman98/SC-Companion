@@ -238,6 +238,21 @@ def test_hub_admin_commands_are_registered() -> None:
     assert admin_group.get_command("hub-repair") is not None
 
 
+def test_peep_profile_does_not_protect_sc_companion_hub_channels() -> None:
+    bot = GameAssistBot.__new__(GameAssistBot)
+    bot.settings = SimpleNamespace(runtime_profile="peep", discord_guild_id=123)
+    bot.visitor_category_id = 50
+    bot.visitor_channels = {"ship-search": 51}
+    channel = SimpleNamespace(
+        id=51,
+        name="ship-search",
+        guild=SimpleNamespace(id=123),
+        category=SimpleNamespace(name="SC Companion Hub"),
+    )
+
+    assert not bot._is_discord_bot_hub_channel(channel)
+
+
 def test_hub_roles_have_scoped_permissions() -> None:
     visitor = _hub_role_permissions("Visitor")
     manager = _hub_role_permissions("Bot Manager")
