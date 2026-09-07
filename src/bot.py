@@ -788,6 +788,7 @@ class GameAssistBot(commands.Bot):
         self._trade_store_sync_task: asyncio.Task | None = None
         self._guild_sync_task: asyncio.Task | None = None
         self._loot_review_task: asyncio.Task | None = None
+        self._feedback_sync_task: asyncio.Task | None = None
         self._shared_setup_locks: dict[int, asyncio.Lock] = {}
         self._shared_recovery_tasks: dict[int, asyncio.Task] = {}
         self._hub_last_recovery_monotonic = 0.0
@@ -925,6 +926,8 @@ class GameAssistBot(commands.Bot):
             self._guild_sync_task = asyncio.create_task(self._guild_sync_loop())
         if self.settings.approval_authority and self._loot_review_task is None:
             self._loot_review_task = asyncio.create_task(self._loot_review_sync_loop())
+        if self._feedback_sync_task is None:
+            self._feedback_sync_task = asyncio.create_task(self._feedback_sync_loop())
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
@@ -1125,17 +1128,33 @@ class GameAssistBot(commands.Bot):
 
     async def backfill_feedback_tickets(self) -> None:
         await self.remove_mirrored_feedback_examples()
+        central = self.primary_feedback_forum()
+        central_forum_id = central.id if central else 0
         for guild in self.guilds:
-            if guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id}:
+            if (
+                guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id}
+                and self.settings.runtime_profile != "public"
+            ):
                 continue
             for forum in guild.forums:
-                if forum.name != "feedback-and-issues":
+                if forum.name != "feedback-and-issues" or forum.id == central_forum_id:
                     continue
                 threads = list(forum.threads)
                 with suppress(discord.Forbidden, discord.HTTPException):
                     threads.extend([thread async for thread in forum.archived_threads(limit=100)])
                 for thread in threads:
                     await self.mirror_feedback_thread(thread)
+
+    async def _feedback_sync_loop(self) -> None:
+        """Recover missed ticket events without relying on an open website."""
+        while not self.is_closed():
+            try:
+                await self.backfill_feedback_tickets()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.exception("Could not synchronize shared feedback tickets")
+            await asyncio.sleep(60)
 
     async def remove_mirrored_feedback_examples(self) -> None:
         forum = self.primary_feedback_forum()
@@ -2286,10 +2305,16 @@ class GameAssistBot(commands.Bot):
             )
 
     async def on_thread_create(self, thread: discord.Thread) -> None:
+        central = self.primary_feedback_forum()
+        is_public_source = (
+            self.settings.runtime_profile == "public"
+            or thread.guild.id not in {self.settings.discord_guild_id, self.settings.discord_support_guild_id}
+        )
         if (
-            thread.guild.id not in {self.settings.discord_guild_id, self.settings.discord_support_guild_id}
+            is_public_source
             and isinstance(thread.parent, discord.ForumChannel)
             and thread.parent.name == "feedback-and-issues"
+            and (central is None or thread.parent_id != central.id)
         ):
             # Discord can dispatch thread creation before the starter upload is
             # fully visible. Give the message payload a moment to settle, then
@@ -3824,6 +3849,8 @@ class GameAssistBot(commands.Bot):
             self._guild_sync_task.cancel()
         if self._loot_review_task:
             self._loot_review_task.cancel()
+        if self._feedback_sync_task:
+            self._feedback_sync_task.cancel()
         for task in self._shared_recovery_tasks.values():
             task.cancel()
         await self.sources.close()
@@ -3980,6 +4007,7 @@ MODULE_EXAMPLES = {
     "item_locator": "/item search name: FS-9 LMG\n/loot search name: ADP-mk4 Arms Justified",
     "inventory_search": "/inventory search item: FS-9 station: Port Tressler",
     "trade_tools": "/commodity name: Gold\n/trade routing starting_point: Area18 investment:500000",
+    "timers": "/exec\n/cztimer create name: Checkmate keycard duration: 60",
 }
 
 

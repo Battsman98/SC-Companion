@@ -9,6 +9,7 @@ from src.bot import (
     FEEDBACK_FORUM_DEFAULT_REACTION,
     FEEDBACK_FORUM_TAGS,
     GameAssistBot,
+    MODULE_EXAMPLES,
     VISITOR_CATEGORY_NAME,
     VISITOR_CHANNEL_SPECS,
     VISITOR_ARCHIVE_CHANNEL_NAMES,
@@ -271,6 +272,22 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
     assert "category.text_channels" in category_source
     assert "build_visitor_command_example_embeds" in category_source
     assert "sc-companion-example" in category_source
+    assert "timers" in MODULE_EXAMPLES
+
+
+def test_ticket_sync_runs_server_side_without_the_website() -> None:
+    ready_source = inspect.getsource(GameAssistBot.on_ready)
+    loop_source = inspect.getsource(GameAssistBot._feedback_sync_loop)
+    backfill_source = inspect.getsource(GameAssistBot.backfill_feedback_tickets)
+    event_source = inspect.getsource(GameAssistBot.on_thread_create)
+
+    assert "_feedback_sync_loop" in ready_source
+    assert "await self.backfill_feedback_tickets()" in loop_source
+    assert "await asyncio.sleep(60)" in loop_source
+    assert 'self.settings.runtime_profile != "public"' in backfill_source
+    assert "forum.id == central_forum_id" in backfill_source
+    assert 'self.settings.runtime_profile == "public"' in event_source
+    assert "thread.parent_id != central.id" in event_source
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
