@@ -2828,15 +2828,6 @@ def build_about_bot_embed(guild: discord.Guild | None = None) -> discord.Embed:
         color=discord.Color.blurple(),
     )
     embed.add_field(
-        name="Purpose & scope",
-        value=(
-            "The bot combines shared game-data catalogs with server-specific configuration. Personal inventory "
-            "and blueprint collections remain private to the linked Discord account. Community findings are "
-            "published globally only after review."
-        ),
-        inline=False,
-    )
-    embed.add_field(
         name="Support operating costs",
         value=(
             f"SC Companion is free to use. [Optional contributions through Square]({SUPPORT_URL}) help cover "
