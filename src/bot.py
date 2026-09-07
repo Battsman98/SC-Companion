@@ -2939,15 +2939,41 @@ class GameAssistBot(commands.Bot):
             await self.publish_loot_review(report)
 
     async def _loot_review_sync_loop(self) -> None:
-        """Let Peep promptly publish reports saved by the public SC Companion worker."""
+        """Refresh Peep's private approval inbox without polling Discord aggressively."""
         while not self.is_closed():
             try:
                 await self.restore_pending_loot_reviews()
+                await self._publish_pending_global_review_notifications()
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logging.exception("Could not synchronize pending loot reviews")
-            await asyncio.sleep(15)
+                logging.exception("Could not synchronize Peep's approval inbox")
+            await asyncio.sleep(60)
+
+    async def _publish_pending_global_review_notifications(self) -> None:
+        if not self.settings.audit_log_channel_id:
+            return
+        channel = self.get_channel(self.settings.audit_log_channel_id)
+        if channel is None:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = await self.fetch_channel(self.settings.audit_log_channel_id)
+        if not isinstance(channel, discord.abc.Messageable):
+            return
+        for review in await self.cache.pending_review_requests(100):
+            notification_key = f"discord:central-review-notified:{review['id']}"
+            if await self.cache.get(notification_key):
+                continue
+            embed = discord.Embed(
+                title=f"Approval Request #{review['id']} — {str(review['review_type']).title()}",
+                description="A request from SC Companion is waiting in Peep's Discord Inbox.",
+                color=discord.Color.gold(),
+                timestamp=discord.utils.utcnow(),
+            )
+            for name, value in list(review["payload"].items())[:8]:
+                embed.add_field(name=str(name).replace("_", " ").title(), value=str(value)[:1024], inline=False)
+            embed.set_footer(text=f"Use /admin review request_id:{review['id']} to approve or reject.")
+            await channel.send(embed=embed, silent=True)
+            await self.cache.set(notification_key, True, 315360000)
 
     async def review_loot_sighting(
         self, interaction: discord.Interaction, report_id: int, approved: bool

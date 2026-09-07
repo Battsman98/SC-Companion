@@ -1888,6 +1888,7 @@ const ticketMessages = document.querySelector("[data-ticket-messages]");
 const ticketReplyForm = document.querySelector("[data-ticket-reply]");
 let selectedTicket = null;
 let allTickets = [];
+let allApprovals = [];
 let currentTicketTab = "open";
 
 async function jsonRequest(url, options = {}) {
@@ -1917,7 +1918,10 @@ function closeDiscordConsole() {
 async function loadTickets() {
   if (!ticketList) return;
   ticketList.textContent = "Loading tickets...";
-  allTickets = await jsonRequest("/api/admin/feedback/tickets");
+  [allTickets, allApprovals] = await Promise.all([
+    jsonRequest("/api/admin/feedback/tickets"),
+    jsonRequest("/api/reviews/pending"),
+  ]);
   renderTicketList();
 }
 
@@ -1930,8 +1934,35 @@ function renderTicketList() {
   const archivedTickets = allTickets.filter(isArchivedTicket);
   document.querySelector('[data-ticket-count="open"]').textContent = openTickets.length;
   document.querySelector('[data-ticket-count="archived"]').textContent = archivedTickets.length;
+  document.querySelector('[data-ticket-count="approvals"]').textContent = allApprovals.length;
+  if (currentTicketTab === "approvals") {
+    ticketList.innerHTML = allApprovals.length ? allApprovals.map((review) => `<button type="button" data-approval-id="${review.id}" data-approval-queue="${escapeAttribute(review.queue)}"><strong>#${review.id} — ${escapeHtml(review.review_type)}</strong><span><span class="ticket-status">waiting approval</span>${escapeHtml(review.submitted_by_name || "SC Companion user")}</span></button>`).join("") : '<p class="ticket-empty">No pending approvals.</p>';
+    return;
+  }
   const tickets = currentTicketTab === "archived" ? archivedTickets : openTickets;
   ticketList.innerHTML = tickets.length ? tickets.map((ticket) => `<button type="button" data-ticket-id="${escapeAttribute(ticket.id)}" data-ticket-name="${escapeAttribute(ticket.name)}" data-ticket-status="${escapeAttribute(ticket.status)}"><strong>${escapeHtml(ticket.name)}</strong><span><span class="ticket-status">${escapeHtml(ticket.status.replaceAll("_", " "))}</span>${ticket.message_count} messages</span></button>`).join("") : `<p class="ticket-empty">No ${currentTicketTab} tickets.</p>`;
+}
+
+function selectApproval(button) {
+  const review = allApprovals.find((item) => String(item.id) === button.dataset.approvalId && item.queue === button.dataset.approvalQueue);
+  if (!review) return;
+  selectedTicket = null;
+  ticketReplyForm.hidden = true;
+  document.querySelector("[data-ticket-title]").textContent = `Approval #${review.id} — ${review.review_type}`;
+  const details = Object.entries(review.payload || {}).map(([key, value]) => `<article><strong>${escapeHtml(key.replaceAll("_", " "))}</strong><p>${escapeHtml(String(value ?? ""))}</p></article>`).join("");
+  ticketMessages.innerHTML = `${details}<div class="feedback-actions"><button type="button" data-approval-decision="approved" data-approval-id="${review.id}" data-approval-queue="${escapeAttribute(review.queue)}">Approve</button><button type="button" data-approval-decision="rejected" data-approval-id="${review.id}" data-approval-queue="${escapeAttribute(review.queue)}">Reject</button></div>`;
+}
+
+async function decideApproval(button) {
+  button.disabled = true;
+  await jsonRequest(`/api/reviews/${button.dataset.approvalId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision: button.dataset.approvalDecision, queue: button.dataset.approvalQueue }),
+  });
+  await loadTickets();
+  document.querySelector("[data-ticket-title]").textContent = "Approval requests";
+  ticketMessages.innerHTML = "<p>The request was updated successfully.</p>";
 }
 
 async function selectTicket(button) {
@@ -2015,6 +2046,10 @@ document.addEventListener("click", (event) => {
   }
   const ticketButton = event.target.closest("[data-ticket-id]");
   if (ticketButton) selectTicket(ticketButton).catch((error) => { ticketMessages.textContent = error.message; });
+  const approvalButton = event.target.closest("[data-approval-id]:not([data-approval-decision])");
+  if (approvalButton) selectApproval(approvalButton);
+  const approvalDecision = event.target.closest("[data-approval-decision]");
+  if (approvalDecision) decideApproval(approvalDecision).catch((error) => { ticketMessages.textContent = error.message; });
 });
 
 document.addEventListener("keydown", (event) => {

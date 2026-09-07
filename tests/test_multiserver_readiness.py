@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -156,6 +157,12 @@ def test_uninstall_only_targets_channels_recorded_in_automatic_settings() -> Non
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
     asyncio.run(_exercise_review_queue_and_server_analytics(tmp_path))
+
+
+def test_peep_approval_sync_runs_once_per_minute() -> None:
+    source = inspect.getsource(GameAssistBot._loot_review_sync_loop)
+    assert "_publish_pending_global_review_notifications" in source
+    assert "asyncio.sleep(60)" in source
 
 
 async def _exercise_review_queue_and_server_analytics(tmp_path) -> None:
