@@ -9,6 +9,7 @@ from src.bot import (
     cz_timers_cache_key,
     exec_override_cache_key,
     manual_channel_steps,
+    timer_dashboard_channel_id,
 )
 from src.cache import SQLiteCache
 from src.guild_config import BOT_MODULES, module_for_command
@@ -78,6 +79,17 @@ def test_manual_setup_has_an_explicit_next_step_for_each_enabled_feature() -> No
     channel_select = wizard.children[0]
     assert channel_select.placeholder == "Choose a channel for Timers"
     assert "channel for Timers" in (wizard.embed().description or "")
+
+
+def test_timer_dashboard_uses_the_enabled_servers_timer_channel() -> None:
+    modules = {
+        key: {"enabled": key == "timers", "channel_id": 1234 if key == "timers" else None,
+              "resource_channel_id": None}
+        for key in BOT_MODULES
+    }
+    assert timer_dashboard_channel_id(modules) == 1234
+    modules["timers"]["enabled"] = False
+    assert timer_dashboard_channel_id(modules) is None
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
