@@ -267,12 +267,20 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
         'tracked = guild.get_channel'
     )
     about_source = inspect.getsource(GameAssistBot._ensure_about_panel)
-    category_source = inspect.getsource(GameAssistBot.sync_sc_companion_category_examples)
+    category_source = inspect.getsource(GameAssistBot.sync_sc_companion_category_guides)
+    cleanup_source = inspect.getsource(GameAssistBot.remove_sc_companion_category_examples)
     assert 'self.settings.runtime_profile == "public"' in about_source
+    assert "guild.id == self.settings.discord_support_guild_id" in about_source
     assert "category.text_channels" in category_source
-    assert "build_visitor_command_example_embeds" in category_source
-    assert "sc-companion-example" in category_source
+    assert "build_guild_command_guide_embed" in category_source
+    assert "sc-companion-guide" in category_source
+    assert "build_visitor_command_example_embeds" in cleanup_source
+    assert "await message.delete()" in cleanup_source
     assert "timers" in MODULE_EXAMPLES
+    automatic_source = inspect.getsource(GameAssistBot._ensure_automatic_module_channels)
+    assert 'self.settings.runtime_profile == "public"' in automatic_source
+    assert "guild.id == self.settings.discord_support_guild_id" in automatic_source
+    assert "len(existing_standard_channels) >= 3" in automatic_source
 
 
 def test_ticket_sync_runs_server_side_without_the_website() -> None:

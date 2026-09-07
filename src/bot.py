@@ -1315,9 +1315,18 @@ class GameAssistBot(commands.Bot):
         await self.ensure_guild_feedback_forum(guild, category)
         await self._ensure_automatic_module_channels(guild)
         await self.ensure_guild_marketplace(guild, normalize_module_settings(configured.get("modules")))
-        await self.sync_guild_command_examples(guild)
+        is_public_peep_install = (
+            self.settings.runtime_profile == "public"
+            and guild.id == self.settings.discord_support_guild_id
+        )
         if self.settings.runtime_profile == "public":
-            await self.sync_sc_companion_category_examples(guild, category)
+            await self.remove_sc_companion_category_examples(guild, category)
+        if is_public_peep_install:
+            # Peep and SC Companion share a guild-settings row. Do not let the
+            # public bot publish into Peep's private configured channel IDs.
+            await self.sync_sc_companion_category_guides(guild, category)
+        else:
+            await self.sync_guild_command_examples(guild)
 
     async def sync_first_run_notice(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -1382,13 +1391,27 @@ class GameAssistBot(commands.Bot):
 
     async def _ensure_automatic_module_channels(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
-        if configured is None or configured.get("channel_setup_mode") != "automatic" or guild.me is None:
+        if configured is None or guild.me is None:
+            return
+        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+        standard_channel_names = {key.replace("_", "-") for key in BOT_MODULES}
+        existing_standard_channels = {
+            channel.name for channel in guild.text_channels
+            if category is not None
+            and channel.category_id == category.id
+            and channel.name in standard_channel_names
+        }
+        inferred_public_automatic = (
+            self.settings.runtime_profile == "public"
+            and guild.id == self.settings.discord_support_guild_id
+            and len(existing_standard_channels) >= 3
+        )
+        if configured.get("channel_setup_mode") != "automatic" and not inferred_public_automatic:
             return
         if not guild.me.guild_permissions.manage_channels:
             logging.warning("Manage Channels is required for automatic setup in guild %s", guild.id)
             return
         modules = normalize_module_settings(configured.get("modules"))
-        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
         if category is None:
             category = await guild.create_category("SC Companion", reason="Set up SC Companion feature channels")
         changed = False
@@ -1580,10 +1603,10 @@ class GameAssistBot(commands.Bot):
                 await message.edit(embed=embed)
         await self.sync_guild_timer_dashboard(guild, modules)
 
-    async def sync_sc_companion_category_examples(
+    async def remove_sc_companion_category_examples(
         self, guild: discord.Guild, category: discord.CategoryChannel
     ) -> None:
-        """Keep public-bot examples in its own category when Peep shares the guild."""
+        """Remove the visitor-style examples accidentally copied into installed guilds."""
         if guild.me is None:
             return
         examples = build_visitor_command_example_embeds()
@@ -1592,7 +1615,7 @@ class GameAssistBot(commands.Bot):
             if embed is None:
                 continue
             permissions = channel.permissions_for(guild.me)
-            if not permissions.send_messages or not permissions.embed_links:
+            if not permissions.read_message_history:
                 continue
             cache_key = f"guild:{guild.id}:sc-companion-example:{channel.id}"
             message_id = await self.cache.get(cache_key)
@@ -1602,10 +1625,39 @@ class GameAssistBot(commands.Bot):
                     message = await channel.fetch_message(message_id)
             if message is None:
                 message = await self.find_recent_embed_message(channel, embed.title or "")
+            if message is not None and self.user is not None and message.author.id == self.user.id:
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await message.delete()
+            await self.cache.set(cache_key, None, 315360000)
+
+    async def sync_sc_companion_category_guides(
+        self, guild: discord.Guild, category: discord.CategoryChannel
+    ) -> None:
+        """Publish normal command guides in Peep's dedicated SC Companion category."""
+        if guild.me is None:
+            return
+        for channel in category.text_channels:
+            module_key = channel.name.replace("-", "_")
+            if module_key not in BOT_MODULES:
+                continue
+            permissions = channel.permissions_for(guild.me)
+            if not permissions.send_messages or not permissions.embed_links:
+                continue
+            embed = build_guild_command_guide_embed([module_key])
+            cache_key = f"guild:{guild.id}:sc-companion-guide:{channel.id}"
+            message_id = await self.cache.get(cache_key)
+            message = None
+            if isinstance(message_id, int):
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = await channel.fetch_message(message_id)
+            if message is None:
+                message = await self.find_recent_embed_message(channel, embed.title or "")
             if message is None:
                 message = await channel.send(embed=embed, silent=True)
-            else:
+            elif self.user is not None and message.author.id == self.user.id:
                 await message.edit(content=None, embed=embed)
+            else:
+                message = await channel.send(embed=embed, silent=True)
             await self.cache.set(cache_key, message.id, 315360000)
 
     async def sync_guild_timer_dashboard(
