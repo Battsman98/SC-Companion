@@ -1795,22 +1795,45 @@ class GameAssistBot(commands.Bot):
     async def configure_marketplace_forum(
         self, channel: discord.ForumChannel, command_channel_id: int | None = None,
     ) -> None:
-        existing = {tag.name.upper(): tag for tag in channel.available_tags}
         required = (*TRADING_FORUM_TAGS, TRADING_STORE_TAG, TRADING_GUIDE_TAG)
-        tags = list(channel.available_tags)
-        for name in required:
-            if name not in existing:
-                tags.append(discord.ForumTag(name=name, moderated=name in {TRADING_STORE_TAG, TRADING_GUIDE_TAG}))
-        if len(tags) > 20:
-            required_names = set(required)
-            tags = [tag for tag in tags if tag.name.upper() in required_names] + [
-                tag for tag in tags if tag.name.upper() not in required_names
-            ][:15]
-        needs_edit = any(name not in existing for name in required)
-        if needs_edit or channel.topic != TRADING_FORUM_TOPIC or not channel.flags.require_tag:
+        required_names = set(required)
+
+        def desired_tags(forum: discord.ForumChannel) -> list[discord.ForumTag]:
+            existing = {tag.name.upper() for tag in forum.available_tags}
+            tags = list(forum.available_tags)
+            for name in required:
+                if name not in existing:
+                    tags.append(discord.ForumTag(name=name, moderated=name in {TRADING_STORE_TAG, TRADING_GUIDE_TAG}))
+            if len(tags) > 20:
+                tags = [tag for tag in tags if tag.name.upper() in required_names] + [
+                    tag for tag in tags if tag.name.upper() not in required_names
+                ][:15]
+            return tags
+
+        # Discord has occasionally accepted a combined forum edit while dropping
+        # available_tags. Save tags on their own, fetch the channel again, and retry
+        # once so automatic setup is self-healing instead of looking complete while
+        # the forum's required marketplace tags are still absent.
+        for attempt in range(2):
+            missing = required_names - {tag.name.upper() for tag in channel.available_tags}
+            if not missing:
+                break
+            await channel.edit(
+                available_tags=desired_tags(channel),
+                reason="Create the SC Companion marketplace tags",
+            )
+            fetched = await self.fetch_channel(channel.id)
+            if isinstance(fetched, discord.ForumChannel):
+                channel = fetched
+        missing = required_names - {tag.name.upper() for tag in channel.available_tags}
+        if missing:
+            raise RuntimeError(
+                f"Discord did not save marketplace tags in guild {channel.guild.id}: {', '.join(sorted(missing))}"
+            )
+
+        if channel.topic != TRADING_FORUM_TOPIC or not channel.flags.require_tag:
             edited_channel = await channel.edit(
                 topic=TRADING_FORUM_TOPIC,
-                available_tags=tags,
                 require_tag=True,
                 reason="Configure the in-game item trading forum",
             )
