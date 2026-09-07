@@ -2558,6 +2558,15 @@ class GameAssistBot(commands.Bot):
         }
         if visitor_role:
             review_overwrites[visitor_role] = discord.PermissionOverwrite(view_channel=False)
+        audit_category = guild.get_channel(AUDIT_LOG_CATEGORY_ID)
+        if not isinstance(audit_category, discord.CategoryChannel):
+            audit_category = discord.utils.find(
+                lambda item: item.name.casefold() == AUDIT_LOG_CATEGORY_NAME.casefold(),
+                guild.categories,
+            )
+        if not isinstance(audit_category, discord.CategoryChannel):
+            logging.error("Could not resolve the audit log category for membership application reviews")
+            return
         review_channel = discord.utils.find(
             lambda channel: channel.name == APPLICATION_REVIEW_CHANNEL_NAME,
             guild.text_channels,
@@ -2565,14 +2574,14 @@ class GameAssistBot(commands.Bot):
         if review_channel is None:
             review_channel = await guild.create_text_channel(
                 APPLICATION_REVIEW_CHANNEL_NAME,
-                category=category,
+                category=audit_category,
                 overwrites=review_overwrites,
                 topic="Private membership application queue — server owner review only.",
                 reason="Create private membership application review queue",
             )
-        elif review_channel.category_id != category.id or review_channel.overwrites != review_overwrites:
+        elif review_channel.category_id != audit_category.id or review_channel.overwrites != review_overwrites:
             await review_channel.edit(
-                category=category,
+                category=audit_category,
                 overwrites=review_overwrites,
                 sync_permissions=False,
                 reason="Restore owner-only membership application reviews",
