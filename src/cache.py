@@ -612,6 +612,17 @@ class SQLiteCache:
         return {"ticket_key": row[0], "origin_guild_id": row[1], "origin_thread_id": row[2],
                 "central_thread_id": int(row[3]), "created_at": int(row[4])}
 
+    async def feedback_mirror_for_origin_thread(self, origin_thread_id: int) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT ticket_key, origin_guild_id, origin_thread_id, central_thread_id, created_at "
+            "FROM feedback_ticket_mirrors WHERE origin_thread_id = ? ORDER BY created_at DESC LIMIT 1",
+            (origin_thread_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"ticket_key": row[0], "origin_guild_id": row[1], "origin_thread_id": row[2],
+                "central_thread_id": int(row[3]), "created_at": int(row[4])}
+
     async def save_inventory_scan_diagnostic(
         self,
         *,

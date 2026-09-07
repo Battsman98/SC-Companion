@@ -855,6 +855,7 @@ class GameAssistBot(commands.Bot):
         await self._run_startup_step("provision membership applications", self.ensure_membership_applications)
         await self._run_startup_step("refresh Bot Manager channel access", self.ensure_bot_manager_role)
         await self._run_startup_step("prepare feedback forum", self.ensure_feedback_forum)
+        await self._run_startup_step("backfill shared feedback tickets", self.backfill_feedback_tickets)
         await self._run_startup_step("prepare trading forum", self.ensure_trading_forum)
         await self._run_startup_step("verify inventory channel", self.ensure_inventory_search_channel)
         await self._run_startup_step("sync command references", self.sync_commands_reference_message)
@@ -894,12 +895,38 @@ class GameAssistBot(commands.Bot):
     async def on_thread_create(self, thread: discord.Thread) -> None:
         if thread.guild.id == self.settings.discord_guild_id or not isinstance(thread.parent, discord.ForumChannel):
             return
-        if thread.parent.name != "feedback-and-issues" or not self.settings.feedback_forum_channel_id:
+        if thread.parent.name != "feedback-and-issues":
+            return
+        await self.mirror_feedback_thread(thread)
+
+    def primary_feedback_forum(self) -> discord.ForumChannel | None:
+        guild = self.get_guild(self.settings.discord_guild_id or 0)
+        if guild is None:
+            return None
+        candidates: list[discord.ForumChannel] = []
+        tracked = guild.get_channel(self.visitor_channels.get("feedback-and-issues", 0))
+        if isinstance(tracked, discord.ForumChannel):
+            candidates.append(tracked)
+        category = guild.get_channel(self.visitor_category_id or 0)
+        if isinstance(category, discord.CategoryChannel):
+            candidates.extend(
+                item for item in category.channels
+                if isinstance(item, discord.ForumChannel) and item.name == "feedback-and-issues"
+            )
+        configured = guild.get_channel(self.settings.feedback_forum_channel_id or 0)
+        if isinstance(configured, discord.ForumChannel):
+            candidates.append(configured)
+        candidates.extend(item for item in guild.forums if item.name == "feedback-and-issues")
+        return next(iter(dict.fromkeys(candidates)), None)
+
+    async def mirror_feedback_thread(self, thread: discord.Thread) -> None:
+        if await self.cache.feedback_mirror_for_origin_thread(thread.id):
             return
         try:
             starter = await thread.fetch_message(thread.id)
-            central = await self.fetch_channel(self.settings.feedback_forum_channel_id)
+            central = self.primary_feedback_forum()
             if not isinstance(central, discord.ForumChannel):
+                logging.error("Could not find the current primary feedback forum")
                 return
             mirror_embed = discord.Embed(
                 title=f"Mirrored ticket from {thread.guild.name}",
@@ -914,6 +941,16 @@ class GameAssistBot(commands.Bot):
             await self.cache.save_feedback_mirror(f"discord:{thread.id}", central_thread.id, thread.guild.id, thread.id)
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
             logging.exception("Could not mirror feedback thread %s", thread.id)
+
+    async def backfill_feedback_tickets(self) -> None:
+        for guild in self.guilds:
+            if guild.id == self.settings.discord_guild_id:
+                continue
+            for forum in guild.forums:
+                if forum.name != "feedback-and-issues":
+                    continue
+                for thread in forum.threads:
+                    await self.mirror_feedback_thread(thread)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.author.id not in self.settings.bot_admin_user_ids:
