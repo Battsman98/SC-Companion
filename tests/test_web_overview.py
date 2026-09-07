@@ -31,7 +31,11 @@ def test_public_discord_install_link_targets_sc_companion() -> None:
 
     assert "Add SC Companion to Discord" not in html
     assert javascript.count("Add SC Companion to Discord") == 2
-    assert "https://discord.com/oauth2/authorize?client_id=1546598117611405384" in javascript
+    invite_url = (
+        "https://discord.com/oauth2/authorize?client_id=1546598117611405384"
+        "&amp;scope=bot%20applications.commands&amp;permissions=397821234192"
+    )
+    assert javascript.count(invite_url) == 2
 
 
 def test_inventory_export_offers_categories_and_uex_selling_prices() -> None:

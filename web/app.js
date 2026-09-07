@@ -1076,7 +1076,7 @@ async function loadMe() {
       userPanel.innerHTML = `<div class="user-row">
         <span>${currentUser.discord_auth_enabled ? "Not signed in" : "Discord OAuth needs setup"}</span>
         <a class="button-link" href="/auth/discord/login">Log in with ${currentUser.login_provider === "sc_companion" ? "SC Companion" : "Peep"}</a>
-        <a class="button-link add-discord-button" href="https://discord.com/oauth2/authorize?client_id=1546598117611405384" target="_blank" rel="noopener noreferrer">Add SC Companion to Discord</a>
+        <a class="button-link add-discord-button" href="https://discord.com/oauth2/authorize?client_id=1546598117611405384&amp;scope=bot%20applications.commands&amp;permissions=397821234192" target="_blank" rel="noopener noreferrer">Add SC Companion to Discord</a>
       </div>`;
       outputs.savedShips.innerHTML = stateMessage("Log in with Discord to save ships to your account.");
       outputs.savedBlueprints.innerHTML = stateMessage("Log in with Discord to save blueprints to your account.");
@@ -1091,7 +1091,7 @@ async function loadMe() {
     userPanel.innerHTML = `<div class="user-row">
       ${currentUser.avatar_url ? `<img src="${escapeAttribute(currentUser.avatar_url)}" alt="">` : ""}
       <span><strong>${escapeHtml(currentUser.display_name || currentUser.username)}</strong><br>${escapeHtml(badges)}</span>
-      <a class="button-link add-discord-button" href="https://discord.com/oauth2/authorize?client_id=1546598117611405384" target="_blank" rel="noopener noreferrer">Add SC Companion to Discord</a>
+      <a class="button-link add-discord-button" href="https://discord.com/oauth2/authorize?client_id=1546598117611405384&amp;scope=bot%20applications.commands&amp;permissions=397821234192" target="_blank" rel="noopener noreferrer">Add SC Companion to Discord</a>
       ${currentUser.can_connect_peep ? '<a class="button-link" href="/auth/peep/login">Connect Peep</a>' : ''}
       <form method="post" action="/auth/logout"><button type="submit">Log out</button></form>
       <button type="button" data-feedback-open>Feedback / Report Issue</button>
