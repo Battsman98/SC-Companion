@@ -12,7 +12,9 @@ from src.bot import (
     VISITOR_CHANNEL_SPECS,
     VISITOR_ARCHIVE_CHANNEL_NAMES,
     VISITOR_COMMAND_CHANNELS,
+    VISITOR_REMOVED_CHANNEL_NAMES,
     build_feedback_template_embed,
+    build_visitor_channel_directory_embed,
     build_visitor_command_example_embeds,
 )
 from src.web import _feedback_embed, _provided_feedback_images
@@ -81,12 +83,16 @@ def test_shared_feedback_forums_copy_the_main_discord_tags() -> None:
     assert FEEDBACK_FORUM_DEFAULT_REACTION == "👍"
 
 
-def test_main_start_channel_only_keeps_welcome_and_directory() -> None:
+def test_main_about_channel_only_keeps_welcome_and_directory() -> None:
     source = inspect.getsource(GameAssistBot._sync_commands_reference_channel)
     assert "directory_only" in source
-    assert 'getattr(channel, "name", None) == "bot-start-here"' in source
+    assert 'getattr(channel, "name", None) == "about-the-bot"' in source
     assert 'title == "Example /lookup Response"' in source
     assert 'title.startswith("Discord Bot Commands - ")' in source
+
+    directory = build_visitor_channel_directory_embed({"general-chat": 123, "ship-search": 456})
+    assert "<#123>: /lookup, /status" in directory.description
+    assert "<#456>: /ship" in directory.description
 
 
 def test_shared_feedback_forums_publish_the_main_example_post() -> None:
@@ -101,12 +107,16 @@ def test_shared_feedback_forums_publish_the_main_example_post() -> None:
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
     assert VISITOR_CATEGORY_NAME == "Discord Bot Hub"
     assert "bot-commands" not in VISITOR_CHANNEL_SPECS
+    assert VISITOR_REMOVED_CHANNEL_NAMES == {"bot-start-here", "bot-status"}
+    assert VISITOR_REMOVED_CHANNEL_NAMES.isdisjoint(VISITOR_CHANNEL_SPECS)
     assert {"blueprints", "missions-wikelo", "timers"} <= set(VISITOR_CHANNEL_SPECS)
     assert {"bot-commands", "industry-operations", "blueprints-and-missions",
             "executive-hangar-status", "contested-zone-timers"} == VISITOR_ARCHIVE_CHANNEL_NAMES
     assert VISITOR_CHANNEL_SPECS["general-chat"] == "text"
     assert VISITOR_CHANNEL_SPECS["visitor-lounge"] == "voice"
     assert VISITOR_COMMAND_CHANNELS["ship"] == "ship-search"
+    assert VISITOR_COMMAND_CHANNELS["lookup"] == "general-chat"
+    assert VISITOR_COMMAND_CHANNELS["status"] == "general-chat"
     assert VISITOR_COMMAND_CHANNELS["trade routing"] == "trade-tools"
     assert VISITOR_COMMAND_CHANNELS["miningadd"] == "mining-tools"
     assert not any(name.startswith("admin") or name.startswith("audit") for name in VISITOR_COMMAND_CHANNELS)
