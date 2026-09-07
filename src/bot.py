@@ -77,7 +77,7 @@ VISITOR_ROLE_NAME = "Visitor"
 BOT_MANAGER_ROLE_NAME = "Bot Manager"
 VISITOR_CATEGORY_NAME = "SC Companion Hub"
 LEGACY_VISITOR_CATEGORY_NAMES = {"Visitor Bot Hub", "Discord Bot Hub"}
-VISITOR_ARCHIVE_CATEGORY_NAME = "Bot Hub Archive"
+REMOVED_VISITOR_ARCHIVE_CATEGORY_NAME = "Bot Hub Archive"
 VISITOR_ARCHIVE_CHANNEL_NAMES = {
     "bot-commands",
     "industry-operations",
@@ -2267,7 +2267,7 @@ class GameAssistBot(commands.Bot):
         self.visitor_category_id = category.id
 
         await self._remove_legacy_visitor_categories(guild, category)
-        await self._archive_replaced_visitor_channels(guild, category, role, me)
+        await self._delete_replaced_visitor_channels(guild, category)
 
         about = discord.utils.find(lambda item: item.name == "about-the-bot", guild.text_channels)
         if isinstance(about, discord.TextChannel):
@@ -2358,12 +2358,10 @@ class GameAssistBot(commands.Bot):
         if isinstance(welcome, discord.TextChannel):
             await self.sync_visitor_welcome(welcome, role)
 
-    async def _archive_replaced_visitor_channels(
+    async def _delete_replaced_visitor_channels(
         self,
         guild: discord.Guild,
         active_category: discord.CategoryChannel,
-        visitor_role: discord.Role,
-        me: discord.Member,
     ) -> None:
         replaced_by_id = {
             channel.id: channel for channel in active_category.channels
@@ -2376,47 +2374,16 @@ class GameAssistBot(commands.Bot):
             )
             for duplicate in matches[1:]:
                 replaced_by_id[duplicate.id] = duplicate
-        replaced = list(replaced_by_id.values())
-        if not replaced:
-            return
         archive = discord.utils.find(
-            lambda item: item.name.casefold() == VISITOR_ARCHIVE_CATEGORY_NAME.casefold(),
+            lambda item: item.name.casefold() == REMOVED_VISITOR_ARCHIVE_CATEGORY_NAME.casefold(),
             guild.categories,
         )
-        manager = guild.get_role(self.hub_role_ids.get(BOT_MANAGER_ROLE_NAME, 0))
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            visitor_role: discord.PermissionOverwrite(view_channel=False),
-            me: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                manage_channels=True,
-            ),
-        }
-        if manager is not None:
-            overwrites[manager] = discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=False,
-                read_message_history=True,
-            )
-        if archive is None:
-            archive = await guild.create_category(
-                VISITOR_ARCHIVE_CATEGORY_NAME,
-                overwrites=overwrites,
-                reason="Preserve replaced Discord Bot Hub channels",
-            )
-        elif archive.overwrites != overwrites:
-            await archive.edit(
-                overwrites=overwrites,
-                reason="Protect preserved Discord Bot Hub history",
-            )
-        for channel in replaced:
-            await channel.edit(
-                category=archive,
-                sync_permissions=True,
-                reason="Archive replaced Discord Bot Hub channel",
-            )
+        for channel in replaced_by_id.values():
+            await channel.delete(reason="Remove replaced SC Companion Hub channel")
+        if archive is not None:
+            for channel in list(archive.channels):
+                await channel.delete(reason="Permanently remove Bot Hub Archive contents")
+            await archive.delete(reason="Permanently remove Bot Hub Archive")
 
     async def remove_legacy_star_citizen_bot_channels(
         self,
