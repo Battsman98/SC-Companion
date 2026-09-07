@@ -2999,6 +2999,7 @@ class GameAssistBot(commands.Bot):
             logging.warning("Commands reference channel %s is not messageable", channel_id)
             return
 
+        directory_only = directory_only or getattr(channel, "name", None) == "bot-start-here"
         embeds = (
             [build_command_channel_directory_embed(self.settings)]
             if directory_only

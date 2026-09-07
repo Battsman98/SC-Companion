@@ -84,6 +84,7 @@ def test_shared_feedback_forums_copy_the_main_discord_tags() -> None:
 def test_main_start_channel_only_keeps_welcome_and_directory() -> None:
     source = inspect.getsource(GameAssistBot._sync_commands_reference_channel)
     assert "directory_only" in source
+    assert 'getattr(channel, "name", None) == "bot-start-here"' in source
     assert 'title == "Example /lookup Response"' in source
     assert 'title.startswith("Discord Bot Commands - ")' in source
 
