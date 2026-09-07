@@ -1,6 +1,8 @@
 import asyncio
+from types import SimpleNamespace
 
 from src.bot import (
+    _automatic_module_channel_id,
     FirstRunSetupView,
     ConfirmBotUninstallView,
     NativeAdminView,
@@ -22,6 +24,18 @@ def test_timer_commands_are_shared_module_commands() -> None:
     assert module_for_command("exec") == "timers"
     assert module_for_command("execset") == "timers"
     assert module_for_command("cztimer") == "timers"
+
+
+def test_automatic_setup_resolves_each_feature_to_its_own_channel() -> None:
+    category = SimpleNamespace(id=50, name="SC Companion")
+    ship = SimpleNamespace(id=101, name="ship-search", category_id=50)
+    mining = SimpleNamespace(id=102, name="mining-tools", category_id=50)
+    unrelated = SimpleNamespace(id=999, name="ship-search", category_id=60)
+    guild = SimpleNamespace(categories=[category], text_channels=[unrelated, ship, mining])
+
+    assert _automatic_module_channel_id(guild, "ship_search") == 101
+    assert _automatic_module_channel_id(guild, "mining_tools") == 102
+    assert _automatic_module_channel_id(guild, "timers") is None
 
 
 def test_mining_tools_are_visible_and_complete() -> None:

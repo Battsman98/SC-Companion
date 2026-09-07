@@ -533,8 +533,18 @@ class GameAssistCommandTree(app_commands.CommandTree):
                     ephemeral=True,
                 )
                 return False
-            if module["channel_id"]:
-                allowed_channel_ids.add(int(module["channel_id"]))
+            channel_id = module["channel_id"]
+            if not channel_id and configured.get("channel_setup_mode") == "automatic":
+                channel_id = _automatic_module_channel_id(interaction.guild, module_key)
+            if channel_id:
+                allowed_channel_ids.add(int(channel_id))
+            elif configured.get("channel_setup_mode") == "automatic":
+                await interaction.response.send_message(
+                    f"The command channel for `/{command_name}` is still being set up. "
+                    "A server manager can reopen `/admin panel` to repair the setup.",
+                    ephemeral=True,
+                )
+                return False
         elif is_primary_guild:
             allowed_channel_ids = bot.allowed_command_channel_ids(command_name)
         if allowed_channel_ids and interaction.channel_id not in allowed_channel_ids:
@@ -3185,6 +3195,20 @@ def _interaction_command_name(interaction: discord.Interaction) -> str:
         options = option.get("options")
 
     return _normalize_command_name(" ".join(names))
+
+
+def _automatic_module_channel_id(guild: discord.Guild | None, module_key: str) -> int | None:
+    """Resolve an automatic channel even if its saved ID has not caught up yet."""
+    if guild is None:
+        return None
+    expected_name = module_key.replace("_", "-")
+    category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+    channel = discord.utils.find(
+        lambda item: item.name == expected_name
+        and (category is None or item.category_id == category.id),
+        guild.text_channels,
+    )
+    return channel.id if channel is not None else None
 
 
 def _normalize_command_name(value: str) -> str:
