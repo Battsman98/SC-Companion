@@ -90,6 +90,7 @@ def test_manual_setup_has_an_explicit_next_step_for_each_enabled_feature() -> No
     assert "Next: Assign Channels" in labels
     automatic_labels = [getattr(item, "label", None) for item in NativeAdminView(modules, "automatic").children]
     assert "Next: Assign Channels" not in automatic_labels
+    assert "Next: Create Channels" in automatic_labels
 
     timer_modules = {
         key: {"enabled": key == "timers", "channel_id": None, "resource_channel_id": None}

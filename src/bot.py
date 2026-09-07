@@ -5833,12 +5833,25 @@ class ChannelSetupChoiceView(discord.ui.View):
         if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
             await interaction.response.send_message("You need Manage Server permission to choose channel setup.", ephemeral=True)
             return
+        if mode == "automatic" and (
+            interaction.guild.me is None
+            or not interaction.guild.me.guild_permissions.manage_channels
+        ):
+            await interaction.response.send_message(
+                "SC Companion needs the **Manage Channels** permission before it can create channels. "
+                "Enable that permission for the bot role, then choose automatic setup again.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
         await bot.cache.save_guild_bot_settings(
             interaction.guild.id, interaction.guild.name, self.modules, interaction.user.id, mode
         )
         if mode == "automatic":
-            await bot.ensure_automatic_module_channels(interaction.guild)
-        await interaction.response.edit_message(
+            # This creates the shared About and Feedback destinations first, then
+            # creates a channel for every enabled feature.
+            await bot.ensure_about_panel(interaction.guild)
+        await interaction.edit_original_response(
             embed=build_native_admin_embed(interaction.guild, self.modules),
             view=NativeAdminView(self.modules, mode),
         )
@@ -6065,6 +6078,10 @@ class NativeAdminView(discord.ui.View):
             assign = discord.ui.Button(label="Next: Assign Channels", style=discord.ButtonStyle.primary, emoji="➡️")
             assign.callback = self.assign_channels
             self.add_item(assign)
+        else:
+            create = discord.ui.Button(label="Next: Create Channels", style=discord.ButtonStyle.primary, emoji="➡️")
+            create.callback = self.create_channels
+            self.add_item(create)
         guide = discord.ui.Button(label="Setup Guide", style=discord.ButtonStyle.secondary, emoji="📘")
         guide.callback = self.show_guide
         self.add_item(guide)
@@ -6084,6 +6101,27 @@ class NativeAdminView(discord.ui.View):
     async def assign_channels(self, interaction: discord.Interaction) -> None:
         view = ManualChannelWizardView(self.modules)
         await interaction.response.edit_message(embed=view.embed(), view=view)
+
+    async def create_channels(self, interaction: discord.Interaction) -> None:
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _can_manage_admin_commands(interaction, bot.settings):
+            await interaction.response.send_message(
+                "You need Manage Server permission to create bot channels.", ephemeral=True
+            )
+            return
+        if interaction.guild.me is None or not interaction.guild.me.guild_permissions.manage_channels:
+            await interaction.response.send_message(
+                "SC Companion needs the **Manage Channels** permission before it can create channels. "
+                "Enable that permission for the bot role, then press **Next: Create Channels** again.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        await bot.ensure_about_panel(interaction.guild)
+        await interaction.edit_original_response(
+            embed=build_native_admin_embed(interaction.guild, self.modules),
+            view=NativeAdminView(self.modules, "automatic"),
+        )
 
     async def show_channel_choice(self, interaction: discord.Interaction) -> None:
         embed = discord.Embed(
