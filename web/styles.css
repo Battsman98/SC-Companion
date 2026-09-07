@@ -478,6 +478,24 @@ button:hover, .button-link:hover, .tabs button.active {
   gap: 10px;
 }
 
+.bot-setup-guide {
+  margin-bottom: 1rem;
+}
+
+.bot-setup-guide h3 {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.bot-setup-guide ol {
+  margin: 1rem 0;
+  padding-left: 1.4rem;
+}
+
+.bot-setup-guide li {
+  margin: 0.65rem 0;
+  line-height: 1.55;
+}
+
 .bot-module-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr);
