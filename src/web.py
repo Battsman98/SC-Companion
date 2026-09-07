@@ -1259,6 +1259,26 @@ def _provided_feedback_images(images: list[UploadFile]) -> list[UploadFile]:
     return [upload for upload in images if (upload.filename or "").strip()]
 
 
+async def _main_feedback_forum_id() -> int:
+    settings = state().settings
+    if not settings.discord_guild_id:
+        raise HTTPException(status_code=503, detail="The primary Discord server is not configured.")
+    try:
+        channels = await _discord_guild_channels(settings.discord_guild_id)
+        forum = next(
+            (item for item in channels if item["name"] == "feedback-and-issues" and item["type"] in {15, 16}),
+            None,
+        )
+        if forum:
+            return int(forum["id"])
+    except HTTPException:
+        if not settings.feedback_forum_channel_id:
+            raise
+    if settings.feedback_forum_channel_id:
+        return settings.feedback_forum_channel_id
+    raise HTTPException(status_code=503, detail="The main Discord feedback forum could not be found.")
+
+
 @app.post("/api/me/feedback")
 async def submit_feedback(
     report_type: str = Form(...),
@@ -1272,9 +1292,9 @@ async def submit_feedback(
     user=Depends(require_user),
 ) -> dict[str, str]:
     settings = state().settings
-    channel_id = settings.feedback_forum_channel_id
-    if not channel_id or not settings.discord_token:
+    if not settings.discord_token:
         raise HTTPException(status_code=503, detail="The Discord feedback forum is not configured.")
+    channel_id = await _main_feedback_forum_id()
     if report_type not in {"issue", "improvement", "feedback"}:
         raise HTTPException(status_code=400, detail="Choose a valid report type.")
     title = " ".join(title.split())
@@ -1419,6 +1439,13 @@ async def _send_discord_channel_message(channel_id: int, content: str) -> dict[s
     return message
 
 
+async def _require_feedback_thread(thread_id: int) -> dict[str, Any]:
+    thread = await _discord_api("GET", f"/channels/{thread_id}")
+    if int(thread.get("parent_id") or 0) != await _main_feedback_forum_id():
+        raise HTTPException(status_code=404, detail="That feedback ticket was not found.")
+    return thread
+
+
 @app.get("/api/admin/discord/guilds", dependencies=[Depends(require_bot_admin)])
 async def discord_guilds() -> list[dict[str, str]]:
     guilds = await _discord_api("GET", "/users/@me/guilds")
@@ -1444,21 +1471,29 @@ async def send_discord_message(channel_id: int, payload: DiscordMessageRequest) 
 @app.get("/api/admin/feedback/tickets", dependencies=[Depends(require_bot_admin)])
 async def feedback_tickets() -> list[dict[str, Any]]:
     settings = state().settings
-    if not settings.discord_guild_id or not settings.feedback_forum_channel_id:
-        raise HTTPException(status_code=503, detail="The Discord feedback forum is not configured.")
+    forum_id = await _main_feedback_forum_id()
     active = await _discord_api("GET", f"/guilds/{settings.discord_guild_id}/threads/active")
-    threads = [item for item in active.get("threads", []) if int(item.get("parent_id") or 0) == settings.feedback_forum_channel_id]
+    archived = await _discord_api("GET", f"/channels/{forum_id}/threads/archived/public?limit=50")
+    by_id = {
+        str(item["id"]): item
+        for item in [*active.get("threads", []), *archived.get("threads", [])]
+        if int(item.get("parent_id") or 0) == forum_id
+    }
+    threads = list(by_id.values())
     statuses = await state().cache.discord_ticket_statuses([int(item["id"]) for item in threads])
     return [{
         "id": str(item["id"]), "name": str(item.get("name") or "Untitled ticket"),
-        "guild_id": str(settings.discord_guild_id), "status": statuses.get(int(item["id"]), "open"),
+        "guild_id": str(settings.discord_guild_id),
+        "status": statuses.get(int(item["id"]), "resolved" if item.get("thread_metadata", {}).get("archived") else "open"),
+        "archived": bool(item.get("thread_metadata", {}).get("archived")),
         "message_count": int(item.get("message_count") or 0),
         "url": f"https://discord.com/channels/{settings.discord_guild_id}/{item['id']}",
-    } for item in threads]
+    } for item in sorted(threads, key=lambda item: str(item.get("id") or ""), reverse=True)]
 
 
 @app.get("/api/admin/feedback/tickets/{thread_id}/messages", dependencies=[Depends(require_bot_admin)])
 async def feedback_ticket_messages(thread_id: int) -> list[dict[str, Any]]:
+    await _require_feedback_thread(thread_id)
     messages = await _discord_api("GET", f"/channels/{thread_id}/messages?limit=50")
     return [{
         "id": str(item["id"]), "content": str(item.get("content") or ""),
@@ -1468,6 +1503,13 @@ async def feedback_ticket_messages(thread_id: int) -> list[dict[str, Any]]:
     } for item in reversed(messages)]
 
 
+@app.post("/api/admin/feedback/tickets/{thread_id}/reply", dependencies=[Depends(require_bot_admin)])
+async def reply_to_feedback_ticket(thread_id: int, payload: DiscordMessageRequest) -> dict[str, str]:
+    await _require_feedback_thread(thread_id)
+    message = await _send_discord_channel_message(thread_id, payload.content)
+    return {"status": "sent", "message_id": str(message.get("id") or "")}
+
+
 @app.put("/api/admin/feedback/tickets/{thread_id}/status", dependencies=[Depends(require_bot_admin)])
 async def update_feedback_ticket_status(
     thread_id: int, payload: DiscordTicketStatusRequest, user=Depends(require_user)
@@ -1475,9 +1517,11 @@ async def update_feedback_ticket_status(
     settings = state().settings
     if not settings.discord_guild_id:
         raise HTTPException(status_code=503, detail="Discord is not configured.")
+    await _require_feedback_thread(thread_id)
     await state().cache.set_discord_ticket_status(thread_id, settings.discord_guild_id, payload.status, user.id)
     label = payload.status.replace("_", " ").title()
     await _send_discord_channel_message(thread_id, f"**Ticket status updated: {label}**")
+    await _discord_api("PATCH", f"/channels/{thread_id}", json_payload={"archived": payload.status == "resolved"})
     return {"status": payload.status}
 
 

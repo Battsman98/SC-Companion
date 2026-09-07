@@ -1886,7 +1886,6 @@ const discordConsole = document.querySelector("[data-discord-console]");
 const ticketList = document.querySelector("[data-ticket-list]");
 const ticketMessages = document.querySelector("[data-ticket-messages]");
 const ticketReplyForm = document.querySelector("[data-ticket-reply]");
-const discordSendForm = document.querySelector("[data-discord-send]");
 let selectedTicket = null;
 
 async function jsonRequest(url, options = {}) {
@@ -1901,9 +1900,6 @@ async function openDiscordConsole() {
   discordConsole.hidden = false;
   document.body.classList.add("feedback-modal-open");
   try {
-    const guilds = await jsonRequest("/api/admin/discord/guilds");
-    const select = discordSendForm?.elements.guild;
-    if (select) select.innerHTML = '<option value="">Choose a server</option>' + guilds.map((guild) => `<option value="${escapeAttribute(guild.id)}">${escapeHtml(guild.name)}</option>`).join("");
     await loadTickets();
   } catch (error) {
     if (ticketList) ticketList.textContent = error.message;
@@ -1920,7 +1916,7 @@ async function loadTickets() {
   if (!ticketList) return;
   ticketList.textContent = "Loading tickets...";
   const tickets = await jsonRequest("/api/admin/feedback/tickets");
-  ticketList.innerHTML = tickets.length ? tickets.map((ticket) => `<button type="button" data-ticket-id="${escapeAttribute(ticket.id)}" data-ticket-name="${escapeAttribute(ticket.name)}" data-ticket-status="${escapeAttribute(ticket.status)}"><strong>${escapeHtml(ticket.name)}</strong><span>${escapeHtml(ticket.status.replaceAll("_", " "))} · ${ticket.message_count} messages</span></button>`).join("") : "<p>No active feedback tickets.</p>";
+  ticketList.innerHTML = tickets.length ? tickets.map((ticket) => `<button type="button" data-ticket-id="${escapeAttribute(ticket.id)}" data-ticket-name="${escapeAttribute(ticket.name)}" data-ticket-status="${escapeAttribute(ticket.status)}"><strong>${escapeHtml(ticket.name)}</strong><span>${escapeHtml(ticket.status.replaceAll("_", " "))}${ticket.archived ? " · archived" : ""} · ${ticket.message_count} messages</span></button>`).join("") : "<p>No feedback tickets were found in the main forum.</p>";
 }
 
 async function selectTicket(button) {
@@ -2029,31 +2025,12 @@ ticketReplyForm?.addEventListener("submit", async (event) => {
   const content = ticketReplyForm.elements.content.value.trim();
   const status = ticketReplyForm.elements.status.value;
   try {
-    if (content) await jsonRequest(`/api/admin/discord/channels/${selectedTicket.id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) });
+    if (content) await jsonRequest(`/api/admin/feedback/tickets/${selectedTicket.id}/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) });
     await jsonRequest(`/api/admin/feedback/tickets/${selectedTicket.id}/status`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
     ticketReplyForm.elements.content.value = "";
     await selectTicket(document.querySelector(`[data-ticket-id="${selectedTicket.id}"]`));
     await loadTickets();
   } catch (error) { ticketMessages.insertAdjacentHTML("beforeend", `<p>${escapeHtml(error.message)}</p>`); }
-});
-
-discordSendForm?.elements.guild?.addEventListener("change", async (event) => {
-  const channel = discordSendForm.elements.channel;
-  channel.innerHTML = '<option value="">Loading channels...</option>';
-  try {
-    const channels = await jsonRequest(`/api/admin/discord/guilds/${event.target.value}/channels`);
-    channel.innerHTML = '<option value="">Choose a channel</option>' + channels.map((item) => `<option value="${escapeAttribute(item.id)}"># ${escapeHtml(item.name)}</option>`).join("");
-  } catch (error) { channel.innerHTML = `<option value="">${escapeHtml(error.message)}</option>`; }
-});
-
-discordSendForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const status = document.querySelector("[data-discord-send-status]");
-  try {
-    await jsonRequest(`/api/admin/discord/channels/${discordSendForm.elements.channel.value}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: discordSendForm.elements.content.value }) });
-    discordSendForm.elements.content.value = "";
-    status.textContent = "Message sent.";
-  } catch (error) { status.textContent = error.message; }
 });
 
 function setChangeAdminVisibility(canManageChanges) {
