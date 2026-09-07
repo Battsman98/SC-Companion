@@ -153,6 +153,7 @@ SHIP_LOANERS = {
     "zeus mk ii mr": ["Zeus Mk II ES"],
 }
 RSI_IMPORT_HEALTH_KEY = "rsi-import-health:v1"
+FEEDBACK_SYNC_LOCK = asyncio.Lock()
 SHIP_DISPLAY_PREFIXES = (
     "Aegis ",
     "Anvil ",
@@ -1469,6 +1470,76 @@ async def _send_discord_channel_message(channel_id: int, content: str) -> dict[s
     return message
 
 
+async def _sync_installed_server_feedback() -> int:
+    async with FEEDBACK_SYNC_LOCK:
+        settings = state().settings
+        central_forum_id = await _main_feedback_forum_id()
+        central_tag_id = await _feedback_forum_tag_id(central_forum_id, "issue")
+        guilds = await _discord_api("GET", "/users/@me/guilds?limit=200")
+        mirrored = 0
+        for guild in guilds:
+            guild_id = int(guild.get("id") or 0)
+            if not guild_id or guild_id == settings.discord_guild_id:
+                continue
+            try:
+                channels = await _discord_guild_channels(guild_id)
+                forums = [
+                    item for item in channels
+                    if item["type"] in {15, 16} and item["name"].casefold() == "feedback-and-issues"
+                ]
+                if not forums:
+                    continue
+                active = await _discord_api("GET", f"/guilds/{guild_id}/threads/active")
+                active_threads = active.get("threads", [])
+                archived_pages = await asyncio.gather(*(
+                    _discord_api("GET", f"/channels/{forum['id']}/threads/archived/public?limit=50")
+                    for forum in forums
+                ))
+                forum_ids = {int(item["id"]) for item in forums}
+                threads = {
+                    str(item["id"]): item
+                    for item in [*active_threads, *(thread for page in archived_pages for thread in page.get("threads", []))]
+                    if int(item.get("parent_id") or 0) in forum_ids
+                }
+                for thread in threads.values():
+                    thread_id = int(thread["id"])
+                    if str(thread.get("name") or "").casefold().startswith("example: how to submit"):
+                        continue
+                    if await state().cache.feedback_mirror_for_origin_thread(thread_id):
+                        continue
+                    starter = await _discord_api("GET", f"/channels/{thread_id}/messages/{thread_id}")
+                    author = starter.get("author", {})
+                    author_name = str(author.get("global_name") or author.get("username") or "Discord user")
+                    description = str(starter.get("content") or "Discord forum ticket")[:4000]
+                    embed = {
+                        "title": f"Mirrored ticket from {guild.get('name') or 'Discord server'}",
+                        "description": description,
+                        "color": 5793266,
+                        "fields": [{
+                            "name": "Origin",
+                            "value": f"[{thread.get('name') or 'Ticket'}](https://discord.com/channels/{guild_id}/{thread_id})",
+                            "inline": False,
+                        }, {"name": "Reported by", "value": author_name[:1024], "inline": True}],
+                    }
+                    payload: dict[str, Any] = {
+                        "name": f"[{guild.get('name') or 'Discord'}] {thread.get('name') or 'Ticket'}"[:100],
+                        "message": {"embeds": [embed], "allowed_mentions": {"parse": []}},
+                    }
+                    if central_tag_id:
+                        payload["applied_tags"] = [central_tag_id]
+                    created = await _discord_api(
+                        "POST", f"/channels/{central_forum_id}/threads", json_payload=payload
+                    )
+                    central_thread_id = int(created["id"])
+                    await state().cache.save_feedback_mirror(
+                        f"website-sync:{thread_id}", central_thread_id, guild_id, thread_id
+                    )
+                    mirrored += 1
+            except HTTPException:
+                logging.exception("Could not synchronize feedback tickets for guild %s", guild_id)
+        return mirrored
+
+
 async def _require_feedback_thread(thread_id: int) -> dict[str, Any]:
     thread = await _discord_api("GET", f"/channels/{thread_id}")
     if int(thread.get("parent_id") or 0) not in await _main_feedback_forum_ids():
@@ -1501,6 +1572,7 @@ async def send_discord_message(channel_id: int, payload: DiscordMessageRequest) 
 @app.get("/api/admin/feedback/tickets", dependencies=[Depends(require_bot_admin)])
 async def feedback_tickets() -> list[dict[str, Any]]:
     settings = state().settings
+    await _sync_installed_server_feedback()
     forum_ids = await _main_feedback_forum_ids()
     active = await _discord_api("GET", f"/guilds/{settings.discord_guild_id}/threads/active")
     archived_pages = await asyncio.gather(*(
