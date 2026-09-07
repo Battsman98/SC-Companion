@@ -15,7 +15,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
-from src.guild_config import module_for_command, normalize_module_settings
+from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.sources.base import (
     BlueprintIngredient,
@@ -707,6 +707,10 @@ class GameAssistBot(commands.Bot):
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
 
     async def on_ready(self) -> None:
+        for guild in self.guilds:
+            await self._run_startup_step(
+                f"publish About panel in {guild.id}", lambda guild=guild: self.ensure_about_panel(guild)
+            )
         if self._commands_reference_synced:
             return
 
@@ -741,6 +745,64 @@ class GameAssistBot(commands.Bot):
             self._anniversary_task = asyncio.create_task(self._anniversary_role_loop())
         if self._trade_store_sync_task is None:
             self._trade_store_sync_task = asyncio.create_task(self._trade_store_sync_loop())
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        await self.ensure_about_panel(guild)
+
+    async def ensure_about_panel(self, guild: discord.Guild) -> None:
+        if guild.me is None or not guild.me.guild_permissions.manage_channels:
+            logging.warning("Manage Channels is required to create the About page in guild %s", guild.id)
+            return
+        channel = discord.utils.find(lambda item: item.name == "about-the-bot", guild.text_channels)
+        if channel is None:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False),
+                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True),
+            }
+            channel = await guild.create_text_channel(
+                "about-the-bot", overwrites=overwrites, reason="Create the SC Companion information page"
+            )
+        cache_key = f"guild:{guild.id}:about-panel-message"
+        message_id = await self.cache.get(cache_key)
+        message = None
+        if message_id:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                message = await channel.fetch_message(int(message_id))
+        if message is None:
+            message = await channel.send(embed=build_about_bot_embed(guild))
+            await self.cache.set(cache_key, message.id, 315360000)
+        else:
+            await message.edit(embed=build_about_bot_embed(guild))
+        await self.sync_guild_command_examples(guild)
+
+    async def sync_guild_command_examples(self, guild: discord.Guild) -> None:
+        configured = await self.cache.guild_bot_settings(guild.id)
+        if configured is None:
+            return
+        modules = normalize_module_settings(configured.get("modules"))
+        grouped: dict[int, list[str]] = {}
+        for key, settings in modules.items():
+            if settings["enabled"] and settings["channel_id"]:
+                grouped.setdefault(int(settings["channel_id"]), []).append(key)
+        for channel_id, module_keys in grouped.items():
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel) or guild.me is None:
+                continue
+            permissions = channel.permissions_for(guild.me)
+            if not permissions.send_messages or not permissions.embed_links:
+                continue
+            cache_key = f"guild:{guild.id}:command-guide:{channel_id}"
+            message_id = await self.cache.get(cache_key)
+            message = None
+            if message_id:
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = await channel.fetch_message(int(message_id))
+            embed = build_guild_command_guide_embed(module_keys)
+            if message is None:
+                message = await channel.send(embed=embed)
+                await self.cache.set(cache_key, message.id, 315360000)
+            else:
+                await message.edit(embed=embed)
 
     async def _website_deployment_monitor_loop(self) -> None:
         """Record website-only Render revisions without restarting Discord."""
@@ -2749,6 +2811,80 @@ def _truncate_audit_value(value: object) -> str:
 @app_commands.command(name="status", description="Check whether the assistance bot is online.")
 async def status_command(interaction: discord.Interaction) -> None:
     await interaction.response.send_message("Online and ready.", ephemeral=True)
+
+
+SUPPORT_URL = "https://square.link/u/g43WPEyN?src=embed"
+SUPPORT_QR_URL = "https://sccompanion.org/assets/media/support-square-qr.png"
+
+
+def build_about_bot_embed(guild: discord.Guild | None = None) -> discord.Embed:
+    embed = discord.Embed(
+        title="About SC Companion",
+        description=(
+            "SC Companion is a community-built Star Citizen assistant for ship and item research, mining, "
+            "blueprints, missions, Wikelo contracts, personal inventory, and trade planning. Server managers "
+            "choose which modules and channels are enabled for their community."
+        ),
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="Purpose & scope",
+        value=(
+            "The bot combines shared game-data catalogs with server-specific configuration. Personal inventory "
+            "and blueprint collections remain private to the linked Discord account. Community findings are "
+            "published globally only after review."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Support operating costs",
+        value=(
+            f"SC Companion is free to use. [Optional contributions through Square]({SUPPORT_URL}) help cover "
+            "hosting, domains, storage, security, and other operating costs. Contributions are not tax-deductible "
+            "and do not provide ownership, guaranteed service, special access, or an advantage over other members."
+        ),
+        inline=False,
+    )
+    embed.add_field(name="Website", value="https://sccompanion.org", inline=False)
+    if guild is not None:
+        embed.add_field(
+            name="This Discord",
+            value=f"Installed for **{guild.name}**. Server managers configure modules and channels at sccompanion.org.",
+            inline=False,
+        )
+    embed.set_image(url=SUPPORT_QR_URL)
+    embed.set_footer(text="Unofficial fan project · Not affiliated with Cloud Imperium Games or Roberts Space Industries")
+    return embed
+
+
+MODULE_EXAMPLES = {
+    "ship_search": "/ship name: Carrack",
+    "mining_tools": "/mining material: Quantanium\n/industry split gross:1200000 crew:Alex,Bex,Cato expenses:150000",
+    "blueprints": "/blueprint name: NDB-28 Repeater\n/myblueprints name: Quantum Drive",
+    "missions_wikelo": "/mission name: Bounty Hunter\n/wikelo item: Golem",
+    "item_locator": "/item search name: FS-9 LMG\n/loot search name: ADP-mk4 Arms Justified",
+    "inventory_search": "/inventory search item: FS-9 station: Port Tressler",
+    "trade_tools": "/commodity name: Gold\n/trade routing starting_point: Area18 investment:500000",
+}
+
+
+def build_guild_command_guide_embed(module_keys: list[str]) -> discord.Embed:
+    embed = discord.Embed(
+        title="SC Companion Command Guide",
+        description="Enabled commands for this channel. Type `/`, choose the command, and complete its options.",
+        color=discord.Color.blurple(),
+    )
+    for key in module_keys:
+        module = BOT_MODULES[key]
+        commands = ", ".join(f"`/{name}`" for name in module["commands"])
+        examples = "\n".join(f"`{line}`" for line in MODULE_EXAMPLES[key].splitlines())
+        embed.add_field(
+            name=str(module["label"]),
+            value=f"{module['description']}\n**Commands:** {commands}\n**Examples:**\n{examples}",
+            inline=False,
+        )
+    embed.set_footer(text="Examples are updated automatically from this server's Bot Management settings")
+    return embed
 
 
 @app_commands.command(name="lookup", description="Search Star Citizen game information.")

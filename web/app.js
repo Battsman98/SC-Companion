@@ -1149,7 +1149,7 @@ async function loadGuildBotConfiguration(guildId) {
     }
     const channelOptions = (selected) => [
       '<option value="">Any channel</option>',
-      ...config.channels.map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
+      ...config.channels.filter((channel) => [0, 5].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
     ].join("");
     const forumOptions = (selected) => [
       '<option value="">Marketplace disabled</option>',

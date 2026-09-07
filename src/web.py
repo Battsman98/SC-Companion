@@ -1022,6 +1022,7 @@ async def save_guild_bot_configuration(
     await _verify_live_guild_manager(guild_id, user.id)
     channels = await _discord_guild_channels(guild_id)
     channel_ids = {channel["id"] for channel in channels}
+    command_channel_ids = {channel["id"] for channel in channels if channel["type"] in {0, 5}}
     unknown_modules = set(payload.modules).difference(BOT_MODULES)
     if unknown_modules:
         raise HTTPException(status_code=422, detail="One or more bot modules are not recognized.")
@@ -1035,6 +1036,8 @@ async def save_guild_bot_configuration(
         for channel_id in (item["channel_id"], item["resource_channel_id"])
     ):
         raise HTTPException(status_code=422, detail="One or more selected channels are unavailable.")
+    if any(item["channel_id"] and item["channel_id"] not in command_channel_ids for item in modules.values()):
+        raise HTTPException(status_code=422, detail="Command destinations must be Discord text channels.")
     forum_ids = {channel["id"] for channel in channels if channel["type"] in {15, 16}}
     trade_forum_id = modules["trade_tools"]["resource_channel_id"]
     if trade_forum_id and trade_forum_id not in forum_ids:
