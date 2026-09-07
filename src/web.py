@@ -1554,12 +1554,17 @@ async def _sync_installed_server_feedback() -> int:
         return mirrored
 
 
-def _add_feedback_attachments_to_embed(embed: dict[str, Any], attachments: list[dict[str, Any]]) -> None:
-    if not attachments:
+def _add_feedback_attachments_to_embed(
+    embed: dict[str, Any], attachments: list[dict[str, Any]], embedded_images: list[str] | None = None
+) -> None:
+    if not attachments and not embedded_images:
         return
-    image = next((item for item in attachments if str(item.get("content_type") or "").startswith("image/")), None)
+    image = next((item for item in attachments if str(item.get("content_type") or "").startswith("image/")
+                  or re.search(r"\.(?:png|jpe?g|gif|webp)$", str(item.get("filename") or ""), re.IGNORECASE)), None)
     if image and image.get("url"):
         embed["image"] = {"url": str(image["url"])}
+    elif embedded_images:
+        embed["image"] = {"url": embedded_images[0]}
     links = "\n".join(
         f"[{item.get('filename') or 'Attachment'}]({item['url']})"
         for item in attachments if item.get("url")
@@ -1571,14 +1576,16 @@ def _add_feedback_attachments_to_embed(embed: dict[str, Any], attachments: list[
 async def _sync_mirrored_feedback_attachments(starter: dict[str, Any], central_thread_id: int) -> None:
     messages = await _discord_api("GET", f"/channels/{int(starter['channel_id'])}/messages?limit=50")
     attachments = [attachment for message in messages for attachment in message.get("attachments", [])]
-    if not attachments:
+    embedded_images = [str(image["url"]) for message in messages for item in message.get("embeds", [])
+                       for image in [item.get("image") or item.get("thumbnail")] if image and image.get("url")]
+    if not attachments and not embedded_images:
         return
     central_starter = await _discord_api("GET", f"/channels/{central_thread_id}/messages/{central_thread_id}")
     embeds = central_starter.get("embeds", [])
     if not embeds or embeds[0].get("image") or any(field.get("name") == "Attachments" for field in embeds[0].get("fields", [])):
         return
     embed = embeds[0]
-    _add_feedback_attachments_to_embed(embed, attachments)
+    _add_feedback_attachments_to_embed(embed, attachments, embedded_images)
     await _discord_api("PATCH", f"/channels/{central_thread_id}/messages/{central_thread_id}", json_payload={"embeds": [embed]})
 
 

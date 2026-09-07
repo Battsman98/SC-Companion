@@ -941,6 +941,8 @@ class GameAssistBot(commands.Bot):
             if starter.embeds:
                 mirror_embed.add_field(name="Original report", value=(starter.embeds[0].description or starter.embeds[0].title or "Embedded report")[:1024], inline=False)
             self.add_feedback_attachments(mirror_embed, starter.attachments)
+            if not mirror_embed.image.url and starter.embeds and starter.embeds[0].image.url:
+                mirror_embed.set_image(url=starter.embeds[0].image.url)
             mirror_tag = discord.utils.find(
                 lambda item: item.name.casefold() == "bug", central.available_tags
             )
@@ -963,7 +965,7 @@ class GameAssistBot(commands.Bot):
     def add_feedback_attachments(embed: discord.Embed, attachments: list[discord.Attachment]) -> None:
         if not attachments:
             return
-        image = next((item for item in attachments if (item.content_type or "").startswith("image/")), None)
+        image = next((item for item in attachments if (item.content_type or "").startswith("image/") or re.search(r"\.(?:png|jpe?g|gif|webp)$", item.filename, re.IGNORECASE)), None)
         if image:
             embed.set_image(url=image.url)
         links = "\n".join(f"[{item.filename}]({item.url})" for item in attachments)
@@ -973,7 +975,8 @@ class GameAssistBot(commands.Bot):
         try:
             messages = [message async for message in thread.history(limit=50, oldest_first=True)]
             attachments = [attachment for message in messages for attachment in message.attachments]
-            if not attachments:
+            embedded_image = next((embed.image.url for message in messages for embed in message.embeds if embed.image.url), None)
+            if not attachments and not embedded_image:
                 return
             central = await self.fetch_channel(central_thread_id)
             if not isinstance(central, discord.Thread):
@@ -985,6 +988,8 @@ class GameAssistBot(commands.Bot):
             if embed.image.url or any(field.name == "Attachments" for field in embed.fields):
                 return
             self.add_feedback_attachments(embed, attachments)
+            if not embed.image.url and embedded_image:
+                embed.set_image(url=embedded_image)
             await central_starter.edit(embed=embed)
             logging.info("Added feedback attachments to mirrored ticket %s", central_thread_id)
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):

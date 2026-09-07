@@ -1940,10 +1940,20 @@ async function selectTicket(button) {
   document.querySelector("[data-ticket-title]").textContent = selectedTicket.name;
   ticketMessages.textContent = "Loading conversation...";
   const messages = await jsonRequest(`/api/admin/feedback/tickets/${selectedTicket.id}/messages`);
-  ticketMessages.innerHTML = messages.map((message) => `<article><strong>${escapeHtml(message.author)}</strong><time>${escapeHtml(message.timestamp ? new Date(message.timestamp).toLocaleString() : "")}</time><p>${escapeHtml(message.content || message.embeds?.[0]?.description || "Discord embed or attachment")}</p></article>`).join("");
+  ticketMessages.innerHTML = messages.map(renderTicketMessage).join("");
   ticketReplyForm.hidden = false;
   ticketReplyForm.elements.status.value = button.dataset.ticketStatus || "open";
   ticketMessages.scrollTop = ticketMessages.scrollHeight;
+}
+
+function renderTicketMessage(message) {
+  const attachmentImages = (message.attachments || []).filter((item) => String(item.content_type || "").startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(item.filename || "")).map((item) => item.url);
+  const embedImages = (message.embeds || []).flatMap((embed) => [embed.image?.url, embed.thumbnail?.url]).filter(Boolean);
+  const images = [...new Set([...attachmentImages, ...embedImages])].filter((url) => /^https?:\/\//i.test(url));
+  const files = (message.attachments || []).filter((item) => item.url && !attachmentImages.includes(item.url));
+  const media = images.map((url) => `<a class="ticket-image" href="${escapeAttribute(url)}" target="_blank" rel="noopener"><img src="${escapeAttribute(url)}" alt="Ticket attachment"></a>`).join("");
+  const fileLinks = files.map((item) => `<a class="ticket-file" href="${escapeAttribute(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.filename || "Open attachment")}</a>`).join("");
+  return `<article><div class="ticket-message-heading"><strong>${escapeHtml(message.author)}</strong><time>${escapeHtml(message.timestamp ? new Date(message.timestamp).toLocaleString() : "")}</time></div><p>${escapeHtml(message.content || message.embeds?.[0]?.description || (media ? "Image attached" : "Discord embed or attachment"))}</p>${media}${fileLinks}</article>`;
 }
 
 function clearFeedbackPreviews() {

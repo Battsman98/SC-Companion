@@ -2305,6 +2305,10 @@ body.hangar-modal-open {
 .ticket-empty { margin: auto; color: var(--muted); }
 .ticket-messages article { border-bottom: 1px solid rgba(80, 200, 255, .16); padding: 10px 2px; }
 .ticket-messages article p { white-space: pre-wrap; margin-bottom: 0; }
+.ticket-message-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ticket-image { display: block; width: min(100%, 520px); margin-top: 10px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(80, 200, 255, .24); }
+.ticket-image img { display: block; width: 100%; max-height: 340px; object-fit: contain; background: rgba(0, 0, 0, .28); }
+.ticket-file { display: block; width: fit-content; margin-top: 8px; color: var(--accent); }
 .discord-console textarea { width: 100%; }
 @media (max-width: 760px) { .discord-console-grid { grid-template-columns: 1fr; } }
 
