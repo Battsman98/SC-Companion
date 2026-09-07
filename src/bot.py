@@ -979,11 +979,15 @@ class GameAssistBot(commands.Bot):
                 return
             mirror_embed = discord.Embed(
                 title=f"Mirrored ticket from {thread.guild.name}",
-                description=self.feedback_message_description(report_message),
                 color=discord.Color.blurple(),
             )
             mirror_embed.add_field(name="Origin", value=f"[{thread.name}]({thread.jump_url})", inline=False)
+            mirror_embed.add_field(name="Reported by", value=report_message.author.display_name[:1024], inline=False)
             self.add_feedback_attachments(mirror_embed, attachments)
+            self.order_feedback_embed_fields(
+                mirror_embed,
+                self.feedback_message_description(report_message),
+            )
             mirror_files: list[discord.File] = []
             image_attachment = self.feedback_image_attachment(attachments)
             if image_attachment:
@@ -1039,6 +1043,18 @@ class GameAssistBot(commands.Bot):
         links = "\n".join(f"[{item.filename}]({item.url})" for item in attachments)
         embed.add_field(name="Attachments", value=links[:1024], inline=False)
 
+    @staticmethod
+    def order_feedback_embed_fields(embed: discord.Embed, body: str) -> None:
+        values = {field.name: field.value for field in embed.fields}
+        embed.description = None
+        embed.clear_fields()
+        for name in ("Origin", "Reported by", "Attachments"):
+            if values.get(name):
+                embed.add_field(name=name, value=values[name][:1024], inline=False)
+        chunks = [body[index:index + 1024] for index in range(0, len(body), 1024)] or ["Discord forum ticket"]
+        for index, chunk in enumerate(chunks[:4]):
+            embed.add_field(name="Body" if index == 0 else "Body (continued)", value=chunk, inline=False)
+
     async def sync_mirrored_feedback_attachments(self, thread: discord.Thread, central_thread_id: int) -> None:
         try:
             messages = [message async for message in thread.history(limit=50, oldest_first=True)]
@@ -1057,8 +1073,6 @@ class GameAssistBot(commands.Bot):
             if not central_starter.embeds:
                 return
             embed = central_starter.embeds[0]
-            if report_message:
-                embed.description = self.feedback_message_description(report_message)
             has_attachment_field = any(field.name == "Attachments" for field in embed.fields)
             if has_attachment_field:
                 image = self.feedback_image_attachment(attachments)
@@ -1068,6 +1082,8 @@ class GameAssistBot(commands.Bot):
                 self.add_feedback_attachments(embed, attachments)
             if not embed.image.url and embedded_image:
                 embed.set_image(url=embedded_image)
+            if report_message:
+                self.order_feedback_embed_fields(embed, self.feedback_message_description(report_message))
             image = self.feedback_image_attachment(attachments)
             if image:
                 mirror_file = await image.to_file(use_cached=True)

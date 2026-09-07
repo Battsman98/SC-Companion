@@ -17,7 +17,7 @@ from src.bot import (
     build_visitor_channel_directory_embed,
     build_visitor_command_example_embeds,
 )
-from src.web import _discord_message_description, _feedback_embed, _provided_feedback_images
+from src.web import _discord_message_description, _feedback_embed, _order_feedback_embed_fields, _provided_feedback_images
 from src.web import _add_feedback_attachments_to_embed, feedback_ticket_messages, update_feedback_ticket_status
 from src.web_auth import WebUser
 
@@ -120,6 +120,25 @@ def test_embedded_ticket_fields_become_the_mirrored_description() -> None:
     assert "self.feedback_message_description(report_message)" in bot_source
 
 
+def test_mirrored_ticket_fields_use_requested_order() -> None:
+    embed = {
+        "description": "Body first",
+        "fields": [
+            {"name": "Reported by", "value": "Pilot"},
+            {"name": "Attachments", "value": "image.png"},
+            {"name": "Origin", "value": "Test server"},
+        ],
+    }
+
+    _order_feedback_embed_fields(embed, "Body last")
+
+    assert "description" not in embed
+    assert [field["name"] for field in embed["fields"]] == [
+        "Origin", "Reported by", "Attachments", "Body",
+    ]
+    assert embed["fields"][-1]["value"] == "Body last"
+
+
 def test_bot_copies_mirrored_images_into_peep() -> None:
     mirror_source = inspect.getsource(GameAssistBot.mirror_feedback_thread)
     sync_source = inspect.getsource(GameAssistBot.sync_mirrored_feedback_attachments)
@@ -201,7 +220,7 @@ def test_website_feedback_sync_reads_origins_as_sc_companion() -> None:
     assert "bot_token=public_token" in sync_source
     assert 'f"/channels/{thread_id}/messages?limit=50"' in sync_source
     assert "_discord_message_description(starter)" in sync_source
-    assert 'embed["description"] = _discord_message_description(report_message)' in inspect.getsource(
+    assert "_order_feedback_embed_fields(embed, _discord_message_description(report_message))" in inspect.getsource(
         web._sync_mirrored_feedback_attachments
     )
     assert "bot_token=_public_bot_token() if origin_thread_id else None" in message_source

@@ -1573,6 +1573,7 @@ async def _sync_installed_server_feedback() -> int:
                         for image in [item.get("image") or item.get("thumbnail")] if image and image.get("url")
                     ]
                     _add_feedback_attachments_to_embed(embed, all_attachments, embedded_images)
+                    _order_feedback_embed_fields(embed, description)
                     payload: dict[str, Any] = {
                         "name": f"[{guild.get('name') or 'Discord'}] {thread.get('name') or 'Ticket'}"[:100],
                         "message": {"embeds": [embed], "allowed_mentions": {"parse": []}},
@@ -1630,6 +1631,24 @@ def _discord_message_description(message: dict[str, Any]) -> str:
     return "\n\n".join(sections)[:4000] or "Discord forum ticket"
 
 
+def _order_feedback_embed_fields(embed: dict[str, Any], body: str) -> None:
+    values = {
+        str(field.get("name") or ""): str(field.get("value") or "")
+        for field in embed.get("fields", [])
+    }
+    embed.pop("description", None)
+    embed["fields"] = [
+        {"name": name, "value": values[name][:1024], "inline": False}
+        for name in ("Origin", "Reported by", "Attachments")
+        if values.get(name)
+    ]
+    chunks = [body[index:index + 1024] for index in range(0, len(body), 1024)] or ["Discord forum ticket"]
+    embed["fields"].extend(
+        {"name": "Body" if index == 0 else "Body (continued)", "value": chunk, "inline": False}
+        for index, chunk in enumerate(chunks[:4])
+    )
+
+
 async def _sync_mirrored_feedback_attachments(
     starter: dict[str, Any], central_thread_id: int, origin_bot_token: str
 ) -> None:
@@ -1651,8 +1670,6 @@ async def _sync_mirrored_feedback_attachments(
     if not embeds:
         return
     embed = embeds[0]
-    if report_message:
-        embed["description"] = _discord_message_description(report_message)
     has_attachment_field = any(field.get("name") == "Attachments" for field in embed.get("fields", []))
     if has_attachment_field:
         image = next((item for item in attachments if str(item.get("content_type") or "").startswith("image/")
@@ -1663,6 +1680,8 @@ async def _sync_mirrored_feedback_attachments(
             embed["image"] = {"url": embedded_images[0]}
     else:
         _add_feedback_attachments_to_embed(embed, attachments, embedded_images)
+    if report_message:
+        _order_feedback_embed_fields(embed, _discord_message_description(report_message))
     await _discord_api("PATCH", f"/channels/{central_thread_id}/messages/{central_thread_id}", json_payload={"embeds": [embed]})
 
 
