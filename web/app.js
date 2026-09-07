@@ -1160,7 +1160,7 @@ async function loadGuildBotConfiguration(guildId) {
     outputs.botManagement.innerHTML = `<form data-bot-management-form data-guild-id="${config.guild.id}">
       <div class="bot-module-list">
         ${config.modules.map((module) => `<div class="bot-module-row" data-module-key="${escapeAttribute(module.key)}">
-          <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></label>
+          <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small></span></label>
           <div><label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>${module.key === "trade_tools" ? `<label>Marketplace forum<select data-module-resource-channel>${forumOptions(module.resource_channel_id)}</select></label>` : ""}</div>
         </div>`).join("")}
       </div>

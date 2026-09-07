@@ -12,6 +12,14 @@ def test_timer_commands_are_shared_module_commands() -> None:
     assert module_for_command("cztimer") == "timers"
 
 
+def test_mining_tools_are_visible_and_complete() -> None:
+    mining = BOT_MODULES["mining_tools"]
+    assert mining["label"] == "Mining Tools"
+    assert set(mining["commands"]) == {
+        "mining", "miningadd", "industry split", "industry refinery", "industry brief"
+    }
+
+
 def test_timer_cache_keys_are_isolated_by_guild() -> None:
     assert exec_override_cache_key(None) != exec_override_cache_key(123)
     assert exec_override_cache_key(123) != exec_override_cache_key(456)

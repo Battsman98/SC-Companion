@@ -4911,7 +4911,8 @@ def build_native_admin_embed(guild: discord.Guild, modules: dict[str, dict[str, 
     for key, definition in BOT_MODULES.items():
         item = modules[key]
         destination = f" <#{item['channel_id']}>" if item.get("channel_id") else " any channel"
-        embed.add_field(name=str(definition["label"]), value=("Enabled —" if item["enabled"] else "Disabled —") + destination, inline=True)
+        commands = " ".join(f"`/{command}`" for command in definition["commands"])
+        embed.add_field(name=str(definition["label"]), value=("Enabled —" if item["enabled"] else "Disabled —") + destination + f"\n{commands}", inline=True)
     embed.add_field(name="Central reviews", value=f"{pending} pending", inline=False)
     embed.set_footer(text="Changes are isolated to this Discord server. Global approved game knowledge remains shared.")
     return embed
@@ -4959,7 +4960,9 @@ def build_bot_setup_guide_embed() -> discord.Embed:
 
 class NativeAdminModuleSelect(discord.ui.Select):
     def __init__(self, modules: dict[str, dict[str, object]]) -> None:
-        options = [discord.SelectOption(label=str(value["label"]), value=key, default=bool(modules[key]["enabled"]))
+        options = [discord.SelectOption(label=str(value["label"]), value=key,
+                                        description=", ".join(f"/{command}" for command in value["commands"])[:100],
+                                        default=bool(modules[key]["enabled"]))
                    for key, value in BOT_MODULES.items()]
         super().__init__(placeholder="Choose enabled features", min_values=0, max_values=len(options), options=options)
 
