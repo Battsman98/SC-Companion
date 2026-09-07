@@ -814,6 +814,10 @@ class GameAssistBot(commands.Bot):
             await self.tree.sync()
             if not self.settings.discord_guild_id:
                 raise RuntimeError("Peep requires DISCORD_GUILD_ID for private command registration.")
+            # Peep and SC Companion can coexist in the home server without two
+            # applications advertising the same /admin command group.
+            admin_group.name = "peep"
+            admin_group.description = "Private Peep management commands."
             guild = discord.Object(id=self.settings.discord_guild_id)
             self.tree.add_command(admin_group, guild=guild)
             self.tree.add_command(audit_group, guild=guild)
@@ -5794,6 +5798,11 @@ async def trade_system_autocomplete(
 admin_group = app_commands.Group(name="admin", description="Bot management commands.")
 
 
+def admin_command_path(command: str) -> str:
+    """Return the active application's management command path."""
+    return f"/{admin_group.name} {command}"
+
+
 def build_native_admin_embed(guild: discord.Guild, modules: dict[str, dict[str, object]], pending: int = 0) -> discord.Embed:
     embed = discord.Embed(
         title=f"SC Companion Admin — {guild.name}",
@@ -5818,7 +5827,7 @@ def build_bot_setup_guide_embed() -> discord.Embed:
     )
     embed.add_field(
         name="1. Open the panel",
-        value="Type `/admin panel`. Only server managers can see and change these settings.",
+        value=f"Type `{admin_command_path('panel')}`. Only server managers can see and change these settings.",
         inline=False,
     )
     embed.add_field(
@@ -5833,7 +5842,8 @@ def build_bot_setup_guide_embed() -> discord.Embed:
     )
     embed.add_field(
         name="4. Finish and test",
-        value="For manual setup, select **Next: Assign Channels** and choose a channel for each feature. Then type `/admin health` and try one enabled command.",
+        value=("For manual setup, select **Next: Assign Channels** and choose a channel for each feature. "
+               f"Then type `{admin_command_path('health')}` and try one enabled command."),
         inline=False,
     )
     embed.add_field(
@@ -5854,7 +5864,7 @@ def build_first_run_setup_embed(*, can_manage_channels: bool = True) -> discord.
     embed = discord.Embed(
         title="Finish setting up SC Companion",
         description=("A server owner or manager can select **Open Admin Panel** below. "
-                     "You can also type `/admin panel` at any time."),
+                     f"You can also type `{admin_command_path('panel')}` at any time."),
         color=discord.Color.blurple(),
     )
     embed.add_field(name="What happens next?", value="Choose how channels are made, pick the features you want, and save.", inline=False)

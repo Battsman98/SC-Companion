@@ -201,6 +201,7 @@ def test_runtime_profiles_split_private_and_public_commands() -> None:
     source = inspect.getsource(GameAssistBot.setup_hook)
     assert 'runtime_profile == "peep"' in source
     assert "Clear legacy global game commands" in source
+    assert 'admin_group.name = "peep"' in source
     assert "self.tree.add_command(admin_group, guild=guild)" in source
     assert "for command in public_commands" in source
 
