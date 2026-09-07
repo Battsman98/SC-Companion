@@ -75,8 +75,8 @@ LOOT_CHANNEL_ID = 1533075933441822830
 FEEDBACK_TEMPLATE_CACHE_PREFIX = "discord:feedback-template-thread"
 VISITOR_ROLE_NAME = "Visitor"
 BOT_MANAGER_ROLE_NAME = "Bot Manager"
-VISITOR_CATEGORY_NAME = "Discord Bot Hub"
-LEGACY_VISITOR_CATEGORY_NAME = "Visitor Bot Hub"
+VISITOR_CATEGORY_NAME = "SC Companion Hub"
+LEGACY_VISITOR_CATEGORY_NAMES = {"Visitor Bot Hub", "Discord Bot Hub"}
 VISITOR_ARCHIVE_CATEGORY_NAME = "Bot Hub Archive"
 VISITOR_ARCHIVE_CHANNEL_NAMES = {
     "bot-commands",
@@ -1704,6 +1704,8 @@ class GameAssistBot(commands.Bot):
     def _is_discord_bot_hub_channel(self, channel: discord.abc.GuildChannel) -> bool:
         if self.settings.discord_guild_id and channel.guild.id != self.settings.discord_guild_id:
             return False
+        if channel.name == APPLICATION_REVIEW_CHANNEL_NAME:
+            return False
         if channel.id == self.visitor_category_id or channel.id in self.visitor_channels.values():
             return True
         if isinstance(channel, discord.CategoryChannel):
@@ -2245,7 +2247,9 @@ class GameAssistBot(commands.Bot):
         category = guild.get_channel(self.visitor_category_id or 0)
         if not isinstance(category, discord.CategoryChannel):
             category = discord.utils.find(
-                lambda item: item.name.casefold() == VISITOR_CATEGORY_NAME.casefold(), guild.categories
+                lambda item: item.name.casefold() == VISITOR_CATEGORY_NAME.casefold()
+                or item.name.casefold() in {name.casefold() for name in LEGACY_VISITOR_CATEGORY_NAMES},
+                guild.categories,
             )
         category_overwrites = _hub_category_overwrites(guild, role, me)
         if category is None:
@@ -2451,7 +2455,7 @@ class GameAssistBot(commands.Bot):
             category
             for category in guild.categories
             if category.id != destination.id
-            and category.name.casefold() == LEGACY_VISITOR_CATEGORY_NAME.casefold()
+            and category.name.casefold() in {name.casefold() for name in LEGACY_VISITOR_CATEGORY_NAMES}
         ]
         for legacy in legacy_categories:
             for channel in list(legacy.channels):

@@ -106,7 +106,7 @@ def test_shared_feedback_forums_publish_the_main_example_post() -> None:
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
-    assert VISITOR_CATEGORY_NAME == "Discord Bot Hub"
+    assert VISITOR_CATEGORY_NAME == "SC Companion Hub"
     assert "bot-commands" not in VISITOR_CHANNEL_SPECS
     assert VISITOR_REMOVED_CHANNEL_NAMES == {"bot-start-here", "bot-status"}
     assert VISITOR_REMOVED_CHANNEL_NAMES.isdisjoint(VISITOR_CHANNEL_SPECS)
@@ -135,6 +135,8 @@ def test_membership_reviews_are_kept_in_the_audit_log_category() -> None:
     assert "AUDIT_LOG_CATEGORY_ID" in source
     assert "category=audit_category" in source
     assert "review_channel.category_id != audit_category.id" in source
+    protection_source = inspect.getsource(GameAssistBot._is_discord_bot_hub_channel)
+    assert "APPLICATION_REVIEW_CHANNEL_NAME" in protection_source
 
 
 def test_every_visitor_command_channel_has_a_response_example() -> None:
