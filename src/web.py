@@ -862,6 +862,14 @@ async def me(request: Request) -> dict[str, Any]:
             "authenticated": False,
             "discord_auth_enabled": discord_auth_configured(state().settings),
         }
+    managed_guilds = await state().cache.user_managed_guilds(user.id)
+    installed_guild_ids: set[int] = set()
+    if managed_guilds:
+        try:
+            installed_guild_ids = await _discord_bot_guild_ids()
+        except HTTPException:
+            logging.warning("Could not check installed Discord servers while loading the user panel")
+    can_manage_bot = any(guild["id"] in installed_guild_ids for guild in managed_guilds)
     return {
         "authenticated": True,
         "id": user.id,
@@ -872,7 +880,9 @@ async def me(request: Request) -> dict[str, Any]:
         "guild_permissions": user.guild_permissions,
         "can_manage_changes": user.can_manage_changes,
         "can_manage_admin": user.can_manage_admin,
-        "can_manage_guilds": bool(await state().cache.user_managed_guilds(user.id)),
+        "can_manage_guilds": bool(managed_guilds),
+        "can_manage_bot": can_manage_bot,
+        "bot_invite_url": _bot_invite_url(),
     }
 
 
@@ -962,7 +972,7 @@ async def _verify_live_guild_manager(guild_id: int, user_id: int) -> None:
         raise HTTPException(status_code=403, detail="You no longer have Manage Server permission for this server.")
 
 
-def _bot_invite_url(guild_id: int) -> str:
+def _bot_invite_url(guild_id: int | None = None) -> str:
     client_id = state().settings.discord_client_id
     if not client_id:
         return ""
@@ -970,11 +980,14 @@ def _bot_invite_url(guild_id: int) -> str:
     # manage messages/threads, and create public threads. Server owners retain
     # control and can grant additional channel-management access separately.
     permissions = 397821234176
-    return (
+    url = (
         "https://discord.com/oauth2/authorize"
         f"?client_id={client_id}&scope=bot%20applications.commands"
-        f"&permissions={permissions}&guild_id={guild_id}&disable_guild_select=true"
+        f"&permissions={permissions}"
     )
+    if guild_id is not None:
+        url += f"&guild_id={guild_id}&disable_guild_select=true"
+    return url
 
 
 def _snowflake(value: int | None) -> str | None:

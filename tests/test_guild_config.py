@@ -63,9 +63,10 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
 
     assert 'id="bot-management"' in html
     assert 'id="botManagementTabTemplate"' in html
-    assert "setBotManagementVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_guilds))" in javascript
+    assert "setBotManagementVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_bot))" in javascript
     assert 'api("/api/bot-management/guilds")' in javascript
     assert "Save Bot Settings" in javascript
+    assert "Add to Discord" in javascript
 
 
 def test_discord_ids_are_sent_to_browsers_without_number_rounding() -> None:
