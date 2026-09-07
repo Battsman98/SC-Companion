@@ -1058,7 +1058,7 @@ async function loadMe() {
     currentUser = await api("/api/me");
     setAdminVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_admin));
     setChangeAdminVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_changes));
-    setBotManagementVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_guilds));
+    setBotManagementVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_bot));
     if (!currentUser.authenticated) {
       userPanel.innerHTML = `<div class="user-row">
         <span>${currentUser.discord_auth_enabled ? "Not signed in" : "Discord OAuth needs setup"}</span>
@@ -1077,6 +1077,7 @@ async function loadMe() {
     userPanel.innerHTML = `<div class="user-row">
       ${currentUser.avatar_url ? `<img src="${escapeAttribute(currentUser.avatar_url)}" alt="">` : ""}
       <span><strong>${escapeHtml(currentUser.display_name || currentUser.username)}</strong><br>${escapeHtml(badges)}</span>
+      ${currentUser.bot_invite_url ? `<a class="button-link" href="${escapeAttribute(currentUser.bot_invite_url)}" target="_blank" rel="noopener">Add to Discord</a>` : ""}
       <form method="post" action="/auth/logout"><button type="submit">Log out</button></form>
       <button type="button" data-feedback-open>Feedback / Report Issue</button>
     </div>`;
@@ -1113,7 +1114,7 @@ function setBotManagementVisibility(canManageGuilds) {
 
 async function loadManageableGuilds() {
   const select = document.querySelector("#managedGuildSelect");
-  if (!select || !currentUser.authenticated || !currentUser.can_manage_guilds) return;
+  if (!select || !currentUser.authenticated || !currentUser.can_manage_bot) return;
   const selected = select.value;
   outputs.botManagement.innerHTML = stateMessage("Loading Discord servers...");
   try {
