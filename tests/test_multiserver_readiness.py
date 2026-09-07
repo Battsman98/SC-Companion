@@ -30,7 +30,7 @@ def test_discord_setup_guide_has_short_ordered_steps() -> None:
     embed = build_bot_setup_guide_embed()
     field_names = [field.name for field in embed.fields]
     assert field_names[:4] == [
-        "1. Open the panel", "2. Pick the features", "3. Pick command channels", "4. Check your setup"
+        "1. Open the panel", "2. Choose channel setup", "3. Pick the features", "4. Finish and test"
     ]
     assert "/admin panel" in embed.fields[0].value
     assert "other servers" in (embed.footer.text or "")

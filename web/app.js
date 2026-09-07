@@ -1157,7 +1157,12 @@ async function loadGuildBotConfiguration(guildId) {
       '<option value="">Marketplace disabled</option>',
       ...config.channels.filter((channel) => [15, 16].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
     ].join("");
+    const setupMode = config.channel_setup_mode || "";
     outputs.botManagement.innerHTML = `<form data-bot-management-form data-guild-id="${config.guild.id}">
+      <fieldset class="bot-setup-choice"><legend>First, how do you want to set up channels?</legend>
+        <label><input type="radio" name="channel_setup_mode" value="automatic" ${setupMode === "automatic" ? "checked" : ""} required><span><strong>Let the bot set up channels</strong><small>The bot makes a channel for each feature you turn on. It also adds command examples.</small></span></label>
+        <label><input type="radio" name="channel_setup_mode" value="manual" ${setupMode === "manual" ? "checked" : ""} required><span><strong>I will set up channels</strong><small>You choose the channel for each feature. Choose Any channel if it may work everywhere.</small></span></label>
+      </fieldset>
       <div class="bot-module-list">
         ${config.modules.map((module) => `<div class="bot-module-row" data-module-key="${escapeAttribute(module.key)}">
           <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small></span></label>
@@ -1167,6 +1172,16 @@ async function loadGuildBotConfiguration(guildId) {
       <div class="bot-management-actions"><button type="submit">Save Bot Settings</button><span data-bot-management-status>${config.configured ? "Settings loaded." : "Choose modules, then save to complete setup."}</span></div>
     </form>`;
     outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
+    const managementForm = outputs.botManagement.querySelector("[data-bot-management-form]");
+    const updateChannelMode = () => {
+      const automatic = managementForm.querySelector('[name="channel_setup_mode"]:checked')?.value === "automatic";
+      managementForm.querySelectorAll("[data-module-channel], [data-module-resource-channel]").forEach((select) => {
+        select.disabled = automatic;
+        select.closest("label")?.classList.toggle("control-disabled", automatic);
+      });
+    };
+    managementForm.querySelectorAll('[name="channel_setup_mode"]').forEach((radio) => radio.addEventListener("change", updateChannelMode));
+    updateChannelMode();
   } catch (error) {
     outputs.botManagement.innerHTML = errorMessage(error.message);
   }
@@ -1177,6 +1192,11 @@ async function saveGuildBotConfiguration(event) {
   const form = event.currentTarget;
   const status = form.querySelector("[data-bot-management-status]");
   const modules = {};
+  const channelSetupMode = form.querySelector('[name="channel_setup_mode"]:checked')?.value;
+  if (!channelSetupMode) {
+    status.textContent = "Choose how you want to set up channels first.";
+    return;
+  }
   form.querySelectorAll("[data-module-key]").forEach((row) => {
     modules[row.dataset.moduleKey] = {
       enabled: row.querySelector("[data-module-enabled]").checked,
@@ -1186,8 +1206,8 @@ async function saveGuildBotConfiguration(event) {
   });
   status.textContent = "Saving...";
   try {
-    await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: { modules } });
-    status.textContent = "Bot settings saved.";
+    await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: { modules, channel_setup_mode: channelSetupMode } });
+    status.textContent = channelSetupMode === "automatic" ? "Settings saved. The bot will make the channels shortly." : "Bot settings saved.";
   } catch (error) {
     status.textContent = error.message;
   }

@@ -34,12 +34,13 @@ def test_guild_settings_round_trip(tmp_path) -> None:
         modules = default_module_settings(False)
         modules["ship_search"] = {"enabled": True, "channel_id": 456}
 
-        await cache.save_guild_bot_settings(123, "Test Server", modules, 99)
+        await cache.save_guild_bot_settings(123, "Test Server", modules, 99, "automatic")
         saved = await cache.guild_bot_settings(123)
 
         assert saved is not None
         assert saved["guild_name"] == "Test Server"
         assert saved["configured_by"] == 99
+        assert saved["channel_setup_mode"] == "automatic"
         assert saved["modules"]["ship_search"] == {"enabled": True, "channel_id": 456}
 
         await cache.replace_user_managed_guilds(99, [
