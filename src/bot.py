@@ -132,6 +132,7 @@ FEEDBACK_FORUM_TAGS = (
     ("bug", False),
     ("request", False),
 )
+FEEDBACK_FORUM_DEFAULT_REACTION = "👍"
 TRADING_FORUM_TOPIC = "Trade in-game items. Select WTS, WTB, or WTT; use the item name as the title and include your price in aUEC."
 TRADING_FORUM_TAGS = ("WTS", "WTB", "WTT")
 TRADING_GUIDE_TAG = "GUIDE"
@@ -1120,8 +1121,12 @@ class GameAssistBot(commands.Bot):
         if not isinstance(forum, discord.ForumChannel):
             forum = discord.utils.find(lambda item: item.name == "feedback-and-issues", guild.forums)
         if forum is None:
-            forum = await guild.create_forum("feedback-and-issues", topic=FEEDBACK_FORUM_TOPIC,
-                                             reason="Create the SC Companion feedback ticket forum")
+            forum = await guild.create_forum(
+                "feedback-and-issues",
+                topic=FEEDBACK_FORUM_TOPIC,
+                default_reaction_emoji=FEEDBACK_FORUM_DEFAULT_REACTION,
+                reason="Create the SC Companion feedback ticket forum",
+            )
         elif forum.name != "feedback-and-issues" or forum.topic != FEEDBACK_FORUM_TOPIC:
             await forum.edit(
                 name="feedback-and-issues",
@@ -1137,7 +1142,8 @@ class GameAssistBot(commands.Bot):
         for attempt in range(2):
             existing = {tag.name.casefold() for tag in forum.available_tags}
             missing = required_names - existing
-            if not missing:
+            reaction_name = getattr(forum.default_reaction_emoji, "name", None)
+            if not missing and reaction_name == FEEDBACK_FORUM_DEFAULT_REACTION:
                 return
             tags = list(forum.available_tags)
             tags.extend(
@@ -1151,6 +1157,7 @@ class GameAssistBot(commands.Bot):
                 ][: 20 - len(required_names)]
             await forum.edit(
                 available_tags=tags,
+                default_reaction_emoji=FEEDBACK_FORUM_DEFAULT_REACTION,
                 reason="Create the SC Companion feedback and issue tags",
             )
             fetched = await self.fetch_channel(forum.id)
@@ -1161,6 +1168,8 @@ class GameAssistBot(commands.Bot):
             raise RuntimeError(
                 f"Discord did not save feedback tags in guild {forum.guild.id}: {', '.join(sorted(missing))}"
             )
+        if getattr(forum.default_reaction_emoji, "name", None) != FEEDBACK_FORUM_DEFAULT_REACTION:
+            raise RuntimeError(f"Discord did not save the feedback default reaction in guild {forum.guild.id}")
 
     async def sync_guild_command_examples(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -2836,6 +2845,7 @@ class GameAssistBot(commands.Bot):
                 "feedback-and-issues",
                 category=category,
                 topic=FEEDBACK_FORUM_TOPIC,
+                default_reaction_emoji=FEEDBACK_FORUM_DEFAULT_REACTION,
                 reason="Restore protected Discord Bot Hub forum",
             )
             channel_id = channel.id
@@ -2896,6 +2906,7 @@ class GameAssistBot(commands.Bot):
                 ", ".join(missing),
             )
 
+        await self.configure_feedback_forum(channel)
         await self.sync_feedback_template(channel)
 
     async def sync_feedback_template(self, channel: discord.ForumChannel) -> None:
@@ -2972,9 +2983,12 @@ class GameAssistBot(commands.Bot):
         if visitor_channel_id and visitor_channel_id not in channel_ids:
             channel_ids.append(visitor_channel_id)
         for channel_id in channel_ids:
-            await self._sync_commands_reference_channel(channel_id)
+            await self._sync_commands_reference_channel(
+                channel_id,
+                directory_only=channel_id == visitor_channel_id,
+            )
 
-    async def _sync_commands_reference_channel(self, channel_id: int) -> None:
+    async def _sync_commands_reference_channel(self, channel_id: int, *, directory_only: bool = False) -> None:
         try:
             channel = await self.fetch_channel(channel_id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -2985,7 +2999,11 @@ class GameAssistBot(commands.Bot):
             logging.warning("Commands reference channel %s is not messageable", channel_id)
             return
 
-        embeds = build_commands_reference_embeds(self.settings)
+        embeds = (
+            [build_command_channel_directory_embed(self.settings)]
+            if directory_only
+            else build_commands_reference_embeds(self.settings)
+        )
         cache_key = f"discord:commands-reference-message:{channel_id}"
         cached_message_ids = await self.cache.get(cache_key)
         message_ids: list[int] = []
@@ -3040,6 +3058,20 @@ class GameAssistBot(commands.Bot):
                 await asyncio.sleep(1)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 logging.info("Could not delete stale commands reference message %s", stale_message_id)
+
+        if directory_only:
+            async for message in channel.history(limit=250):
+                if message.author.id != self.user.id or not message.embeds:
+                    continue
+                title = message.embeds[0].title or ""
+                if title == "Discord Bot Commands - Channel Directory" or title.startswith(
+                    "Welcome to the Star Citizen Companion Bot Hub"
+                ):
+                    continue
+                if title.startswith("Discord Bot Commands - ") or title == "Example /lookup Response":
+                    with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        await message.delete()
+                        await asyncio.sleep(1)
 
         await self.cache.set(cache_key, updated_message_ids, 315360000)
         logging.info("Synced %s commands reference message(s) in channel %s", len(updated_message_ids), channel_id)
@@ -3240,6 +3272,8 @@ class GameAssistBot(commands.Bot):
 
     async def sync_visitor_command_examples(self) -> None:
         for channel_name, embed in build_visitor_command_example_embeds().items():
+            if channel_name == "bot-start-here":
+                continue
             channel = self.get_channel(self.visitor_channels.get(channel_name, 0))
             if not isinstance(channel, discord.TextChannel):
                 continue
