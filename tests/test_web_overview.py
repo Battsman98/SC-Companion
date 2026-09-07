@@ -30,7 +30,7 @@ def test_public_discord_install_link_targets_sc_companion() -> None:
     javascript = (WEB_DIR / "app.js").read_text(encoding="utf-8")
 
     assert "Add SC Companion to Discord" not in html
-    assert "Add SC Companion to Discord" in javascript
+    assert javascript.count("Add SC Companion to Discord") == 2
     assert "https://discord.com/oauth2/authorize?client_id=1546598117611405384" in javascript
 
 

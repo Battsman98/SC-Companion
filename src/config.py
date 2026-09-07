@@ -36,6 +36,7 @@ class Settings:
     turnstile_secret_key: str = ""
     public_discord_token: str = ""
     public_discord_client_id: str = ""
+    public_discord_client_secret: str = ""
     discord_support_guild_id: int | None = None
     approval_authority: bool = True
     runtime_profile: str = "peep"
@@ -55,6 +56,7 @@ class Settings:
         discord_client_id = os.getenv("DISCORD_CLIENT_ID", "").strip()
         public_discord_token = os.getenv("PUBLIC_DISCORD_TOKEN", "").strip()
         public_discord_client_id = os.getenv("PUBLIC_DISCORD_CLIENT_ID", "").strip()
+        public_discord_client_secret = os.getenv("PUBLIC_DISCORD_CLIENT_SECRET", "").strip()
         support_guild_id = os.getenv("DISCORD_SUPPORT_GUILD_ID", "").strip()
         discord_client_secret = os.getenv("DISCORD_CLIENT_SECRET", "").strip()
         discord_redirect_uri = os.getenv(
@@ -122,6 +124,7 @@ class Settings:
             turnstile_secret_key=os.getenv("TURNSTILE_SECRET_KEY", "").strip(),
             public_discord_token=public_discord_token,
             public_discord_client_id=public_discord_client_id,
+            public_discord_client_secret=public_discord_client_secret,
             discord_support_guild_id=int(support_guild_id) if support_guild_id else None,
             approval_authority=os.getenv("BOT_APPROVAL_AUTHORITY", "true").strip().casefold()
             not in {"0", "false", "no", "off"},

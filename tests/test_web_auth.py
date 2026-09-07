@@ -33,6 +33,8 @@ def settings(
         database_path="data/test.sqlite3",
         http_timeout_seconds=15,
         cache_ttl_seconds=300,
+        public_discord_client_id="public-client",
+        public_discord_client_secret="public-secret",
     )
 
 
@@ -86,6 +88,14 @@ def test_discord_authorization_can_join_new_visitors() -> None:
     assert "guilds" in url
     assert "identify" in url
     assert "state=state-token" in url
+
+
+def test_sc_companion_authorization_does_not_join_private_guild() -> None:
+    url = build_discord_authorize_url(settings(), "state-token", "sc_companion")
+
+    assert "client_id=public-client" in url
+    assert "guilds.join" not in url
+    assert "identify" in url
 
 
 def test_human_verification_requires_both_keys() -> None:

@@ -53,6 +53,7 @@ from src.timers import (
     fetch_exec_cycle_start_unix,
 )
 from src.web_auth import (
+    OAUTH_PROVIDER_COOKIE_NAME,
     OAUTH_STATE_COOKIE_NAME,
     SESSION_COOKIE_NAME,
     build_discord_authorize_url,
@@ -63,6 +64,7 @@ from src.web_auth import (
     fetch_web_user,
     human_verification_configured,
     oauth_state,
+    sc_companion_auth_configured,
     session_secret,
     verify_human,
 )
@@ -857,7 +859,8 @@ async def health() -> dict[str, Any]:
     return {
         "status": "online",
         "revision": os.getenv("RENDER_GIT_COMMIT", "local")[:12],
-        "discord_auth_enabled": discord_auth_configured(settings),
+        "discord_auth_enabled": sc_companion_auth_configured(settings) or discord_auth_configured(settings),
+        "sc_companion_auth_enabled": sc_companion_auth_configured(settings),
         "inventory_scanner": {
             "workers": state().scanner_gate.worker_count,
             "capacity": state().scanner_gate.capacity,
@@ -875,7 +878,8 @@ async def me(request: Request) -> dict[str, Any]:
     if user is None:
         return {
             "authenticated": False,
-            "discord_auth_enabled": discord_auth_configured(state().settings),
+            "discord_auth_enabled": sc_companion_auth_configured(state().settings) or discord_auth_configured(state().settings),
+            "login_provider": "sc_companion" if sc_companion_auth_configured(state().settings) else "peep",
         }
     managed_guilds = await state().cache.user_managed_guilds(user.id)
     installed_guild_ids: set[int] = set()
@@ -901,6 +905,8 @@ async def me(request: Request) -> dict[str, Any]:
         "can_manage_admin": can_manage_admin,
         "can_manage_guilds": bool(managed_guilds),
         "can_manage_bot": can_manage_bot,
+        "auth_provider": user.auth_provider,
+        "can_connect_peep": can_manage_admin and user.auth_provider != "peep",
         "bot_invite_url": _bot_invite_url(),
     }
 
@@ -1739,12 +1745,20 @@ async def website_language_measurement(
     return None
 
 
-def _begin_discord_login(settings: Settings) -> RedirectResponse:
+def _begin_discord_login(settings: Settings, provider: str = "sc_companion") -> RedirectResponse:
     state_token = oauth_state()
-    response = RedirectResponse(build_discord_authorize_url(settings, state_token), status_code=303)
+    response = RedirectResponse(build_discord_authorize_url(settings, state_token, provider), status_code=303)
     response.set_cookie(
         OAUTH_STATE_COOKIE_NAME,
         state_token,
+        httponly=True,
+        secure=settings.discord_redirect_uri.startswith("https://"),
+        samesite="lax",
+        max_age=300,
+    )
+    response.set_cookie(
+        OAUTH_PROVIDER_COOKIE_NAME,
+        provider,
         httponly=True,
         secure=settings.discord_redirect_uri.startswith("https://"),
         samesite="lax",
@@ -1756,10 +1770,11 @@ def _begin_discord_login(settings: Settings) -> RedirectResponse:
 @app.get("/auth/discord/login", response_model=None)
 async def discord_login() -> RedirectResponse | HTMLResponse:
     settings = state().settings
-    if not discord_auth_configured(settings):
+    provider = "sc_companion" if sc_companion_auth_configured(settings) else "peep"
+    if provider == "peep" and not discord_auth_configured(settings):
         raise HTTPException(status_code=503, detail="Discord OAuth is not configured.")
     if not human_verification_configured(settings):
-        return _begin_discord_login(settings)
+        return _begin_discord_login(settings, provider)
     site_key = html.escape(settings.turnstile_site_key, quote=True)
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1778,14 +1793,26 @@ async def discord_login_verified(
     turnstile_response: str | None = Form(default=None, alias="cf-turnstile-response"),
 ) -> RedirectResponse:
     settings = state().settings
-    if not discord_auth_configured(settings):
+    provider = "sc_companion" if sc_companion_auth_configured(settings) else "peep"
+    if provider == "peep" and not discord_auth_configured(settings):
         raise HTTPException(status_code=503, detail="Discord OAuth is not configured.")
     if not human_verification_configured(settings):
-        return _begin_discord_login(settings)
+        return _begin_discord_login(settings, provider)
     client_ip = request.client.host if request.client else None
     if not await verify_human(settings, turnstile_response or "", client_ip):
         raise HTTPException(status_code=400, detail="Human verification failed. Please go back and try again.")
-    return _begin_discord_login(settings)
+    return _begin_discord_login(settings, provider)
+
+
+@app.get("/auth/peep/login")
+async def peep_login(request: Request) -> RedirectResponse:
+    settings = state().settings
+    user = current_user_from_request(request, settings)
+    if user is None or not user.can_manage_admin or user.auth_provider == "peep":
+        raise HTTPException(status_code=403, detail="Peep connection is available only to authorized bot managers.")
+    if not discord_auth_configured(settings):
+        raise HTTPException(status_code=503, detail="Peep OAuth is not configured.")
+    return _begin_discord_login(settings, "peep")
 
 
 @app.get("/auth/discord/callback")
@@ -1798,8 +1825,17 @@ async def discord_callback(
     expected_state = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
     if not expected_state or expected_state != oauth_state_value:
         raise HTTPException(status_code=400, detail="Discord login state did not match.")
-    token_payload = await exchange_discord_code(settings, code)
-    user = await fetch_web_user(settings, str(token_payload.get("access_token")))
+    provider = request.cookies.get(OAUTH_PROVIDER_COOKIE_NAME, "sc_companion")
+    if provider not in {"sc_companion", "peep"}:
+        raise HTTPException(status_code=400, detail="Discord login provider did not match.")
+    existing_user = current_user_from_request(request, settings)
+    token_payload = await exchange_discord_code(settings, code, provider)
+    user = await fetch_web_user(settings, str(token_payload.get("access_token")), provider)
+    if provider == "peep":
+        if existing_user is None or not existing_user.can_manage_admin:
+            raise HTTPException(status_code=403, detail="Peep connection is available only to authorized bot managers.")
+        if existing_user.id != user.id:
+            raise HTTPException(status_code=403, detail="The Peep account must match the SC Companion login.")
     await state().cache.replace_user_managed_guilds(
         user.id,
         [asdict(guild) for guild in user.managed_guilds],
@@ -1817,6 +1853,7 @@ async def discord_callback(
         max_age=7 * 24 * 60 * 60,
     )
     response.delete_cookie(OAUTH_STATE_COOKIE_NAME)
+    response.delete_cookie(OAUTH_PROVIDER_COOKIE_NAME)
     return response
 
 

@@ -50,6 +50,7 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret-key")
     monkeypatch.setenv("PUBLIC_DISCORD_TOKEN", "public-token")
     monkeypatch.setenv("PUBLIC_DISCORD_CLIENT_ID", "777")
+    monkeypatch.setenv("PUBLIC_DISCORD_CLIENT_SECRET", "public-secret")
     monkeypatch.setenv("DISCORD_SUPPORT_GUILD_ID", "888")
 
     settings = Settings.from_env(load_env_file=False)
@@ -75,4 +76,5 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.turnstile_secret_key == "secret-key"
     assert settings.public_discord_token == "public-token"
     assert settings.public_discord_client_id == "777"
+    assert settings.public_discord_client_secret == "public-secret"
     assert settings.discord_support_guild_id == 888

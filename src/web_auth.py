@@ -19,6 +19,7 @@ MANAGE_GUILD_PERMISSION = 0x20
 ADMINISTRATOR_PERMISSION = 0x8
 SESSION_COOKIE_NAME = "game_assist_session"
 OAUTH_STATE_COOKIE_NAME = "game_assist_oauth_state"
+OAUTH_PROVIDER_COOKIE_NAME = "game_assist_oauth_provider"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 VISITOR_ROLE_NAME = "Visitor"
 BOT_MANAGER_ROLE_NAME = "Bot Manager"
@@ -43,6 +44,7 @@ class WebUser:
     guild_permissions: int
     can_manage_changes: bool
     can_manage_admin: bool
+    auth_provider: str = "peep"
     managed_guilds: tuple[ManagedGuild, ...] = ()
 
 
@@ -56,29 +58,41 @@ def discord_auth_configured(settings: Settings) -> bool:
     )
 
 
+def sc_companion_auth_configured(settings: Settings) -> bool:
+    return bool(
+        settings.public_discord_client_id
+        and settings.public_discord_client_secret
+        and settings.discord_redirect_uri
+        and settings.discord_token
+        and settings.discord_guild_id
+    )
+
+
 def oauth_state() -> str:
     return secrets.token_urlsafe(32)
 
 
-def build_discord_authorize_url(settings: Settings, state: str) -> str:
+def build_discord_authorize_url(settings: Settings, state: str, provider: str = "peep") -> str:
+    public_login = provider == "sc_companion"
     params = {
-        "client_id": settings.discord_client_id,
+        "client_id": settings.public_discord_client_id if public_login else settings.discord_client_id,
         "redirect_uri": settings.discord_redirect_uri,
         "response_type": "code",
-        "scope": "identify guilds guilds.join",
+        "scope": "identify guilds" if public_login else "identify guilds guilds.join",
         "state": state,
     }
     query = "&".join(f"{key}={_quote(value)}" for key, value in params.items())
     return f"https://discord.com/oauth2/authorize?{query}"
 
 
-async def exchange_discord_code(settings: Settings, code: str) -> dict[str, Any]:
+async def exchange_discord_code(settings: Settings, code: str, provider: str = "peep") -> dict[str, Any]:
+    public_login = provider == "sc_companion"
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{DISCORD_API_BASE_URL}/oauth2/token",
             data={
-                "client_id": settings.discord_client_id,
-                "client_secret": settings.discord_client_secret,
+                "client_id": settings.public_discord_client_id if public_login else settings.discord_client_id,
+                "client_secret": settings.public_discord_client_secret if public_login else settings.discord_client_secret,
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": settings.discord_redirect_uri,
@@ -91,7 +105,7 @@ async def exchange_discord_code(settings: Settings, code: str) -> dict[str, Any]
             return payload
 
 
-async def fetch_web_user(settings: Settings, access_token: str) -> WebUser:
+async def fetch_web_user(settings: Settings, access_token: str, provider: str = "peep") -> WebUser:
     async with aiohttp.ClientSession() as session:
         async with session.get(
             f"{DISCORD_API_BASE_URL}/users/@me",
@@ -110,7 +124,9 @@ async def fetch_web_user(settings: Settings, access_token: str) -> WebUser:
                 raise HTTPException(status_code=401, detail="Could not read your Discord servers.")
 
         user_id = int(user_payload["id"])
-        member_payload = await _fetch_or_join_guild_member(session, settings, user_id, access_token)
+        member_payload = await _fetch_or_join_guild_member(
+            session, settings, user_id, access_token, allow_join=provider == "peep"
+        )
         role_ids = tuple(int(role_id) for role_id in member_payload.get("roles", []))
         permissions = await _resolve_member_permissions(session, settings, role_ids)
         is_bot_manager = await _member_has_named_role(
@@ -133,6 +149,7 @@ async def fetch_web_user(settings: Settings, access_token: str) -> WebUser:
         guild_permissions=permissions,
         can_manage_changes=is_bot_manager or can_manage_change_commands(settings, role_ids, permissions),
         can_manage_admin=is_bot_manager or can_manage_admin_commands(settings, user_id, role_ids, permissions),
+        auth_provider=provider,
         managed_guilds=tuple(
             ManagedGuild(
                 id=int(guild["id"]),
@@ -152,6 +169,7 @@ async def _fetch_or_join_guild_member(
     settings: Settings,
     user_id: int,
     access_token: str,
+    allow_join: bool = True,
 ) -> dict[str, Any]:
     async with session.get(
         f"{DISCORD_API_BASE_URL}/guilds/{settings.discord_guild_id}/members/{user_id}",
@@ -159,6 +177,8 @@ async def _fetch_or_join_guild_member(
     ) as response:
         payload = await response.json()
         if response.status == 404:
+            if not allow_join:
+                return {"roles": []}
             return await _join_guild_as_visitor(session, settings, user_id, access_token)
         if response.status >= 400:
             raise HTTPException(status_code=403, detail="Could not verify Discord server membership.")
@@ -312,6 +332,7 @@ def encode_session(user: WebUser, secret: str) -> str:
             "guild_permissions": user.guild_permissions,
             "can_manage_changes": user.can_manage_changes,
             "can_manage_admin": user.can_manage_admin,
+            "auth_provider": user.auth_provider,
         },
         "expires_at": int(time.time()) + SESSION_TTL_SECONDS,
     }
@@ -345,6 +366,7 @@ def decode_session(value: str | None, secret: str) -> WebUser | None:
         guild_permissions=int(user.get("guild_permissions", 0)),
         can_manage_changes=bool(user.get("can_manage_changes")),
         can_manage_admin=bool(user.get("can_manage_admin")),
+        auth_provider=str(user.get("auth_provider") or "peep"),
     )
 
 
