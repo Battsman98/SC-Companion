@@ -326,6 +326,29 @@ def _trade_seller_terms(content: str) -> str | None:
     return "\n".join(fields) or None
 
 
+def build_marketplace_guide_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="How to use the marketplace",
+        description="Choose one listing tag when you make a post. Use the exact in-game item name as the post title.",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="WTS — Want to Sell", value="Use this when you have an item to sell. Add the price in aUEC.", inline=False)
+    embed.add_field(name="WTB — Want to Buy", value="Use this when you want to buy an item. Add the price you will pay.", inline=False)
+    embed.add_field(name="WTT — Want to Trade", value="Use this when you want to trade one item for another. Say what you offer and want.", inline=False)
+    embed.add_field(
+        name="Bot-managed tags",
+        value="**STORE** marks a player store made with `/trade store`. **GUIDE** marks this help page.",
+        inline=False,
+    )
+    embed.add_field(
+        name="Before you post",
+        value="Check the item name, price, quantity, meeting place, and trade details. Never share account passwords.",
+        inline=False,
+    )
+    embed.set_footer(text="Required listing tags: WTS, WTB, or WTT")
+    return embed
+
+
 def build_trade_store_content(store: dict) -> str:
     uploaded = store.get("source_type") == "inventory_workbook"
     inventory_label = "Download the uploaded inventory workbook" if uploaded else "Open the live Google Sheet"
@@ -1006,6 +1029,7 @@ class GameAssistBot(commands.Bot):
             else:
                 await message.edit(embed=embed)
         await self.sync_guild_timer_dashboard(guild, modules)
+        await self.ensure_guild_marketplace(guild, modules)
 
     async def sync_guild_timer_dashboard(
         self,
@@ -1686,19 +1710,71 @@ class GameAssistBot(commands.Bot):
         if not isinstance(channel, discord.ForumChannel):
             logging.error("TRADING_FORUM_CHANNEL_ID %s is not a Discord forum channel", channel_id)
             return
+        await self.configure_marketplace_forum(channel)
+
+    async def ensure_guild_marketplace(
+        self,
+        guild: discord.Guild,
+        modules: dict[str, dict[str, object]],
+    ) -> None:
+        trade = modules.get("trade_tools")
+        if not trade or not trade.get("enabled") or not trade.get("resource_channel_id"):
+            return
+        forum = guild.get_channel(int(trade["resource_channel_id"]))
+        if not isinstance(forum, discord.ForumChannel):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                fetched = await self.fetch_channel(int(trade["resource_channel_id"]))
+                forum = fetched if isinstance(fetched, discord.ForumChannel) else None
+        if isinstance(forum, discord.ForumChannel):
+            await self.configure_marketplace_forum(forum)
+
+    async def configure_marketplace_forum(self, channel: discord.ForumChannel) -> None:
         existing = {tag.name.upper(): tag for tag in channel.available_tags}
-        tags = [existing.get(name) or discord.ForumTag(name=name) for name in TRADING_FORUM_TAGS]
-        tags.append(existing.get(TRADING_STORE_TAG) or discord.ForumTag(name=TRADING_STORE_TAG, moderated=True))
-        tags.append(existing.get(TRADING_GUIDE_TAG) or discord.ForumTag(name=TRADING_GUIDE_TAG, moderated=True))
-        desired_names = [*TRADING_FORUM_TAGS, TRADING_STORE_TAG, TRADING_GUIDE_TAG]
-        needs_edit = [tag.name.upper() for tag in channel.available_tags] != desired_names
+        required = (*TRADING_FORUM_TAGS, TRADING_STORE_TAG, TRADING_GUIDE_TAG)
+        tags = list(channel.available_tags)
+        for name in required:
+            if name not in existing:
+                tags.append(discord.ForumTag(name=name, moderated=name in {TRADING_STORE_TAG, TRADING_GUIDE_TAG}))
+        if len(tags) > 20:
+            required_names = set(required)
+            tags = [tag for tag in tags if tag.name.upper() in required_names] + [
+                tag for tag in tags if tag.name.upper() not in required_names
+            ][:15]
+        needs_edit = any(name not in existing for name in required)
         if needs_edit or channel.topic != TRADING_FORUM_TOPIC or not channel.flags.require_tag:
-            await channel.edit(
+            channel = await channel.edit(
                 topic=TRADING_FORUM_TOPIC,
                 available_tags=tags,
                 require_tag=True,
                 reason="Configure the in-game item trading forum",
             )
+        guide_tag = discord.utils.find(
+            lambda tag: tag.name.casefold() == TRADING_GUIDE_TAG.casefold(), channel.available_tags
+        )
+        cache_key = f"guild:{channel.guild.id}:marketplace-guide"
+        thread_id = await self.cache.get(cache_key)
+        thread = None
+        if isinstance(thread_id, int):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                candidate = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
+                thread = candidate if isinstance(candidate, discord.Thread) else None
+        embed = build_marketplace_guide_embed()
+        if thread is None:
+            created = await channel.create_thread(
+                name="Marketplace Guide — Read Before Posting",
+                embed=embed,
+                applied_tags=[guide_tag] if guide_tag else [],
+                reason="Create the SC Companion marketplace guide",
+            )
+            thread = created.thread
+            await self.cache.set(cache_key, thread.id, 315360000)
+        else:
+            if thread.archived:
+                await thread.edit(archived=False, reason="Refresh the marketplace guide")
+            starter = await thread.fetch_message(thread.id)
+            await starter.edit(embed=embed)
+        with suppress(discord.Forbidden, discord.HTTPException):
+            await thread.edit(pinned=True, reason="Keep the marketplace guide visible")
 
     async def enrich_trading_post(self, thread: discord.Thread) -> None:
         if self.user is not None and thread.owner_id == self.user.id:
