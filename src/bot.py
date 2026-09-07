@@ -951,6 +951,9 @@ class GameAssistBot(commands.Bot):
             await message.edit(embed=build_about_bot_embed(guild))
         await self.ensure_guild_feedback_forum(guild)
         await self.ensure_automatic_module_channels(guild)
+        configured = await self.cache.guild_bot_settings(guild.id)
+        if configured is not None:
+            await self.ensure_guild_marketplace(guild, normalize_module_settings(configured.get("modules")))
         await self.sync_guild_command_examples(guild)
 
     async def sync_first_run_notice(self, guild: discord.Guild) -> None:
@@ -1047,6 +1050,7 @@ class GameAssistBot(commands.Bot):
                 if item["resource_channel_id"] != forum.id:
                     item["resource_channel_id"] = forum.id
                     changed = True
+                await self.configure_marketplace_forum(forum, channel.id)
         if changed:
             await self.cache.save_guild_bot_settings(
                 guild.id, guild.name, modules, int(configured["configured_by"]), "automatic"
@@ -1090,7 +1094,6 @@ class GameAssistBot(commands.Bot):
             else:
                 await message.edit(embed=embed)
         await self.sync_guild_timer_dashboard(guild, modules)
-        await self.ensure_guild_marketplace(guild, modules)
 
     async def sync_guild_timer_dashboard(
         self,
@@ -1805,12 +1808,14 @@ class GameAssistBot(commands.Bot):
             ][:15]
         needs_edit = any(name not in existing for name in required)
         if needs_edit or channel.topic != TRADING_FORUM_TOPIC or not channel.flags.require_tag:
-            channel = await channel.edit(
+            edited_channel = await channel.edit(
                 topic=TRADING_FORUM_TOPIC,
                 available_tags=tags,
                 require_tag=True,
                 reason="Configure the in-game item trading forum",
             )
+            if isinstance(edited_channel, discord.ForumChannel):
+                channel = edited_channel
         guide_tag = discord.utils.find(
             lambda tag: tag.name.casefold() == TRADING_GUIDE_TAG.casefold(), channel.available_tags
         )
@@ -5430,6 +5435,13 @@ class ManualChannelWizardView(discord.ui.View):
         await bot.cache.save_guild_bot_settings(
             interaction.guild.id, interaction.guild.name, self.modules, interaction.user.id, "manual"
         )
+        if field_name == "resource_channel_id" and channel_id is not None:
+            forum = interaction.guild.get_channel(channel_id)
+            if isinstance(forum, discord.ForumChannel):
+                command_channel_id = self.modules[module_key].get("channel_id")
+                await bot.configure_marketplace_forum(
+                    forum, int(command_channel_id) if command_channel_id else None
+                )
         next_index = self.step_index + 1
         if next_index < len(self.steps):
             next_view = ManualChannelWizardView(self.modules, next_index)
