@@ -148,6 +148,8 @@ def test_bot_copies_mirrored_images_into_peep() -> None:
     assert "files=mirror_files" in mirror_source
     assert "await image.to_file(use_cached=True)" in sync_source
     assert "attachments=[mirror_file]" in sync_source
+    assert "except discord.HTTPException" in mirror_source
+    assert "except discord.HTTPException" in sync_source
 
 
 def test_reporter_updates_are_forwarded_to_the_main_ticket() -> None:

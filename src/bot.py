@@ -1000,12 +1000,23 @@ class GameAssistBot(commands.Bot):
                 lambda item: item.name.casefold() == "bug", central.available_tags
             )
             applied_tags = [mirror_tag] if mirror_tag else list(central.available_tags[:1])
-            created = await central.create_thread(
-                name=f"[{thread.guild.name}] {thread.name}"[:100],
-                embed=mirror_embed,
-                files=mirror_files,
-                applied_tags=applied_tags,
-            )
+            try:
+                created = await central.create_thread(
+                    name=f"[{thread.guild.name}] {thread.name}"[:100],
+                    embed=mirror_embed,
+                    files=mirror_files,
+                    applied_tags=applied_tags,
+                )
+            except discord.HTTPException:
+                if not image_attachment:
+                    raise
+                logging.info("Peep rejected the mirrored file upload; using the source image URL")
+                mirror_embed.set_image(url=image_attachment.url)
+                created = await central.create_thread(
+                    name=f"[{thread.guild.name}] {thread.name}"[:100],
+                    embed=mirror_embed,
+                    applied_tags=applied_tags,
+                )
             central_thread = getattr(created, "thread", created)
             await self.cache.save_feedback_mirror(f"discord:{thread.id}", central_thread.id, thread.guild.id, thread.id)
             logging.info(
@@ -1088,7 +1099,12 @@ class GameAssistBot(commands.Bot):
             if image:
                 mirror_file = await image.to_file(use_cached=True)
                 embed.set_image(url=f"attachment://{mirror_file.filename}")
-                await central_starter.edit(embed=embed, attachments=[mirror_file])
+                try:
+                    await central_starter.edit(embed=embed, attachments=[mirror_file])
+                except discord.HTTPException:
+                    logging.info("Peep rejected the mirrored file update; retaining the source image URL")
+                    embed.set_image(url=image.url)
+                    await central_starter.edit(embed=embed)
             else:
                 await central_starter.edit(embed=embed)
             logging.info("Added feedback attachments to mirrored ticket %s", central_thread_id)
