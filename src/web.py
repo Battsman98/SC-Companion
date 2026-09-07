@@ -1294,6 +1294,17 @@ async def _main_feedback_forum_id() -> int:
     return (await _main_feedback_forum_ids())[0]
 
 
+async def _feedback_forum_tag_id(forum_id: int, report_type: str) -> str | None:
+    forum = await _discord_api("GET", f"/channels/{forum_id}")
+    preferred = "bug" if report_type == "issue" else "request"
+    tags = forum.get("available_tags", [])
+    tag = next(
+        (item for item in tags if str(item.get("name") or "").casefold() == preferred),
+        tags[0] if tags else None,
+    )
+    return str(tag["id"]) if tag and tag.get("id") else None
+
+
 @app.post("/api/me/feedback")
 async def submit_feedback(
     report_type: str = Form(...),
@@ -1361,8 +1372,6 @@ async def submit_feedback(
             {"id": index, "filename": filename}
             for index, (filename, _data, _content_type) in enumerate(attachments)
         ]
-    payload = {"name": title, "message": message}
-
     origin_channel_id: int | None = None
     if guild_id and guild_id != settings.discord_guild_id:
         await _managed_guild(user, guild_id)
@@ -1372,7 +1381,13 @@ async def submit_feedback(
             raise HTTPException(status_code=409, detail="The bot has not finished creating this server's feedback forum. Try Refresh shortly.")
         origin_channel_id = int(origin["id"])
 
-    def feedback_form() -> aiohttp.FormData:
+    central_tag_id = await _feedback_forum_tag_id(channel_id, report_type)
+    origin_tag_id = await _feedback_forum_tag_id(origin_channel_id, report_type) if origin_channel_id else None
+
+    def feedback_form(tag_id: str | None) -> aiohttp.FormData:
+        payload = {"name": title, "message": message}
+        if tag_id:
+            payload["applied_tags"] = [tag_id]
         form = aiohttp.FormData()
         form.add_field("payload_json", json.dumps(payload), content_type="application/json")
         for index, (filename, data, content_type) in enumerate(attachments):
@@ -1386,7 +1401,7 @@ async def submit_feedback(
             if origin_channel_id:
                 async with session.post(
                     f"https://discord.com/api/v10/channels/{origin_channel_id}/threads",
-                    headers={"Authorization": f"Bot {settings.discord_token}"}, data=feedback_form(),
+                    headers={"Authorization": f"Bot {settings.discord_token}"}, data=feedback_form(origin_tag_id),
                 ) as response:
                     origin_payload = await response.json(content_type=None)
                     if response.status >= 400:
@@ -1394,7 +1409,7 @@ async def submit_feedback(
             async with session.post(
                 f"https://discord.com/api/v10/channels/{channel_id}/threads",
                 headers={"Authorization": f"Bot {settings.discord_token}"},
-                data=feedback_form(),
+                data=feedback_form(central_tag_id),
             ) as response:
                 response_payload = await response.json(content_type=None)
                 if response.status >= 400:

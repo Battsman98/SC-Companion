@@ -936,7 +936,15 @@ class GameAssistBot(commands.Bot):
             mirror_embed.add_field(name="Origin", value=f"[{thread.name}]({thread.jump_url})", inline=False)
             if starter.embeds:
                 mirror_embed.add_field(name="Original report", value=(starter.embeds[0].description or starter.embeds[0].title or "Embedded report")[:1024], inline=False)
-            created = await central.create_thread(name=f"[{thread.guild.name}] {thread.name}"[:100], embed=mirror_embed)
+            mirror_tag = discord.utils.find(
+                lambda item: item.name.casefold() == "bug", central.available_tags
+            )
+            applied_tags = [mirror_tag] if mirror_tag else list(central.available_tags[:1])
+            created = await central.create_thread(
+                name=f"[{thread.guild.name}] {thread.name}"[:100],
+                embed=mirror_embed,
+                applied_tags=applied_tags,
+            )
             central_thread = getattr(created, "thread", created)
             await self.cache.save_feedback_mirror(f"discord:{thread.id}", central_thread.id, thread.guild.id, thread.id)
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
