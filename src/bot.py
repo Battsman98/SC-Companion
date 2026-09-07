@@ -959,6 +959,7 @@ class GameAssistBot(commands.Bot):
             await self.cache.set(cache_key, message.id, 315360000)
         else:
             await message.edit(embed=build_about_bot_embed(guild))
+        await self.cache.set(f"guild:{guild.id}:about-channel", channel.id, 315360000)
         await self.ensure_guild_feedback_forum(guild)
         await self.ensure_automatic_module_channels(guild)
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -5533,8 +5534,31 @@ class ConfirmBotUninstallView(discord.ui.View):
         stored = await bot.cache.guild_bot_settings(guild.id)
         modules = normalize_module_settings(stored.get("modules") if stored else None)
         automatic = bool(stored and stored.get("channel_setup_mode") == "automatic")
+        setup_channel_ids: set[int] = set()
+        for cache_key in (
+            f"guild:{guild.id}:about-channel",
+            f"guild:{guild.id}:feedback-forum",
+        ):
+            channel_id = await bot.cache.get(cache_key)
+            if isinstance(channel_id, int):
+                setup_channel_ids.add(channel_id)
+
+        # Older installations did not save the About channel ID. Confirm that the
+        # cached About panel message belongs to this bot before treating the named
+        # channel as bot-owned.
+        if not any(
+            getattr(guild.get_channel(channel_id), "name", None) == "about-the-bot"
+            for channel_id in setup_channel_ids
+        ):
+            about = discord.utils.find(lambda item: item.name == "about-the-bot", guild.text_channels)
+            panel_message_id = await bot.cache.get(f"guild:{guild.id}:about-panel-message")
+            if isinstance(about, discord.TextChannel) and panel_message_id and bot.user is not None:
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    panel_message = await about.fetch_message(int(panel_message_id))
+                    if panel_message.author.id == bot.user.id:
+                        setup_channel_ids.add(about.id)
         await interaction.response.edit_message(
-            content="Uninstalling SC Companion and cleaning up its automatic channels…", embed=None, view=None
+            content="Uninstalling SC Companion and cleaning up its channels…", embed=None, view=None
         )
         if automatic:
             category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
@@ -5548,6 +5572,11 @@ class ConfirmBotUninstallView(discord.ui.View):
                 if not any(channel.id not in cleanup_ids for channel in original_children):
                     with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                         await category.delete(reason="SC Companion confirmed uninstall")
+        for channel_id in setup_channel_ids:
+            channel = guild.get_channel(channel_id)
+            if channel is not None:
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await channel.delete(reason="SC Companion confirmed uninstall")
         await bot.cache.record_guild_installation(guild.id, guild.name, guild.member_count, active=False)
         await bot.cache.purge_guild_data(guild.id)
         await guild.leave()
@@ -5563,7 +5592,8 @@ def build_uninstall_warning_embed() -> discord.Embed:
         title="Uninstall SC Companion?",
         description=("This removes the bot's saved settings. If the bot used automatic setup, it also deletes the "
                      "feature channels and marketplace it created inside the **SC Companion** category, then removes "
-                     "the bot from this Discord. Manually selected channels are not deleted."),
+                     "the bot from this Discord. The bot-created **about-the-bot** page and **feedback-and-issues** "
+                     "forum are also deleted. Manually selected channels are not deleted."),
         color=discord.Color.red(),
     )
 

@@ -9,6 +9,7 @@ from src.bot import (
     ManualChannelWizardView,
     build_bot_setup_guide_embed,
     build_first_run_setup_embed,
+    build_uninstall_warning_embed,
     cz_timers_cache_key,
     exec_override_cache_key,
     manual_channel_steps,
@@ -119,6 +120,9 @@ def test_uninstall_only_targets_channels_recorded_in_automatic_settings() -> Non
     assert len(targets) == len(BOT_MODULES) + 1
     labels = [getattr(item, "label", None) for item in ConfirmBotUninstallView().children]
     assert labels == ["Delete Bot Setup and Uninstall", "Cancel"]
+    warning = build_uninstall_warning_embed().description or ""
+    assert "about-the-bot" in warning
+    assert "feedback-and-issues" in warning
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
