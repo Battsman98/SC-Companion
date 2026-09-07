@@ -319,6 +319,17 @@ class SQLiteCache:
             """
         )
         connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discord_ticket_statuses (
+                thread_id INTEGER PRIMARY KEY,
+                guild_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                updated_by INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_trade_stores_owner_active ON trade_store_listings(owner_id, active, updated_at)"
         )
         connection.execute(
@@ -1700,6 +1711,33 @@ class SQLiteCache:
         )
         self._connection.commit()
         return cursor.rowcount > 0
+
+    async def discord_ticket_statuses(self, thread_ids: list[int]) -> dict[int, str]:
+        if not thread_ids:
+            return {}
+        placeholders = ",".join("?" for _ in thread_ids)
+        rows = self._connection.execute(
+            f"SELECT thread_id, status FROM discord_ticket_statuses WHERE thread_id IN ({placeholders})",
+            thread_ids,
+        ).fetchall()
+        return {int(thread_id): str(status) for thread_id, status in rows}
+
+    async def set_discord_ticket_status(
+        self, thread_id: int, guild_id: int, status: str, updated_by: int
+    ) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO discord_ticket_statuses (thread_id, guild_id, status, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(thread_id) DO UPDATE SET
+                guild_id = excluded.guild_id,
+                status = excluded.status,
+                updated_by = excluded.updated_by,
+                updated_at = excluded.updated_at
+            """,
+            (thread_id, guild_id, status, updated_by, int(time.time())),
+        )
+        self._connection.commit()
 
     async def save_trade_store(self, values: dict[str, Any]) -> None:
         now = int(time.time())

@@ -848,8 +848,20 @@
       <h2 id="feedbackSuccessTitle">Your report was submitted</h2>
       <p id="feedbackSuccessMessage">Your ticket was created successfully. Direct Discord access is temporarily unavailable while server access is being configured.</p>
       <div class="feedback-success-actions">
+        <a data-feedback-ticket-link href="#" target="_blank" rel="noopener" hidden>Open ticket in Discord</a>
         <button type="button" data-feedback-success-close>Close</button>
       </div>
+    </section>
+  </div>
+
+  <div class="feedback-backdrop" data-discord-console hidden>
+    <section class="feedback-dialog discord-console" role="dialog" aria-modal="true" aria-labelledby="discordConsoleTitle">
+      <div class="feedback-heading"><div><p class="guide-kicker">CREATOR TOOLS</p><h2 id="discordConsoleTitle">Discord Inbox</h2></div><button type="button" class="feedback-close" data-discord-console-close>Close</button></div>
+      <div class="discord-console-grid">
+        <section><h3>Feedback tickets</h3><button type="button" data-ticket-refresh>Refresh tickets</button><div class="ticket-list" data-ticket-list><p>Select refresh to load Discord tickets.</p></div></section>
+        <section><h3 data-ticket-title>Ticket conversation</h3><div class="ticket-messages" data-ticket-messages><p>Select a ticket to read and respond.</p></div><form data-ticket-reply hidden><textarea name="content" rows="3" maxlength="2000" required placeholder="Reply to this ticket in Discord"></textarea><div class="feedback-actions"><select name="status" aria-label="Ticket status"><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting">Waiting on reporter</option><option value="resolved">Resolved</option></select><button type="submit">Reply & update</button></div></form></section>
+      </div>
+      <section class="discord-broadcast"><h3>Send to a Discord server</h3><form data-discord-send><div class="feedback-field-row"><label><span>Server</span><select name="guild" required><option value="">Choose a server</option></select></label><label><span>Channel</span><select name="channel" required><option value="">Choose a channel</option></select></label></div><textarea name="content" rows="3" maxlength="2000" required placeholder="Message to send as the bot"></textarea><div class="feedback-actions"><span data-discord-send-status></span><button type="submit">Send to Discord</button></div></form></section>
     </section>
   </div>
 

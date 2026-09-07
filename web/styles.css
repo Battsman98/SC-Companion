@@ -2287,6 +2287,17 @@ body.hangar-modal-open {
   min-width: 0;
 }
 
+.discord-console { width: min(1120px, calc(100vw - 32px)); max-height: 92vh; overflow: auto; }
+.discord-console-grid { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(360px, 1.5fr); gap: 18px; }
+.ticket-list, .ticket-messages { border: 1px solid rgba(80, 200, 255, .28); background: rgba(3, 13, 22, .72); border-radius: 8px; padding: 10px; min-height: 220px; max-height: 390px; overflow: auto; }
+.ticket-list button { display: flex; width: 100%; flex-direction: column; gap: 4px; text-align: left; padding: 10px; margin-bottom: 8px; }
+.ticket-list span, .ticket-messages time { display: block; color: var(--muted); font-size: .8rem; }
+.ticket-messages article { border-bottom: 1px solid rgba(80, 200, 255, .16); padding: 10px 2px; }
+.ticket-messages article p { white-space: pre-wrap; margin-bottom: 0; }
+.discord-broadcast { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(80, 200, 255, .25); }
+.discord-console textarea { width: 100%; }
+@media (max-width: 760px) { .discord-console-grid { grid-template-columns: 1fr; } }
+
 .inventory-card-primary {
   grid-template-columns: minmax(220px, 2fr) minmax(150px, 1.15fr) minmax(190px, 1.6fr) minmax(120px, 0.8fr);
 }

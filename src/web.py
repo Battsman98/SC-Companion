@@ -374,6 +374,14 @@ class ReviewDecisionRequest(BaseModel):
     queue: str = Field(default="global", pattern="^(global|loot)$")
 
 
+class DiscordMessageRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class DiscordTicketStatusRequest(BaseModel):
+    status: str = Field(pattern="^(open|in_progress|waiting|resolved)$")
+
+
 async def _warm_inventory_scanner(sources: SourceRegistry) -> None:
     """Prepare OCR and catalog indexes without delaying web readiness."""
     warmup_started = time.perf_counter()
@@ -1359,7 +1367,99 @@ async def submit_feedback(
     ticket_key = secrets.token_hex(12)
     await state().cache.save_feedback_mirror(ticket_key, int(thread_id), guild_id,
                                              int(origin_payload["id"]) if origin_channel_id and origin_payload else None)
-    return {"status": "submitted"}
+    central_guild_id = str(response_payload.get("guild_id") or settings.discord_guild_id or "")
+    ticket_url = f"https://discord.com/channels/{central_guild_id}/{thread_id}" if central_guild_id else ""
+    return {"status": "submitted", "thread_id": thread_id, "ticket_url": ticket_url}
+
+
+async def _discord_api(method: str, path: str, *, json_payload: dict[str, Any] | None = None) -> Any:
+    settings = state().settings
+    if not settings.discord_token:
+        raise HTTPException(status_code=503, detail="Discord is not configured.")
+    timeout = aiohttp.ClientTimeout(total=max(30, settings.http_timeout_seconds))
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.request(
+                method,
+                f"https://discord.com/api/v10{path}",
+                headers={"Authorization": f"Bot {settings.discord_token}"},
+                json=json_payload,
+            ) as response:
+                payload = await response.json(content_type=None)
+                if response.status >= 400:
+                    logging.error("Discord API %s %s returned %s", method, path, response.status)
+                    raise HTTPException(status_code=502, detail="Discord could not complete that request.")
+                return payload
+    except HTTPException:
+        raise
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+        raise HTTPException(status_code=502, detail="Discord could not be reached.") from error
+
+
+@app.get("/api/admin/discord/guilds", dependencies=[Depends(require_bot_admin)])
+async def discord_guilds() -> list[dict[str, str]]:
+    guilds = await _discord_api("GET", "/users/@me/guilds")
+    return [{"id": str(item["id"]), "name": str(item["name"])} for item in guilds]
+
+
+@app.get("/api/admin/discord/guilds/{guild_id}/channels", dependencies=[Depends(require_bot_admin)])
+async def discord_channels(guild_id: int) -> list[dict[str, str]]:
+    channels = await _discord_api("GET", f"/guilds/{guild_id}/channels")
+    supported = {0, 5, 15}  # text, announcement, forum
+    return [
+        {"id": str(item["id"]), "name": str(item.get("name") or item["id"]), "type": str(item["type"])}
+        for item in channels if item.get("type") in supported
+    ]
+
+
+@app.post("/api/admin/discord/channels/{channel_id}/messages", dependencies=[Depends(require_bot_admin)])
+async def send_discord_message(channel_id: int, payload: DiscordMessageRequest) -> dict[str, str]:
+    message = await _discord_api("POST", f"/channels/{channel_id}/messages", json_payload={
+        "content": payload.content.strip(), "allowed_mentions": {"parse": []},
+    })
+    return {"status": "sent", "message_id": str(message.get("id") or "")}
+
+
+@app.get("/api/admin/feedback/tickets", dependencies=[Depends(require_bot_admin)])
+async def feedback_tickets() -> list[dict[str, Any]]:
+    settings = state().settings
+    if not settings.discord_guild_id or not settings.feedback_forum_channel_id:
+        raise HTTPException(status_code=503, detail="The Discord feedback forum is not configured.")
+    active = await _discord_api("GET", f"/guilds/{settings.discord_guild_id}/threads/active")
+    threads = [item for item in active.get("threads", []) if int(item.get("parent_id") or 0) == settings.feedback_forum_channel_id]
+    statuses = await state().cache.discord_ticket_statuses([int(item["id"]) for item in threads])
+    return [{
+        "id": str(item["id"]), "name": str(item.get("name") or "Untitled ticket"),
+        "guild_id": str(settings.discord_guild_id), "status": statuses.get(int(item["id"]), "open"),
+        "message_count": int(item.get("message_count") or 0),
+        "url": f"https://discord.com/channels/{settings.discord_guild_id}/{item['id']}",
+    } for item in threads]
+
+
+@app.get("/api/admin/feedback/tickets/{thread_id}/messages", dependencies=[Depends(require_bot_admin)])
+async def feedback_ticket_messages(thread_id: int) -> list[dict[str, Any]]:
+    messages = await _discord_api("GET", f"/channels/{thread_id}/messages?limit=50")
+    return [{
+        "id": str(item["id"]), "content": str(item.get("content") or ""),
+        "author": str(item.get("author", {}).get("global_name") or item.get("author", {}).get("username") or "Unknown"),
+        "timestamp": str(item.get("timestamp") or ""), "attachments": item.get("attachments", []),
+        "embeds": item.get("embeds", []),
+    } for item in reversed(messages)]
+
+
+@app.put("/api/admin/feedback/tickets/{thread_id}/status", dependencies=[Depends(require_bot_admin)])
+async def update_feedback_ticket_status(
+    thread_id: int, payload: DiscordTicketStatusRequest, user=Depends(require_user)
+) -> dict[str, str]:
+    settings = state().settings
+    if not settings.discord_guild_id:
+        raise HTTPException(status_code=503, detail="Discord is not configured.")
+    await state().cache.set_discord_ticket_status(thread_id, settings.discord_guild_id, payload.status, user.id)
+    label = payload.status.replace("_", " ").title()
+    await _discord_api("POST", f"/channels/{thread_id}/messages", json_payload={
+        "content": f"**Ticket status updated: {label}**", "allowed_mentions": {"parse": []},
+    })
+    return {"status": payload.status}
 
 
 @app.post("/api/activity", status_code=204)
