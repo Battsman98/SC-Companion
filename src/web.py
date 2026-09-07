@@ -361,6 +361,7 @@ class LanguageMeasurementRequest(BaseModel):
 class GuildModuleRequest(BaseModel):
     enabled: bool = False
     channel_id: int | None = None
+    resource_channel_id: int | None = None
 
 
 class GuildBotSettingsRequest(BaseModel):
@@ -920,7 +921,7 @@ async def _discord_guild_channels(guild_id: int) -> list[dict[str, Any]]:
             if response.status >= 400 or not isinstance(payload, list):
                 raise HTTPException(status_code=503, detail="Discord channels are temporarily unavailable.")
             return [
-                {"id": int(channel["id"]), "name": str(channel.get("name") or "channel")}
+                {"id": int(channel["id"]), "name": str(channel.get("name") or "channel"), "type": int(channel.get("type", -1))}
                 for channel in payload
                 if int(channel.get("type", -1)) in {0, 5, 15, 16}
             ]
@@ -1028,8 +1029,16 @@ async def save_guild_bot_configuration(
         {key: value.model_dump() for key, value in payload.modules.items()},
         enabled_default=False,
     )
-    if any(item["channel_id"] and item["channel_id"] not in channel_ids for item in modules.values()):
+    if any(
+        channel_id and channel_id not in channel_ids
+        for item in modules.values()
+        for channel_id in (item["channel_id"], item["resource_channel_id"])
+    ):
         raise HTTPException(status_code=422, detail="One or more selected channels are unavailable.")
+    forum_ids = {channel["id"] for channel in channels if channel["type"] in {15, 16}}
+    trade_forum_id = modules["trade_tools"]["resource_channel_id"]
+    if trade_forum_id and trade_forum_id not in forum_ids:
+        raise HTTPException(status_code=422, detail="The marketplace destination must be a Discord forum channel.")
     await state().cache.save_guild_bot_settings(guild_id, guild["name"], modules, user.id)
     await state().cache.add_audit_event(
         "Bot Configuration Updated",

@@ -50,7 +50,7 @@ COMMAND_MODULE: Final[dict[str, str]] = {
 
 def default_module_settings(enabled: bool = True) -> dict[str, dict[str, object]]:
     return {
-        key: {"enabled": enabled, "channel_id": None}
+        key: {"enabled": enabled, "channel_id": None, "resource_channel_id": None}
         for key in BOT_MODULES
     }
 
@@ -66,6 +66,7 @@ def normalize_module_settings(value: object, *, enabled_default: bool = False) -
         normalized[key] = {
             "enabled": bool(item.get("enabled")),
             "channel_id": int(channel_id) if channel_id else None,
+            "resource_channel_id": int(item["resource_channel_id"]) if item.get("resource_channel_id") else None,
         }
     return normalized
 

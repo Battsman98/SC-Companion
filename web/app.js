@@ -1151,11 +1151,15 @@ async function loadGuildBotConfiguration(guildId) {
       '<option value="">Any channel</option>',
       ...config.channels.map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
     ].join("");
+    const forumOptions = (selected) => [
+      '<option value="">Marketplace disabled</option>',
+      ...config.channels.filter((channel) => [15, 16].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
+    ].join("");
     outputs.botManagement.innerHTML = `<form data-bot-management-form data-guild-id="${config.guild.id}">
       <div class="bot-module-list">
         ${config.modules.map((module) => `<div class="bot-module-row" data-module-key="${escapeAttribute(module.key)}">
           <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></label>
-          <label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>
+          <div><label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>${module.key === "trade_tools" ? `<label>Marketplace forum<select data-module-resource-channel>${forumOptions(module.resource_channel_id)}</select></label>` : ""}</div>
         </div>`).join("")}
       </div>
       <div class="bot-management-actions"><button type="submit">Save Bot Settings</button><span data-bot-management-status>${config.configured ? "Settings loaded." : "Choose modules, then save to complete setup."}</span></div>
@@ -1175,6 +1179,7 @@ async function saveGuildBotConfiguration(event) {
     modules[row.dataset.moduleKey] = {
       enabled: row.querySelector("[data-module-enabled]").checked,
       channel_id: row.querySelector("[data-module-channel]").value || null,
+      resource_channel_id: row.querySelector("[data-module-resource-channel]")?.value || null,
     };
   });
   status.textContent = "Saving...";
