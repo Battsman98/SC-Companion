@@ -1,6 +1,6 @@
 import asyncio
 
-from src.bot import cz_timers_cache_key, exec_override_cache_key
+from src.bot import build_bot_setup_guide_embed, cz_timers_cache_key, exec_override_cache_key
 from src.cache import SQLiteCache
 from src.guild_config import BOT_MODULES, module_for_command
 
@@ -16,6 +16,16 @@ def test_timer_cache_keys_are_isolated_by_guild() -> None:
     assert exec_override_cache_key(None) != exec_override_cache_key(123)
     assert exec_override_cache_key(123) != exec_override_cache_key(456)
     assert cz_timers_cache_key(123) != cz_timers_cache_key(456)
+
+
+def test_discord_setup_guide_has_short_ordered_steps() -> None:
+    embed = build_bot_setup_guide_embed()
+    field_names = [field.name for field in embed.fields]
+    assert field_names[:4] == [
+        "1. Open the panel", "2. Pick the features", "3. Pick command channels", "4. Check your setup"
+    ]
+    assert "/admin panel" in embed.fields[0].value
+    assert "other servers" in (embed.footer.text or "")
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:

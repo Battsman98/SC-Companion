@@ -4917,6 +4917,46 @@ def build_native_admin_embed(guild: discord.Guild, modules: dict[str, dict[str, 
     return embed
 
 
+def build_bot_setup_guide_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Set Up SC Companion",
+        description="You need the **Manage Server** permission. Follow these steps in the server where you want to use the bot.",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="1. Open the panel",
+        value="Type `/admin panel`. Only server managers can see and change these settings.",
+        inline=False,
+    )
+    embed.add_field(
+        name="2. Pick the features",
+        value="Open **Choose enabled features**. Check each feature you want. Remove the check from a feature you do not want. Then save your choice.",
+        inline=False,
+    )
+    embed.add_field(
+        name="3. Pick command channels",
+        value="Type `/admin channel`. Enter the feature name and choose a text channel. Leave the channel empty if the commands may work in any channel.",
+        inline=False,
+    )
+    embed.add_field(
+        name="4. Check your setup",
+        value="Type `/admin health`. Then try one enabled command in its channel. The bot will tell you if a command is turned off or used in the wrong channel.",
+        inline=False,
+    )
+    embed.add_field(
+        name="What the bot makes",
+        value="The bot makes an **about-the-bot** page and a **feedback-and-issues** forum. It also adds command examples to the channels you choose.",
+        inline=False,
+    )
+    embed.add_field(
+        name="Need help?",
+        value="Open the full panel at [sccompanion.org](https://sccompanion.org), or send a ticket in **feedback-and-issues**.",
+        inline=False,
+    )
+    embed.set_footer(text="Settings only change this Discord server. They do not change other servers.")
+    return embed
+
+
 class NativeAdminModuleSelect(discord.ui.Select):
     def __init__(self, modules: dict[str, dict[str, object]]) -> None:
         options = [discord.SelectOption(label=str(value["label"]), value=key, default=bool(modules[key]["enabled"]))
@@ -4943,7 +4983,13 @@ class NativeAdminView(discord.ui.View):
     def __init__(self, modules: dict[str, dict[str, object]]) -> None:
         super().__init__(timeout=900)
         self.add_item(NativeAdminModuleSelect(modules))
+        guide = discord.ui.Button(label="Setup Guide", style=discord.ButtonStyle.secondary, emoji="📘")
+        guide.callback = self.show_guide
+        self.add_item(guide)
         self.add_item(discord.ui.Button(label="Open full website panel", style=discord.ButtonStyle.link, url="https://sccompanion.org"))
+
+    async def show_guide(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(embed=build_bot_setup_guide_embed(), ephemeral=True)
 
 
 @admin_group.command(name="panel", description="Open this server's native bot administration panel.")
@@ -4961,6 +5007,15 @@ async def admin_panel_command(interaction: discord.Interaction) -> None:
     pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
     await interaction.response.send_message(embed=build_native_admin_embed(interaction.guild, modules, pending),
                                             view=NativeAdminView(modules), ephemeral=True)
+
+
+@admin_group.command(name="guide", description="Show simple steps for setting up the bot.")
+async def admin_guide_command(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or not _can_manage_admin_commands(interaction, bot.settings):
+        await interaction.response.send_message("You need Manage Server permission to open the setup guide.", ephemeral=True)
+        return
+    await interaction.response.send_message(embed=build_bot_setup_guide_embed(), ephemeral=True)
 
 
 @admin_group.command(name="channel", description="Assign a feature's commands to a channel in this server.")
