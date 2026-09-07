@@ -353,6 +353,14 @@ label {
   font-size: 0.78rem;
 }
 
+.support-qr {
+  width: min(180px, 55vw);
+  height: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff;
+}
+
 input, select, button, .button-link {
   width: 100%;
   min-height: 40px;

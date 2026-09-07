@@ -7,6 +7,8 @@ import discord
 
 from src.config import Settings
 from src.bot import (
+    build_about_bot_embed,
+    build_guild_command_guide_embed,
     build_commodity_embed,
     build_inventory_search_embed,
     build_command_channel_directory_embed,
@@ -28,6 +30,23 @@ from src.bot import (
     item_group,
     industry_group,
 )
+
+
+def test_about_panel_explains_scope_and_optional_support() -> None:
+    embed = build_about_bot_embed()
+
+    assert embed.title == "About SC Companion"
+    assert "Server managers" in (embed.description or "")
+    assert any("hosting, domains, storage, security" in field.value for field in embed.fields)
+    assert embed.image.url.endswith("support-square-qr.png")
+
+
+def test_command_channel_guide_lists_commands_and_examples() -> None:
+    embed = build_guild_command_guide_embed(["ship_search", "trade_tools"])
+
+    assert embed.title == "SC Companion Command Guide"
+    assert any("`/ship`" in field.value and "`/ship name: Carrack`" in field.value for field in embed.fields)
+    assert any("`/trade routing`" in field.value for field in embed.fields)
 from src.sources.base import CommodityMarket
 from src.sources.base import CommodityResult
 
