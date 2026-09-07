@@ -854,7 +854,11 @@ class GameAssistBot(commands.Bot):
     async def on_ready(self) -> None:
         await self._run_startup_step("backfill shared feedback tickets", self.backfill_feedback_tickets)
         for guild in self.guilds:
-            if guild.id == self.settings.discord_support_guild_id and guild.id != self.settings.discord_guild_id:
+            if (
+                self.settings.runtime_profile != "public"
+                and guild.id == self.settings.discord_support_guild_id
+                and guild.id != self.settings.discord_guild_id
+            ):
                 continue
             await self._run_startup_step(
                 f"publish first-run setup notice in {guild.id}",
@@ -924,7 +928,11 @@ class GameAssistBot(commands.Bot):
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
-        if guild.id == self.settings.discord_support_guild_id and guild.id != self.settings.discord_guild_id:
+        if (
+            self.settings.runtime_profile != "public"
+            and guild.id == self.settings.discord_support_guild_id
+            and guild.id != self.settings.discord_guild_id
+        ):
             return
         await self.sync_first_run_notice(guild)
         await self.ensure_about_panel(guild)
@@ -939,6 +947,9 @@ class GameAssistBot(commands.Bot):
         if guild is None:
             return None
         candidates: list[discord.ForumChannel] = []
+        configured = guild.get_channel(self.settings.feedback_forum_channel_id or 0)
+        if isinstance(configured, discord.ForumChannel):
+            candidates.append(configured)
         tracked = guild.get_channel(self.visitor_channels.get("feedback-and-issues", 0))
         if isinstance(tracked, discord.ForumChannel):
             candidates.append(tracked)
@@ -948,9 +959,6 @@ class GameAssistBot(commands.Bot):
                 item for item in category.channels
                 if isinstance(item, discord.ForumChannel) and item.name == "feedback-and-issues"
             )
-        configured = guild.get_channel(self.settings.feedback_forum_channel_id or 0)
-        if isinstance(configured, discord.ForumChannel):
-            candidates.append(configured)
         candidates.extend(item for item in guild.forums if item.name == "feedback-and-issues")
         return next(iter(dict.fromkeys(candidates)), None)
 
@@ -1212,7 +1220,11 @@ class GameAssistBot(commands.Bot):
         await self.wait_until_ready()
         while not self.is_closed():
             for guild in self.guilds:
-                if guild.id == self.settings.discord_support_guild_id and guild.id != self.settings.discord_guild_id:
+                if (
+                    self.settings.runtime_profile != "public"
+                    and guild.id == self.settings.discord_support_guild_id
+                    and guild.id != self.settings.discord_guild_id
+                ):
                     continue
                 with suppress(Exception):
                     await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
@@ -1436,7 +1448,10 @@ class GameAssistBot(commands.Bot):
     async def ensure_guild_feedback_forum(
         self, guild: discord.Guild, category: discord.CategoryChannel | None = None
     ) -> None:
-        if guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id} or guild.me is None or not guild.me.guild_permissions.manage_channels:
+        if (
+            self.settings.runtime_profile != "public"
+            and guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id}
+        ) or guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
         if category is None:
             category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)

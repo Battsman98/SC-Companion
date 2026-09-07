@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 import inspect
 
 from fastapi import UploadFile
@@ -243,6 +244,27 @@ def test_forwarded_staff_messages_do_not_repeat_official_response_label() -> Non
     website_source = inspect.getsource(web._send_discord_channel_message)
     assert "Official SC Companion response" not in bot_source
     assert "Official SC Companion response" not in website_source
+
+
+def test_discord_inbox_refreshes_every_minute_while_open() -> None:
+    javascript = (Path(__file__).parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "window.setInterval(refreshDiscordConsole, 60_000)" in javascript
+    assert "window.clearInterval(ticketRefreshTimer)" in javascript
+
+
+def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None:
+    ready_source = inspect.getsource(GameAssistBot.on_ready)
+    join_source = inspect.getsource(GameAssistBot.on_guild_join)
+    loop_source = inspect.getsource(GameAssistBot._guild_sync_loop)
+    feedback_source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
+    primary_source = inspect.getsource(GameAssistBot.primary_feedback_forum)
+
+    for source in (ready_source, join_source, loop_source, feedback_source):
+        assert 'self.settings.runtime_profile != "public"' in source
+    assert primary_source.index("configured = guild.get_channel") < primary_source.index(
+        'tracked = guild.get_channel'
+    )
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:

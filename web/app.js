@@ -1892,6 +1892,8 @@ let selectedTicket = null;
 let allTickets = [];
 let allApprovals = [];
 let currentTicketTab = "open";
+let ticketRefreshTimer = null;
+let ticketRefreshInFlight = false;
 
 async function jsonRequest(url, options = {}) {
   const response = await fetch(url, { credentials: "same-origin", ...options });
@@ -1906,6 +1908,7 @@ async function openDiscordConsole() {
   document.body.classList.add("feedback-modal-open");
   try {
     await loadTickets();
+    if (!ticketRefreshTimer) ticketRefreshTimer = window.setInterval(refreshDiscordConsole, 60_000);
   } catch (error) {
     if (ticketList) ticketList.textContent = error.message;
   }
@@ -1914,7 +1917,26 @@ async function openDiscordConsole() {
 function closeDiscordConsole() {
   if (!discordConsole) return;
   discordConsole.hidden = true;
+  if (ticketRefreshTimer) window.clearInterval(ticketRefreshTimer);
+  ticketRefreshTimer = null;
   document.body.classList.remove("feedback-modal-open");
+}
+
+async function refreshDiscordConsole() {
+  if (!discordConsole || discordConsole.hidden || ticketRefreshInFlight) return;
+  ticketRefreshInFlight = true;
+  const selectedId = selectedTicket?.id;
+  try {
+    await loadTickets();
+    if (selectedId) {
+      const selectedButton = document.querySelector(`[data-ticket-id="${CSS.escape(String(selectedId))}"]`);
+      if (selectedButton) await selectTicket(selectedButton);
+    }
+  } catch (_) {
+    // Keep the current inbox visible and try again on the next interval.
+  } finally {
+    ticketRefreshInFlight = false;
+  }
 }
 
 async function loadTickets() {
@@ -1986,7 +2008,13 @@ function renderTicketMessage(message) {
   const files = (message.attachments || []).filter((item) => item.url && !attachmentImages.includes(item.url));
   const media = images.map((url) => `<a class="ticket-image" href="${escapeAttribute(url)}" target="_blank" rel="noopener"><img src="${escapeAttribute(url)}" alt="Ticket attachment"></a>`).join("");
   const fileLinks = files.map((item) => `<a class="ticket-file" href="${escapeAttribute(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.filename || "Open attachment")}</a>`).join("");
-  return `<article><div class="ticket-message-heading"><strong>${escapeHtml(message.author)}</strong><time>${escapeHtml(message.timestamp ? new Date(message.timestamp).toLocaleString() : "")}</time></div><p>${escapeHtml(message.content || message.embeds?.[0]?.description || (media ? "Image attached" : "Discord embed or attachment"))}</p>${media}${fileLinks}</article>`;
+  const embedText = (message.embeds || []).flatMap((embed) => [
+    embed.description,
+    ...(embed.fields || []).map((field) => `${field.name || "Details"}\n${field.value || ""}`),
+    (!embed.description && !(embed.fields || []).length) ? embed.title : "",
+  ]).filter(Boolean).join("\n\n");
+  const body = message.content || embedText || (media ? "Image attached" : "Discord embed or attachment");
+  return `<article><div class="ticket-message-heading"><strong>${escapeHtml(message.author)}</strong><time>${escapeHtml(message.timestamp ? new Date(message.timestamp).toLocaleString() : "")}</time></div><p>${escapeHtml(body)}</p>${media}${fileLinks}</article>`;
 }
 
 function clearFeedbackPreviews() {
