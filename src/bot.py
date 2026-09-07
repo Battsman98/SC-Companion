@@ -1297,6 +1297,8 @@ class GameAssistBot(commands.Bot):
         await self._ensure_automatic_module_channels(guild)
         await self.ensure_guild_marketplace(guild, normalize_module_settings(configured.get("modules")))
         await self.sync_guild_command_examples(guild)
+        if self.settings.runtime_profile == "public":
+            await self.sync_sc_companion_category_examples(guild, category)
 
     async def sync_first_run_notice(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -1558,6 +1560,34 @@ class GameAssistBot(commands.Bot):
             else:
                 await message.edit(embed=embed)
         await self.sync_guild_timer_dashboard(guild, modules)
+
+    async def sync_sc_companion_category_examples(
+        self, guild: discord.Guild, category: discord.CategoryChannel
+    ) -> None:
+        """Keep public-bot examples in its own category when Peep shares the guild."""
+        if guild.me is None:
+            return
+        examples = build_visitor_command_example_embeds()
+        for channel in category.text_channels:
+            embed = examples.get(channel.name)
+            if embed is None:
+                continue
+            permissions = channel.permissions_for(guild.me)
+            if not permissions.send_messages or not permissions.embed_links:
+                continue
+            cache_key = f"guild:{guild.id}:sc-companion-example:{channel.id}"
+            message_id = await self.cache.get(cache_key)
+            message = None
+            if isinstance(message_id, int):
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = await channel.fetch_message(message_id)
+            if message is None:
+                message = await self.find_recent_embed_message(channel, embed.title or "")
+            if message is None:
+                message = await channel.send(embed=embed, silent=True)
+            else:
+                await message.edit(content=None, embed=embed)
+            await self.cache.set(cache_key, message.id, 315360000)
 
     async def sync_guild_timer_dashboard(
         self,

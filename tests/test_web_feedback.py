@@ -265,6 +265,12 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
     assert primary_source.index("configured = guild.get_channel") < primary_source.index(
         'tracked = guild.get_channel'
     )
+    about_source = inspect.getsource(GameAssistBot._ensure_about_panel)
+    category_source = inspect.getsource(GameAssistBot.sync_sc_companion_category_examples)
+    assert 'self.settings.runtime_profile == "public"' in about_source
+    assert "category.text_channels" in category_source
+    assert "build_visitor_command_example_embeds" in category_source
+    assert "sc-companion-example" in category_source
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
