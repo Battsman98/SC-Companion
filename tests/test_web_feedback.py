@@ -123,8 +123,12 @@ def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
     assert not any(name.startswith("admin") or name.startswith("audit") for name in VISITOR_COMMAND_CHANNELS)
 
 
-def test_archived_hub_channels_and_manual_order_are_not_restored() -> None:
+def test_replaced_hub_channels_are_deleted_and_manual_order_is_not_restored() -> None:
     assert VISITOR_ARCHIVE_CHANNEL_NAMES.isdisjoint(VISITOR_CHANNEL_SPECS)
+    cleanup_source = inspect.getsource(GameAssistBot._delete_replaced_visitor_channels)
+    assert "Permanently remove Bot Hub Archive" in cleanup_source
+    assert "create_category" not in cleanup_source
+    assert ".edit(" not in cleanup_source
     source = inspect.getsource(GameAssistBot.on_guild_channel_update)
     assert 'for attribute in ("name", "category_id", "topic", "overwrites")' in source
     assert "position" not in source.casefold()
