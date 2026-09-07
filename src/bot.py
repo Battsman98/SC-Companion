@@ -690,6 +690,7 @@ class GameAssistBot(commands.Bot):
         self.add_view(CZTimerDashboardView())
         self.add_view(MembershipApplicationPanelView())
         self.add_view(MembershipReviewView())
+        self.add_view(FirstRunSetupView())
         self.tree.add_command(status_command)
         self.tree.add_command(lookup_command)
         self.tree.add_command(ship_command)
@@ -847,8 +848,53 @@ class GameAssistBot(commands.Bot):
         else:
             await message.edit(embed=build_about_bot_embed(guild))
         await self.ensure_guild_feedback_forum(guild)
+        configured = await self.cache.guild_bot_settings(guild.id)
+        setup_complete = configured is not None and any(
+            bool(item["enabled"]) for item in normalize_module_settings(configured.get("modules")).values()
+        )
+        if guild.id != self.settings.discord_guild_id and not setup_complete:
+            await self.ensure_first_run_notice(guild)
+        else:
+            await self.remove_first_run_notice(guild)
         await self.ensure_automatic_module_channels(guild)
         await self.sync_guild_command_examples(guild)
+
+    async def ensure_first_run_notice(self, guild: discord.Guild) -> None:
+        if guild.me is None:
+            return
+        candidates = [guild.system_channel, *guild.text_channels]
+        channel = next((candidate for candidate in candidates if isinstance(candidate, discord.TextChannel)
+                        and candidate.name != "about-the-bot"
+                        and candidate.permissions_for(guild.me).send_messages
+                        and candidate.permissions_for(guild.me).embed_links), None)
+        if channel is None:
+            channel = discord.utils.find(lambda item: item.name == "about-the-bot", guild.text_channels)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        cache_key = f"guild:{guild.id}:first-run-setup"
+        stored = await self.cache.get(cache_key)
+        message = None
+        if isinstance(stored, dict) and int(stored.get("channel_id") or 0) == channel.id:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                message = await channel.fetch_message(int(stored.get("message_id") or 0))
+        embed = build_first_run_setup_embed()
+        if message is None:
+            message = await channel.send(embed=embed, view=FirstRunSetupView())
+            await self.cache.set(cache_key, {"channel_id": channel.id, "message_id": message.id}, 315360000)
+        else:
+            await message.edit(embed=embed, view=FirstRunSetupView())
+
+    async def remove_first_run_notice(self, guild: discord.Guild) -> None:
+        cache_key = f"guild:{guild.id}:first-run-setup"
+        stored = await self.cache.get(cache_key)
+        if not isinstance(stored, dict):
+            return
+        channel = guild.get_channel(int(stored.get("channel_id") or 0))
+        if isinstance(channel, discord.TextChannel):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                message = await channel.fetch_message(int(stored.get("message_id") or 0))
+                await message.delete()
+        await self.cache.delete(cache_key)
 
     async def ensure_automatic_module_channels(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -5008,6 +5054,18 @@ def build_bot_setup_guide_embed() -> discord.Embed:
     return embed
 
 
+def build_first_run_setup_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Finish setting up SC Companion",
+        description=("A server owner or manager can select **Open Admin Panel** below. "
+                     "You can also type `/admin panel` at any time."),
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="What happens next?", value="Choose how channels are made, pick the features you want, and save.", inline=False)
+    embed.set_footer(text="This setup notice is removed after the server settings are saved.")
+    return embed
+
+
 class NativeAdminModuleSelect(discord.ui.Select):
     def __init__(self, modules: dict[str, dict[str, object]]) -> None:
         options = [discord.SelectOption(label=str(value["label"]), value=key,
@@ -5093,14 +5151,26 @@ class NativeAdminView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=ChannelSetupChoiceView(self.modules))
 
 
-@admin_group.command(name="panel", description="Open this server's native bot administration panel.")
-async def admin_panel_command(interaction: discord.Interaction) -> None:
+class FirstRunSetupView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Open Admin Panel", style=discord.ButtonStyle.primary,
+                       emoji="⚙️", custom_id="sc-companion:first-run-admin-panel")
+    async def open_panel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await respond_with_admin_panel(interaction)
+
+
+async def respond_with_admin_panel(interaction: discord.Interaction) -> None:
     bot = interaction.client
     if not isinstance(bot, GameAssistBot) or interaction.guild is None:
         await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
         return
     if not _can_manage_admin_commands(interaction, bot.settings):
-        await interaction.response.send_message("You need Manage Server permission to open this panel.", ephemeral=True)
+        await interaction.response.send_message(
+            "Only a server owner or member with Manage Server permission can open this panel.", ephemeral=True
+        )
         return
     stored = await bot.cache.guild_bot_settings(interaction.guild.id)
     modules = normalize_module_settings(stored.get("modules") if stored else None,
@@ -5115,8 +5185,16 @@ async def admin_panel_command(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(embed=embed, view=ChannelSetupChoiceView(modules), ephemeral=True)
         return
     pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
-    await interaction.response.send_message(embed=build_native_admin_embed(interaction.guild, modules, pending),
-                                            view=NativeAdminView(modules, str((stored or {}).get("channel_setup_mode") or "manual")), ephemeral=True)
+    await interaction.response.send_message(
+        embed=build_native_admin_embed(interaction.guild, modules, pending),
+        view=NativeAdminView(modules, str((stored or {}).get("channel_setup_mode") or "manual")),
+        ephemeral=True,
+    )
+
+
+@admin_group.command(name="panel", description="Open this server's native bot administration panel.")
+async def admin_panel_command(interaction: discord.Interaction) -> None:
+    await respond_with_admin_panel(interaction)
 
 
 @admin_group.command(name="guide", description="Show simple steps for setting up the bot.")

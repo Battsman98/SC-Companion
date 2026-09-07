@@ -1,6 +1,6 @@
 import asyncio
 
-from src.bot import build_bot_setup_guide_embed, cz_timers_cache_key, exec_override_cache_key
+from src.bot import FirstRunSetupView, build_bot_setup_guide_embed, build_first_run_setup_embed, cz_timers_cache_key, exec_override_cache_key
 from src.cache import SQLiteCache
 from src.guild_config import BOT_MODULES, module_for_command
 
@@ -34,6 +34,14 @@ def test_discord_setup_guide_has_short_ordered_steps() -> None:
     ]
     assert "/admin panel" in embed.fields[0].value
     assert "other servers" in (embed.footer.text or "")
+
+
+def test_first_run_notice_points_to_admin_panel_and_has_persistent_button() -> None:
+    embed = build_first_run_setup_embed()
+    assert "/admin panel" in (embed.description or "")
+    button = FirstRunSetupView().children[0]
+    assert button.label == "Open Admin Panel"
+    assert button.custom_id == "sc-companion:first-run-admin-panel"
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:
