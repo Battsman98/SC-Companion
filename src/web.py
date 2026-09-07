@@ -1008,6 +1008,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
                 "key": key,
                 "label": definition["label"],
                 "description": definition["description"],
+                "commands": list(definition["commands"]),
                 **modules[key],
             }
             for key, definition in BOT_MODULES.items()
