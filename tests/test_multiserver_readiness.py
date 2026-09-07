@@ -3,6 +3,7 @@ import asyncio
 from src.bot import (
     FirstRunSetupView,
     NativeAdminView,
+    ManualChannelWizardView,
     build_bot_setup_guide_embed,
     build_first_run_setup_embed,
     cz_timers_cache_key,
@@ -68,6 +69,15 @@ def test_manual_setup_has_an_explicit_next_step_for_each_enabled_feature() -> No
     assert "Next: Assign Channels" in labels
     automatic_labels = [getattr(item, "label", None) for item in NativeAdminView(modules, "automatic").children]
     assert "Next: Assign Channels" not in automatic_labels
+
+    timer_modules = {
+        key: {"enabled": key == "timers", "channel_id": None, "resource_channel_id": None}
+        for key in BOT_MODULES
+    }
+    wizard = ManualChannelWizardView(timer_modules)
+    channel_select = wizard.children[0]
+    assert channel_select.placeholder == "Choose a channel for Timers"
+    assert "channel for Timers" in (wizard.embed().description or "")
 
 
 def test_review_queue_and_server_analytics_are_persistent(tmp_path) -> None:

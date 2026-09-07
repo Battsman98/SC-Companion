@@ -5157,7 +5157,9 @@ class ManualChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, module_key: str, field_name: str) -> None:
         channel_types = ([discord.ChannelType.forum] if field_name == "resource_channel_id"
                          else [discord.ChannelType.text, discord.ChannelType.news])
-        label = "Choose the marketplace forum" if field_name == "resource_channel_id" else "Choose a command channel"
+        feature_label = str(BOT_MODULES[module_key]["label"])
+        label = (f"Choose a marketplace forum for {feature_label}"
+                 if field_name == "resource_channel_id" else f"Choose a channel for {feature_label}")
         super().__init__(placeholder=label, min_values=1, max_values=1, channel_types=channel_types)
         self.module_key = module_key
         self.field_name = field_name
@@ -5196,10 +5198,12 @@ class ManualChannelWizardView(discord.ui.View):
                                  color=discord.Color.orange())
         module_key, field_name = self.steps[self.step_index]
         label = str(BOT_MODULES[module_key]["label"])
-        destination = "marketplace forum" if field_name == "resource_channel_id" else "command channel"
+        instruction = (f"Choose the **marketplace forum for {label}**."
+                       if field_name == "resource_channel_id"
+                       else f"Choose a **channel for {label}**.")
         return discord.Embed(
             title=f"Assign Channels — Step {self.step_index + 1} of {len(self.steps)}",
-            description=f"Choose the **{destination}** for **{label}**.",
+            description=instruction,
             color=discord.Color.blurple(),
         )
 
