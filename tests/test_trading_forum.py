@@ -7,6 +7,7 @@ from src.bot import (
     _trade_listing_content,
     _trade_seller_terms,
     build_marketplace_guide_embed,
+    build_marketplace_store_guide_embed,
     build_trading_item_embed,
 )
 from src.sources.base import TradeItemResult
@@ -18,12 +19,17 @@ def test_trading_forum_has_the_three_required_listing_types() -> None:
 
 
 def test_marketplace_guide_explains_every_required_tag() -> None:
-    embed = build_marketplace_guide_embed()
+    embed = build_marketplace_guide_embed(111, 222)
     text = " ".join([embed.description or "", *(field.name + " " + field.value for field in embed.fields)])
     for tag in TRADING_FORUM_TAGS:
         assert tag in text
-    assert "STORE" in text
-    assert "GUIDE" in text
+    assert "<#111>" in text
+    assert "<#222>" in text
+    store = build_marketplace_store_guide_embed(111)
+    store_text = " ".join([store.description or "", *(field.name + " " + field.value for field in store.fields)])
+    assert "/trade store-refresh" in store_text
+    assert "Inventory Scanner Excel" in store_text
+    assert "STORE" in store_text
 
 
 def test_trade_listing_command_is_routed_to_trade_tools() -> None:
