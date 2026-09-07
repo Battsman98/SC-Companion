@@ -6,6 +6,7 @@ from src.bot import (
     VISITOR_COMMAND_CHANNELS,
     _trade_listing_content,
     _trade_seller_terms,
+    build_marketplace_guide_embed,
     build_trading_item_embed,
 )
 from src.sources.base import TradeItemResult
@@ -14,6 +15,15 @@ from src.sources.base import TradeItemResult
 def test_trading_forum_has_the_three_required_listing_types() -> None:
     assert TRADING_FORUM_TAGS == ("WTS", "WTB", "WTT")
     assert TRADING_GUIDE_TAG not in TRADING_FORUM_TAGS
+
+
+def test_marketplace_guide_explains_every_required_tag() -> None:
+    embed = build_marketplace_guide_embed()
+    text = " ".join([embed.description or "", *(field.name + " " + field.value for field in embed.fields)])
+    for tag in TRADING_FORUM_TAGS:
+        assert tag in text
+    assert "STORE" in text
+    assert "GUIDE" in text
 
 
 def test_trade_listing_command_is_routed_to_trade_tools() -> None:
