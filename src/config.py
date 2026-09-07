@@ -34,6 +34,9 @@ class Settings:
     uex_api_token: str = ""
     turnstile_site_key: str = ""
     turnstile_secret_key: str = ""
+    public_discord_token: str = ""
+    public_discord_client_id: str = ""
+    discord_support_guild_id: int | None = None
 
     @classmethod
     def from_env(cls, load_env_file: bool = True, require_discord_token: bool = True) -> "Settings":
@@ -48,6 +51,9 @@ class Settings:
 
         guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
         discord_client_id = os.getenv("DISCORD_CLIENT_ID", "").strip()
+        public_discord_token = os.getenv("PUBLIC_DISCORD_TOKEN", "").strip()
+        public_discord_client_id = os.getenv("PUBLIC_DISCORD_CLIENT_ID", "").strip()
+        support_guild_id = os.getenv("DISCORD_SUPPORT_GUILD_ID", "").strip()
         discord_client_secret = os.getenv("DISCORD_CLIENT_SECRET", "").strip()
         discord_redirect_uri = os.getenv(
             "DISCORD_REDIRECT_URI",
@@ -108,6 +114,9 @@ class Settings:
             uex_api_token=os.getenv("UEX_API_TOKEN", "").strip(),
             turnstile_site_key=os.getenv("TURNSTILE_SITE_KEY", "").strip(),
             turnstile_secret_key=os.getenv("TURNSTILE_SECRET_KEY", "").strip(),
+            public_discord_token=public_discord_token,
+            public_discord_client_id=public_discord_client_id,
+            discord_support_guild_id=int(support_guild_id) if support_guild_id else None,
         )
 
 

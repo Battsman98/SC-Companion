@@ -920,7 +920,7 @@ async def _managed_guild(user: Any, guild_id: int) -> dict[str, Any]:
 
 
 async def _discord_bot_guild(guild_id: int) -> dict[str, Any] | None:
-    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    headers = {"Authorization": f"Bot {_public_bot_token()}"}
     timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}", headers=headers) as response:
@@ -933,7 +933,7 @@ async def _discord_bot_guild(guild_id: int) -> dict[str, Any] | None:
 
 
 async def _discord_bot_guild_ids() -> set[int]:
-    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    headers = {"Authorization": f"Bot {_public_bot_token()}"}
     timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
     guild_ids: set[int] = set()
     after: int | None = None
@@ -954,7 +954,7 @@ async def _discord_bot_guild_ids() -> set[int]:
 
 
 async def _discord_guild_channels(guild_id: int) -> list[dict[str, Any]]:
-    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    headers = {"Authorization": f"Bot {_public_bot_token()}"}
     timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers=headers) as response:
@@ -974,7 +974,7 @@ async def _discord_guild_channels(guild_id: int) -> list[dict[str, Any]]:
 
 
 async def _verify_live_guild_manager(guild_id: int, user_id: int) -> None:
-    headers = {"Authorization": f"Bot {state().settings.discord_token}"}
+    headers = {"Authorization": f"Bot {_public_bot_token()}"}
     timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}", headers=headers) as response:
@@ -1003,7 +1003,7 @@ async def _verify_live_guild_manager(guild_id: int, user_id: int) -> None:
 
 
 def _bot_invite_url(guild_id: int | None = None) -> str:
-    client_id = state().settings.discord_client_id
+    client_id = state().settings.public_discord_client_id or state().settings.discord_client_id
     if not client_id:
         return ""
     # View/send messages, embed links, attach files, read history, use commands,
@@ -1018,6 +1018,11 @@ def _bot_invite_url(guild_id: int | None = None) -> str:
     if guild_id is not None:
         url += f"&guild_id={guild_id}&disable_guild_select=true"
     return url
+
+
+def _public_bot_token() -> str:
+    """Use SC Companion for shared-server management while Peep retains website auth/support."""
+    return state().settings.public_discord_token or state().settings.discord_token
 
 
 def _snowflake(value: int | None) -> str | None:
@@ -5390,6 +5395,22 @@ app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 async def index() -> FileResponse:
     return FileResponse(
         WEB_DIR / "index.html",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/terms")
+async def terms_of_service() -> FileResponse:
+    return FileResponse(
+        WEB_DIR / "terms.html",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/privacy")
+async def privacy_policy() -> FileResponse:
+    return FileResponse(
+        WEB_DIR / "privacy.html",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
 

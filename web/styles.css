@@ -183,6 +183,27 @@ h1 {
   line-height: 1;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.add-discord-button {
+  white-space: nowrap;
+  background: #5865f2;
+  border-color: #7983f5;
+  color: #fff;
+}
+
+.add-discord-button:hover,
+.add-discord-button:focus-visible {
+  background: #6875f5;
+  border-color: #9aa2ff;
+}
+
 h2 {
   font-size: 1rem;
   margin-bottom: 14px;

@@ -46,6 +46,10 @@ services:
         sync: false
       - key: DISCORD_CLIENT_ID
         sync: false
+      - key: PUBLIC_DISCORD_CLIENT_ID
+        value: "1546598117611405384"
+      - key: PUBLIC_DISCORD_TOKEN
+        sync: false
       - key: DISCORD_CLIENT_SECRET
         sync: false
       - key: DISCORD_REDIRECT_URI
@@ -133,6 +137,74 @@ services:
         value: "1544467298046320711"
       - key: COMMAND_CHANNEL_IDS
         sync: false
+      - key: BOT_COMMAND_PREFIX
+        value: "!"
+      - key: HTTP_TIMEOUT_SECONDS
+        value: "15"
+      - key: CACHE_TTL_SECONDS
+        value: "300"
+      - key: DISCORD_RATE_LIMIT_PER_10_SECONDS
+        value: "8"
+
+  - type: worker
+    name: sc-companion-discord
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements-bot.txt
+    startCommand: python -m src.bot
+    autoDeployTrigger: commit
+    buildFilter:
+      paths:
+        - docs/**
+        - data/**
+        - src/bot.py
+        - src/cache.py
+        - src/config.py
+        - src/guild_config.py
+        - src/postgres_compat.py
+        - src/security.py
+        - src/shared.py
+        - src/timers.py
+        - src/sources/**
+        - requirements-bot.txt
+        - requirements-common.txt
+        - render.yaml
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_PATH
+        fromDatabase:
+          name: star-citizen-game-assist-db
+          property: connectionString
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: UEX_API_TOKEN
+        sync: false
+      - key: DISCORD_GUILD_ID
+        value: ""
+      - key: DISCORD_SUPPORT_GUILD_ID
+        value: "1409105942284472322"
+      - key: COMMANDS_CHANNEL_ID
+        value: ""
+      - key: EXEC_STATUS_CHANNEL_ID
+        value: ""
+      - key: EXEC_ADMIN_ROLE_IDS
+        value: ""
+      - key: BOT_ADMIN_ROLE_IDS
+        value: ""
+      - key: BOT_ADMIN_USER_IDS
+        sync: false
+      - key: CZ_TIMERS_CHANNEL_ID
+        value: ""
+      - key: AUDIT_LOG_CHANNEL_ID
+        value: ""
+      - key: FEEDBACK_FORUM_CHANNEL_ID
+        value: "1533026212463775754"
+      - key: TRADING_FORUM_CHANNEL_ID
+        value: ""
+      - key: COMMAND_CHANNEL_IDS
+        value: ""
       - key: BOT_COMMAND_PREFIX
         value: "!"
       - key: HTTP_TIMEOUT_SECONDS

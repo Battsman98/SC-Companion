@@ -838,6 +838,8 @@ class GameAssistBot(commands.Bot):
     async def on_ready(self) -> None:
         await self._run_startup_step("backfill shared feedback tickets", self.backfill_feedback_tickets)
         for guild in self.guilds:
+            if guild.id == self.settings.discord_support_guild_id and guild.id != self.settings.discord_guild_id:
+                continue
             await self._run_startup_step(
                 f"publish first-run setup notice in {guild.id}",
                 lambda guild=guild: self.sync_first_run_notice(guild),
@@ -884,6 +886,8 @@ class GameAssistBot(commands.Bot):
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
+        if guild.id == self.settings.discord_support_guild_id and guild.id != self.settings.discord_guild_id:
+            return
         await self.sync_first_run_notice(guild)
         await self.ensure_about_panel(guild)
 
@@ -893,14 +897,14 @@ class GameAssistBot(commands.Bot):
         logging.info("Removed saved configuration and server-owned data for uninstalled guild %s", guild.id)
 
     async def on_thread_create(self, thread: discord.Thread) -> None:
-        if thread.guild.id == self.settings.discord_guild_id or not isinstance(thread.parent, discord.ForumChannel):
+        if thread.guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id} or not isinstance(thread.parent, discord.ForumChannel):
             return
         if thread.parent.name != "feedback-and-issues":
             return
         await self.mirror_feedback_thread(thread)
 
     def primary_feedback_forum(self) -> discord.ForumChannel | None:
-        guild = self.get_guild(self.settings.discord_guild_id or 0)
+        guild = self.get_guild(self.settings.discord_support_guild_id or self.settings.discord_guild_id or 0)
         if guild is None:
             return None
         candidates: list[discord.ForumChannel] = []
@@ -1005,7 +1009,7 @@ class GameAssistBot(commands.Bot):
     async def backfill_feedback_tickets(self) -> None:
         await self.remove_mirrored_feedback_examples()
         for guild in self.guilds:
-            if guild.id == self.settings.discord_guild_id:
+            if guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id}:
                 continue
             for forum in guild.forums:
                 if forum.name != "feedback-and-issues":
@@ -1035,7 +1039,8 @@ class GameAssistBot(commands.Bot):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or not isinstance(message.channel, discord.Thread) or message.guild is None:
             return
-        if message.guild.id != self.settings.discord_guild_id:
+        support_guild_id = self.settings.discord_support_guild_id or self.settings.discord_guild_id
+        if message.guild.id != support_guild_id:
             mirror = await self.cache.feedback_mirror_for_origin_thread(message.channel.id)
             if not mirror:
                 return
@@ -1071,7 +1076,8 @@ class GameAssistBot(commands.Bot):
             logging.exception("Could not sync official feedback response from thread %s", message.channel.id)
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
-        if payload.guild_id is None or payload.guild_id == self.settings.discord_guild_id:
+        support_guild_id = self.settings.discord_support_guild_id or self.settings.discord_guild_id
+        if payload.guild_id is None or payload.guild_id == support_guild_id:
             return
         mirror = await self.cache.feedback_mirror_for_origin_thread(payload.channel_id)
         if not mirror:
@@ -1087,6 +1093,8 @@ class GameAssistBot(commands.Bot):
         await self.wait_until_ready()
         while not self.is_closed():
             for guild in self.guilds:
+                if guild.id == self.settings.discord_support_guild_id and guild.id != self.settings.discord_guild_id:
+                    continue
                 with suppress(Exception):
                     await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
                     await self.sync_first_run_notice(guild)
@@ -1255,7 +1263,7 @@ class GameAssistBot(commands.Bot):
             )
 
     async def ensure_guild_feedback_forum(self, guild: discord.Guild) -> None:
-        if guild.id == self.settings.discord_guild_id or guild.me is None or not guild.me.guild_permissions.manage_channels:
+        if guild.id in {self.settings.discord_guild_id, self.settings.discord_support_guild_id} or guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
         tracked_forum_id = await self.cache.get(f"guild:{guild.id}:feedback-forum")
         forum = guild.get_channel(tracked_forum_id) if isinstance(tracked_forum_id, int) else None

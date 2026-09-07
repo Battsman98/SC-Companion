@@ -7,7 +7,8 @@ WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 def test_home_page_uses_companion_branding_and_guidance() -> None:
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
 
-    assert '<h1 class="companion-title">Star Citizen Companion</h1>' in html
+    assert '<h1 class="companion-title">' in html
+    assert "Star Citizen Companion</h1>" in html
     assert 'id="discordServerCount"' in html
     assert "Game Assist Control Deck" not in html
     assert "Star Citizen Discord Companion" not in html
@@ -22,6 +23,13 @@ def test_home_page_loads_the_public_discord_server_count() -> None:
     assert 'api("/api/bot-stats")' in javascript
     assert "active_servers" in javascript
     assert ".discord-server-count" in css
+
+
+def test_public_discord_install_link_targets_sc_companion() -> None:
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "Add SC Companion to Discord" in html
+    assert "https://discord.com/oauth2/authorize?client_id=1546598117611405384" in html
 
 
 def test_inventory_export_offers_categories_and_uex_selling_prices() -> None:

@@ -34,6 +34,9 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRADING_FORUM_CHANNEL_ID", "1544467298046320711")
     monkeypatch.setenv("TURNSTILE_SITE_KEY", "site-key")
     monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret-key")
+    monkeypatch.setenv("PUBLIC_DISCORD_TOKEN", "public-token")
+    monkeypatch.setenv("PUBLIC_DISCORD_CLIENT_ID", "777")
+    monkeypatch.setenv("DISCORD_SUPPORT_GUILD_ID", "888")
 
     settings = Settings.from_env(load_env_file=False)
 
@@ -56,3 +59,6 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.trading_forum_channel_id == 1544467298046320711
     assert settings.turnstile_site_key == "site-key"
     assert settings.turnstile_secret_key == "secret-key"
+    assert settings.public_discord_token == "public-token"
+    assert settings.public_discord_client_id == "777"
+    assert settings.discord_support_guild_id == 888
