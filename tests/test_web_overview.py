@@ -27,9 +27,11 @@ def test_home_page_loads_the_public_discord_server_count() -> None:
 
 def test_public_discord_install_link_targets_sc_companion() -> None:
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    javascript = (WEB_DIR / "app.js").read_text(encoding="utf-8")
 
-    assert "Add SC Companion to Discord" in html
-    assert "https://discord.com/oauth2/authorize?client_id=1546598117611405384" in html
+    assert "Add SC Companion to Discord" not in html
+    assert "Add SC Companion to Discord" in javascript
+    assert "https://discord.com/oauth2/authorize?client_id=1546598117611405384" in javascript
 
 
 def test_inventory_export_offers_categories_and_uex_selling_prices() -> None:

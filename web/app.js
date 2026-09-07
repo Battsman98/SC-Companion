@@ -1090,7 +1090,7 @@ async function loadMe() {
     userPanel.innerHTML = `<div class="user-row">
       ${currentUser.avatar_url ? `<img src="${escapeAttribute(currentUser.avatar_url)}" alt="">` : ""}
       <span><strong>${escapeHtml(currentUser.display_name || currentUser.username)}</strong><br>${escapeHtml(badges)}</span>
-      ${currentUser.bot_invite_url ? `<a class="button-link" href="${escapeAttribute(currentUser.bot_invite_url)}" target="_blank" rel="noopener">Add to Discord</a>` : ""}
+      <a class="button-link add-discord-button" href="https://discord.com/oauth2/authorize?client_id=1546598117611405384" target="_blank" rel="noopener noreferrer">Add SC Companion to Discord</a>
       <form method="post" action="/auth/logout"><button type="submit">Log out</button></form>
       <button type="button" data-feedback-open>Feedback / Report Issue</button>
       ${currentUser.can_manage_admin ? '<button type="button" data-discord-console-open>Discord Inbox</button>' : ''}
@@ -1141,7 +1141,7 @@ async function loadManageableGuilds() {
       select.append(option);
     });
     if (!guilds.length) {
-      outputs.botManagement.innerHTML = stateMessage("The bot is not installed in a Discord server you manage. Use Add to Discord at the top of this page.");
+      outputs.botManagement.innerHTML = stateMessage("The bot is not installed in a Discord server you manage.");
       return;
     }
     const next = guilds.some((guild) => String(guild.id) === selected) ? selected : String(guilds[0].id);
