@@ -1506,8 +1506,11 @@ class GameAssistBot(commands.Bot):
                 category = await guild.create_category("SC Companion", reason="Set up SC Companion channels")
         tracked_forum_id = await self.cache.get(f"guild:{guild.id}:feedback-forum")
         forum = guild.get_channel(tracked_forum_id) if isinstance(tracked_forum_id, int) else None
-        if not isinstance(forum, discord.ForumChannel):
-            forum = discord.utils.find(lambda item: item.name == "feedback-and-issues", guild.forums)
+        if not isinstance(forum, discord.ForumChannel) or forum.category_id != category.id:
+            forum = discord.utils.find(
+                lambda item: item.name == "feedback-and-issues" and item.category_id == category.id,
+                guild.forums,
+            )
         if forum is None:
             forum = await guild.create_forum(
                 "feedback-and-issues",

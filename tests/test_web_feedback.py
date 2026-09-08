@@ -282,6 +282,9 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
     assert 'self.settings.runtime_profile == "public"' in automatic_source
     assert "guild.id == self.settings.discord_support_guild_id" in automatic_source
     assert "len(existing_standard_channels) >= 3" in automatic_source
+    feedback_source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
+    assert "forum.category_id != category.id" in feedback_source
+    assert "item.category_id == category.id" in feedback_source
 
 
 def test_ticket_sync_runs_server_side_without_the_website() -> None:
