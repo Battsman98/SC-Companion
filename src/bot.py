@@ -1260,7 +1260,9 @@ class GameAssistBot(commands.Bot):
             and guild.id == self.settings.discord_support_guild_id
         ):
             # Peep owns the shared guild configuration and setup lease. Repair
-            # guides independently in channels that already exist.
+            # Peep's SC Companion area independently without mutating the shared
+            # guild settings row used by the public install.
+            await self.ensure_sc_companion_support_resources(guild)
             await self.sync_sc_companion_category_guides(guild)
         lock = self._shared_setup_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
@@ -1271,6 +1273,56 @@ class GameAssistBot(commands.Bot):
                 await self._ensure_about_panel(guild)
             finally:
                 await self.cache.release_guild_setup_lease(guild.id, holder)
+
+    async def ensure_sc_companion_support_resources(self, guild: discord.Guild) -> None:
+        """Finish Peep's SC Companion command area without touching test guilds."""
+        if guild.me is None or not guild.me.guild_permissions.manage_channels:
+            return
+        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+        if category is None:
+            category = await guild.create_category("SC Companion", reason="Repair Peep SC Companion area")
+
+        channels: dict[str, discord.TextChannel] = {}
+        for module_key in ("trade_tools", "timers"):
+            channel_name = module_key.replace("_", "-")
+            channel = discord.utils.find(
+                lambda item, name=channel_name: item.name == name and item.category_id == category.id,
+                guild.text_channels,
+            )
+            if channel is None:
+                channel = await guild.create_text_channel(
+                    channel_name,
+                    category=category,
+                    topic=f"SC Companion {BOT_MODULES[module_key]['label']} commands and examples.",
+                    reason="Finish Peep SC Companion command area",
+                )
+            channels[module_key] = channel
+
+        forum = discord.utils.find(
+            lambda item: item.name == "marketplace" and item.category_id == category.id,
+            guild.forums,
+        )
+        if forum is None:
+            forum = await guild.create_forum(
+                "marketplace",
+                category=category,
+                topic=TRADING_FORUM_TOPIC,
+                reason="Finish Peep SC Companion marketplace",
+            )
+        try:
+            await self.configure_marketplace_forum(
+                forum,
+                channels["trade_tools"].id,
+                cache_namespace="sc-companion",
+            )
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, RuntimeError):
+            # Do not let a transient forum failure prevent the Timers and Trade
+            # Tools command guides from being repaired during this pass.
+            logging.exception("Could not finish Peep SC Companion marketplace in guild %s", guild.id)
+        try:
+            await self.ensure_guild_feedback_forum(guild, category)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, RuntimeError):
+            logging.exception("Could not repair SC Companion feedback forum in guild %s", guild.id)
 
     async def _ensure_about_panel(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -2458,7 +2510,11 @@ class GameAssistBot(commands.Bot):
             await self.configure_marketplace_forum(forum, int(trade["channel_id"]) if trade.get("channel_id") else None)
 
     async def configure_marketplace_forum(
-        self, channel: discord.ForumChannel, command_channel_id: int | None = None,
+        self,
+        channel: discord.ForumChannel,
+        command_channel_id: int | None = None,
+        *,
+        cache_namespace: str | None = None,
     ) -> None:
         required = (*TRADING_FORUM_TAGS, TRADING_STORE_TAG, TRADING_GUIDE_TAG)
         required_names = set(required)
@@ -2507,13 +2563,23 @@ class GameAssistBot(commands.Bot):
         guide_tag = discord.utils.find(
             lambda tag: tag.name.casefold() == TRADING_GUIDE_TAG.casefold(), channel.available_tags
         )
-        cache_key = f"guild:{channel.guild.id}:marketplace-guide"
+        namespace_suffix = f":{cache_namespace}" if cache_namespace else ""
+        cache_key = f"guild:{channel.guild.id}:marketplace-guide{namespace_suffix}"
         thread_id = await self.cache.get(cache_key)
         thread = None
         if isinstance(thread_id, int):
             with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                 candidate = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
                 thread = candidate if isinstance(candidate, discord.Thread) else None
+        if thread is None and self.user is not None:
+            thread = next(
+                (
+                    candidate for candidate in channel.threads
+                    if candidate.name == "How to Use the Trading Forum"
+                    and candidate.owner_id == self.user.id
+                ),
+                None,
+            )
         embed = build_marketplace_guide_embed(command_channel_id, channel.id)
         if thread is None:
             created = await channel.create_thread(

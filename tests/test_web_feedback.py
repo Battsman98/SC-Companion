@@ -272,8 +272,14 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
     assert 'self.settings.runtime_profile == "public"' in about_source
     assert "guild.id == self.settings.discord_support_guild_id" in about_source
     ensure_source = inspect.getsource(GameAssistBot.ensure_about_panel)
+    support_resources_source = inspect.getsource(GameAssistBot.ensure_sc_companion_support_resources)
+    assert "await self.ensure_sc_companion_support_resources(guild)" in ensure_source
     assert "await self.sync_sc_companion_category_guides(guild)" in ensure_source
     assert ensure_source.index("sync_sc_companion_category_guides") < ensure_source.index("acquire_guild_setup_lease")
+    assert '("trade_tools", "timers")' in support_resources_source
+    assert '"marketplace"' in support_resources_source
+    assert 'cache_namespace="sc-companion"' in support_resources_source
+    assert "await self.ensure_guild_feedback_forum(guild, category)" in support_resources_source
     assert "build_guild_command_guide_embed" in category_source
     assert "sc-companion-guide" in category_source
     assert "VISITOR_CATEGORY_NAME" in category_source
