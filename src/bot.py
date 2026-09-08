@@ -1636,10 +1636,15 @@ class GameAssistBot(commands.Bot):
     async def sync_sc_companion_category_guides(
         self, guild: discord.Guild, category: discord.CategoryChannel
     ) -> None:
-        """Publish normal command guides in Peep's dedicated SC Companion category."""
+        """Publish normal command guides in Peep's SC Companion feature channels."""
         if guild.me is None:
             return
-        for channel in category.text_channels:
+        peep_category_names = {"SC Companion", VISITOR_CATEGORY_NAME}
+        channels = [
+            channel for channel in guild.text_channels
+            if channel.category is not None and channel.category.name in peep_category_names
+        ]
+        for channel in channels:
             module_key = channel.name.replace("-", "_")
             if module_key not in BOT_MODULES:
                 continue

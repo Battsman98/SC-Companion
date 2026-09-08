@@ -271,9 +271,10 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
     cleanup_source = inspect.getsource(GameAssistBot.remove_sc_companion_category_examples)
     assert 'self.settings.runtime_profile == "public"' in about_source
     assert "guild.id == self.settings.discord_support_guild_id" in about_source
-    assert "category.text_channels" in category_source
     assert "build_guild_command_guide_embed" in category_source
     assert "sc-companion-guide" in category_source
+    assert "VISITOR_CATEGORY_NAME" in category_source
+    assert "guild.text_channels" in category_source
     assert "build_visitor_command_example_embeds" in cleanup_source
     assert "await message.delete()" in cleanup_source
     assert "timers" in MODULE_EXAMPLES
