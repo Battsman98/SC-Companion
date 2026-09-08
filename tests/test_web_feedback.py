@@ -285,6 +285,8 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
     feedback_source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
     assert "forum.category_id != category.id" in feedback_source
     assert "item.category_id == category.id" in feedback_source
+    assert "sc-companion-feedback-forum" in feedback_source
+    assert 'f"guild:{guild.id}:feedback-forum"' not in feedback_source
 
 
 def test_ticket_sync_runs_server_side_without_the_website() -> None:

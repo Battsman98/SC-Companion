@@ -1504,7 +1504,8 @@ class GameAssistBot(commands.Bot):
             category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
             if category is None:
                 category = await guild.create_category("SC Companion", reason="Set up SC Companion channels")
-        tracked_forum_id = await self.cache.get(f"guild:{guild.id}:feedback-forum")
+        forum_cache_key = f"guild:{guild.id}:sc-companion-feedback-forum"
+        tracked_forum_id = await self.cache.get(forum_cache_key)
         forum = guild.get_channel(tracked_forum_id) if isinstance(tracked_forum_id, int) else None
         if not isinstance(forum, discord.ForumChannel) or forum.category_id != category.id:
             forum = discord.utils.find(
@@ -1540,7 +1541,7 @@ class GameAssistBot(commands.Bot):
                 await duplicate.delete(reason="Remove duplicate SC Companion feedback forum")
         await self.configure_feedback_forum(forum)
         await self.sync_feedback_template(forum)
-        await self.cache.set(f"guild:{guild.id}:feedback-forum", forum.id, 315360000)
+        await self.cache.set(forum_cache_key, forum.id, 315360000)
 
     async def configure_feedback_forum(self, forum: discord.ForumChannel) -> None:
         required_names = {name for name, _ in FEEDBACK_FORUM_TAGS}
@@ -2112,7 +2113,11 @@ class GameAssistBot(commands.Bot):
         if configured is None:
             return False
         tracked_ids: set[int] = set()
-        for cache_key in (f"guild:{guild.id}:about-channel", f"guild:{guild.id}:feedback-forum"):
+        for cache_key in (
+            f"guild:{guild.id}:about-channel",
+            f"guild:{guild.id}:sc-companion-feedback-forum",
+            f"guild:{guild.id}:feedback-forum",
+        ):
             tracked = await self.cache.get(cache_key)
             if isinstance(tracked, int):
                 tracked_ids.add(tracked)
@@ -6331,7 +6336,7 @@ class ConfirmBotUninstallView(discord.ui.View):
         setup_channel_ids: set[int] = set()
         for cache_key in (
             f"guild:{guild.id}:about-channel",
-            f"guild:{guild.id}:feedback-forum",
+            f"guild:{guild.id}:sc-companion-feedback-forum",
         ):
             channel_id = await bot.cache.get(cache_key)
             if isinstance(channel_id, int):
