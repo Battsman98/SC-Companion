@@ -853,7 +853,6 @@ class GameAssistBot(commands.Bot):
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
 
     async def on_ready(self) -> None:
-        await self._run_startup_step("backfill shared feedback tickets", self.backfill_feedback_tickets)
         for guild in self.guilds:
             if (
                 self.settings.runtime_profile != "public"
@@ -1097,6 +1096,10 @@ class GameAssistBot(commands.Bot):
                 return
             central_starter = await central.fetch_message(central.id)
             if not central_starter.embeds:
+                return
+            if self.user is None or central_starter.author.id != self.user.id:
+                # Peep owns central posts created by Peep or the website. The
+                # public bot must not repeatedly attempt forbidden edits.
                 return
             embed = central_starter.embeds[0]
             has_attachment_field = any(field.name == "Attachments" for field in embed.fields)
@@ -1654,10 +1657,13 @@ class GameAssistBot(commands.Bot):
                 message = await self.find_recent_embed_message(channel, embed.title or "")
             if message is None:
                 message = await channel.send(embed=embed, silent=True)
+                logging.info("Created SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
             elif self.user is not None and message.author.id == self.user.id:
                 await message.edit(content=None, embed=embed)
+                logging.info("Updated SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
             else:
                 message = await channel.send(embed=embed, silent=True)
+                logging.info("Created owned SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
             await self.cache.set(cache_key, message.id, 315360000)
 
     async def sync_guild_timer_dashboard(

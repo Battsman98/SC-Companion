@@ -289,6 +289,7 @@ def test_ticket_sync_runs_server_side_without_the_website() -> None:
     backfill_source = inspect.getsource(GameAssistBot.backfill_feedback_tickets)
     event_source = inspect.getsource(GameAssistBot.on_thread_create)
 
+    assert "backfill shared feedback tickets" not in ready_source
     assert "_feedback_sync_loop" in ready_source
     assert "await self.backfill_feedback_tickets()" in loop_source
     assert "await asyncio.sleep(60)" in loop_source
@@ -296,6 +297,8 @@ def test_ticket_sync_runs_server_side_without_the_website() -> None:
     assert "forum.id == central_forum_id" in backfill_source
     assert 'self.settings.runtime_profile == "public"' in event_source
     assert "thread.parent_id != central.id" in event_source
+    attachment_source = inspect.getsource(GameAssistBot.sync_mirrored_feedback_attachments)
+    assert "central_starter.author.id != self.user.id" in attachment_source
 
 
 def test_visitor_hub_includes_public_bot_and_social_channels() -> None:
