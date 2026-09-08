@@ -1255,6 +1255,13 @@ class GameAssistBot(commands.Bot):
             await asyncio.sleep(60)
 
     async def ensure_about_panel(self, guild: discord.Guild) -> None:
+        if (
+            self.settings.runtime_profile == "public"
+            and guild.id == self.settings.discord_support_guild_id
+        ):
+            # Peep owns the shared guild configuration and setup lease. Repair
+            # guides independently in channels that already exist.
+            await self.sync_sc_companion_category_guides(guild)
         lock = self._shared_setup_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             holder = secrets.token_hex(16)
@@ -1327,7 +1334,7 @@ class GameAssistBot(commands.Bot):
         if is_public_peep_install:
             # Peep and SC Companion share a guild-settings row. Do not let the
             # public bot publish into Peep's private configured channel IDs.
-            await self.sync_sc_companion_category_guides(guild, category)
+            pass
         else:
             await self.sync_guild_command_examples(guild)
 
@@ -1637,9 +1644,7 @@ class GameAssistBot(commands.Bot):
                     await message.delete()
             await self.cache.set(cache_key, None, 315360000)
 
-    async def sync_sc_companion_category_guides(
-        self, guild: discord.Guild, category: discord.CategoryChannel
-    ) -> None:
+    async def sync_sc_companion_category_guides(self, guild: discord.Guild) -> None:
         """Publish normal command guides in Peep's SC Companion feature channels."""
         if guild.me is None:
             return
@@ -1655,25 +1660,32 @@ class GameAssistBot(commands.Bot):
             permissions = channel.permissions_for(guild.me)
             if not permissions.send_messages or not permissions.embed_links:
                 continue
-            embed = build_guild_command_guide_embed([module_key])
-            cache_key = f"guild:{guild.id}:sc-companion-guide:{channel.id}"
-            message_id = await self.cache.get(cache_key)
-            message = None
-            if isinstance(message_id, int):
-                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    message = await channel.fetch_message(message_id)
-            if message is None:
-                message = await self.find_recent_embed_message(channel, embed.title or "")
-            if message is None:
-                message = await channel.send(embed=embed, silent=True)
-                logging.info("Created SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
-            elif self.user is not None and message.author.id == self.user.id:
-                await message.edit(content=None, embed=embed)
-                logging.info("Updated SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
-            else:
-                message = await channel.send(embed=embed, silent=True)
-                logging.info("Created owned SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
-            await self.cache.set(cache_key, message.id, 315360000)
+            try:
+                embed = build_guild_command_guide_embed([module_key])
+                cache_key = f"guild:{guild.id}:sc-companion-guide:{channel.id}"
+                message_id = await self.cache.get(cache_key)
+                message = None
+                if isinstance(message_id, int):
+                    with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        message = await channel.fetch_message(message_id)
+                if message is None:
+                    message = await self.find_recent_embed_message(channel, embed.title or "")
+                if message is None:
+                    message = await channel.send(embed=embed, silent=True)
+                    logging.info("Created SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
+                elif self.user is not None and message.author.id == self.user.id:
+                    await message.edit(content=None, embed=embed)
+                    logging.info("Updated SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
+                else:
+                    message = await channel.send(embed=embed, silent=True)
+                    logging.info("Created owned SC Companion Command Guide in guild %s channel %s", guild.id, channel.id)
+                await self.cache.set(cache_key, message.id, 315360000)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logging.exception(
+                    "Could not publish SC Companion Command Guide in guild %s channel %s",
+                    guild.id,
+                    channel.id,
+                )
 
     async def sync_guild_timer_dashboard(
         self,
