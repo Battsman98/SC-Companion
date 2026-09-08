@@ -920,9 +920,25 @@ async def public_bot_stats() -> dict[str, int]:
 async def _managed_guild(user: Any, guild_id: int) -> dict[str, Any]:
     guilds = await state().cache.user_managed_guilds(user.id)
     guild = next((item for item in guilds if item["id"] == guild_id), None)
-    if guild is None:
+    if guild is not None:
+        return guild
+    # Discord OAuth guild membership is cached at login time. A server created,
+    # joined, or reinstalled afterward would otherwise stay absent until logout.
+    # The bot's live guild record is authoritative for server owners.
+    bot_guild = await _discord_bot_guild(guild_id)
+    if bot_guild is None or int(bot_guild.get("owner_id") or 0) != user.id:
         raise HTTPException(status_code=403, detail="You need Manage Server permission for this Discord server.")
-    return guild
+    icon_hash = bot_guild.get("icon")
+    return {
+        "id": guild_id,
+        "name": str(bot_guild.get("name") or "Discord Server"),
+        "icon_url": (
+            f"https://cdn.discordapp.com/icons/{guild_id}/{icon_hash}.png?size=128"
+            if icon_hash else None
+        ),
+        "permissions": 0,
+        "is_owner": True,
+    }
 
 
 async def _discord_bot_guild(guild_id: int) -> dict[str, Any] | None:
@@ -1076,16 +1092,33 @@ def _discover_existing_routes(channels: list[dict[str, Any]]) -> dict[str, list[
 @app.get("/api/bot-management/guilds")
 async def manageable_bot_guilds(user=Depends(require_user)) -> list[dict[str, Any]]:
     configured_guilds = []
+    configured_ids: set[int] = set()
     bot_guild_ids = await _discord_bot_guild_ids()
     for guild in await state().cache.user_managed_guilds(user.id):
         if guild["id"] not in bot_guild_ids:
             continue
+        configured_ids.add(guild["id"])
         configured_guilds.append({
             "id": _snowflake(guild["id"]),
             "name": guild["name"],
             "icon_url": guild["icon_url"],
             "bot_installed": True,
         })
+    for guild_id in sorted(bot_guild_ids - configured_ids):
+        guild = await _discord_bot_guild(guild_id)
+        if guild is None or int(guild.get("owner_id") or 0) != user.id:
+            continue
+        icon_hash = guild.get("icon")
+        configured_guilds.append({
+            "id": _snowflake(guild_id),
+            "name": str(guild.get("name") or "Discord Server"),
+            "icon_url": (
+                f"https://cdn.discordapp.com/icons/{guild_id}/{icon_hash}.png?size=128"
+                if icon_hash else None
+            ),
+            "bot_installed": True,
+        })
+    configured_guilds.sort(key=lambda item: item["name"].casefold())
     return configured_guilds
 
 

@@ -19,7 +19,14 @@ from src.bot import (
     build_visitor_channel_directory_embed,
     build_visitor_command_example_embeds,
 )
-from src.web import _discord_message_description, _feedback_embed, _order_feedback_embed_fields, _provided_feedback_images
+from src.web import (
+    _discord_message_description,
+    _feedback_embed,
+    _managed_guild,
+    _order_feedback_embed_fields,
+    _provided_feedback_images,
+    manageable_bot_guilds,
+)
 from src.web import _add_feedback_attachments_to_embed, feedback_ticket_messages, update_feedback_ticket_status
 from src.web_auth import WebUser
 
@@ -298,6 +305,16 @@ def test_public_sc_companion_can_publish_examples_in_the_support_guild() -> None
     assert "item.category_id == category.id" in feedback_source
     assert "sc-companion-feedback-forum" in feedback_source
     assert 'f"guild:{guild.id}:feedback-forum"' not in feedback_source
+
+
+def test_bot_management_discovers_newly_owned_installed_guilds() -> None:
+    managed_source = inspect.getsource(manageable_bot_guilds)
+    authorization_source = inspect.getsource(_managed_guild)
+
+    assert "bot_guild_ids - configured_ids" in managed_source
+    assert 'guild.get("owner_id")' in managed_source
+    assert "configured_guilds.sort" in managed_source
+    assert 'bot_guild.get("owner_id")' in authorization_source
 
 
 def test_ticket_sync_runs_server_side_without_the_website() -> None:
