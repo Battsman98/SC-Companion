@@ -1604,27 +1604,38 @@ class GameAssistBot(commands.Bot):
 
     async def configure_feedback_forum(self, forum: discord.ForumChannel) -> None:
         required_names = {name for name, _ in FEEDBACK_FORUM_TAGS}
-        for attempt in range(2):
+        for attempt in range(3):
             existing = {tag.name.casefold() for tag in forum.available_tags}
             missing = required_names - existing
             reaction_name = getattr(forum.default_reaction_emoji, "name", None)
             if not missing and reaction_name == FEEDBACK_FORUM_DEFAULT_REACTION and forum.flags.require_tag:
                 return
-            tags = list(forum.available_tags)
-            tags.extend(
-                discord.ForumTag(name=name, moderated=moderated)
-                for name, moderated in FEEDBACK_FORUM_TAGS
-                if name not in existing
-            )
-            if len(tags) > 20:
-                tags = [tag for tag in tags if tag.name.casefold() in required_names] + [
-                    tag for tag in tags if tag.name.casefold() not in required_names
-                ][: 20 - len(required_names)]
+            if missing:
+                tags = list(forum.available_tags)
+                tags.extend(
+                    discord.ForumTag(name=name, moderated=moderated)
+                    for name, moderated in FEEDBACK_FORUM_TAGS
+                    if name not in existing
+                )
+                if len(tags) > 20:
+                    tags = [tag for tag in tags if tag.name.casefold() in required_names] + [
+                        tag for tag in tags if tag.name.casefold() not in required_names
+                    ][: 20 - len(required_names)]
+                # Discord validates require_tag against the forum's tags before
+                # applying tags included in the same PATCH (error 40066). Save
+                # them first, then refetch before enabling tag enforcement.
+                await forum.edit(
+                    available_tags=tags,
+                    reason="Create the SC Companion feedback and issue tags",
+                )
+                fetched = await self.fetch_channel(forum.id)
+                if isinstance(fetched, discord.ForumChannel):
+                    forum = fetched
+                continue
             await forum.edit(
-                available_tags=tags,
                 default_reaction_emoji=FEEDBACK_FORUM_DEFAULT_REACTION,
                 require_tag=True,
-                reason="Create the SC Companion feedback and issue tags",
+                reason="Require SC Companion feedback and issue tags",
             )
             fetched = await self.fetch_channel(forum.id)
             if isinstance(fetched, discord.ForumChannel):

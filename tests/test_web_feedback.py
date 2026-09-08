@@ -199,6 +199,8 @@ def test_shared_feedback_forums_publish_the_main_example_post() -> None:
     assert "await self.sync_feedback_template(forum)" in source
     assert "forum.flags.require_tag" in configure_source
     assert "require_tag=True" in configure_source
+    assert configure_source.index("available_tags=tags") < configure_source.index("require_tag=True")
+    assert "continue" in configure_source
 
     embed = build_feedback_template_embed()
     assert embed.title == "Example: Guide button does not display the selected information"
