@@ -71,7 +71,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Add SC Companion to Discord" in javascript
     assert "Create an award" in javascript
     assert "Where should awards be announced?" in javascript
-    assert "Create Awards Channel" in javascript
+    assert "Create Awards Category" in javascript
+    assert "guidelines, award criteria, progress tracking, and announcement channels" in javascript
     assert "/awards/channel" in javascript
     assert "data-award-feature-enabled" in javascript
     assert 'enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked' in javascript
@@ -99,10 +100,20 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
         )
         monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
         monkeypatch.setattr(web, "_award_dashboard_manager", AsyncMock(return_value={"id": 123}))
-        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=[
-            {"id": 800, "name": "SC Companion", "type": 4, "parent_id": None},
-        ]))
-        discord_api = AsyncMock(return_value={"id": "900", "name": "awards", "type": 0})
+        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=[]))
+
+        async def discord_response(method, path, *, bot_token, json_payload):
+            del method, path, bot_token
+            if json_payload["type"] == 4:
+                return {"id": "800", "name": json_payload["name"], "type": 4}
+            ids = {
+                "award-guidelines": "901", "award-list-criteria": "902",
+                "award-progress-tracker": "903", "award-announcements": "904",
+            }
+            return {"id": ids[json_payload["name"]], "name": json_payload["name"],
+                    "type": 0, "parent_id": "800"}
+
+        discord_api = AsyncMock(side_effect=discord_response)
         monkeypatch.setattr(web, "_discord_api", discord_api)
         monkeypatch.setattr(web, "_public_bot_token", lambda: "public-token")
 
@@ -110,15 +121,18 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
             123, SimpleNamespace(id=99, username="owner")
         )
 
-        assert result == {"status": "created", "channel_id": "900"}
-        discord_api.assert_awaited_once_with(
-            "POST", "/guilds/123/channels", bot_token="public-token",
-            json_payload={
-                "name": "awards", "type": 0, "parent_id": "800",
-                "topic": "SC Companion award announcements and recognition.",
-            },
-        )
-        cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 900)
+        assert result["status"] == "created"
+        assert result["category_id"] == "800"
+        assert result["channel_id"] == "904"
+        assert result["channels"] == {
+            "award-guidelines": "901", "award-list-criteria": "902",
+            "award-progress-tracker": "903", "award-announcements": "904",
+        }
+        assert discord_api.await_count == 5
+        assert discord_api.await_args_list[0].kwargs["json_payload"] == {
+            "name": "🏆 AWARDS & PROGRESS", "type": 4,
+        }
+        cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 904)
 
     asyncio.run(scenario())
 

@@ -6696,28 +6696,48 @@ class AwardAdminView(discord.ui.View):
             f"Award system {'enabled' if not settings['enabled'] else 'disabled'}.", ephemeral=True
         )
 
-    @discord.ui.button(label="Create Announcement Channel", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Create Awards Category", style=discord.ButtonStyle.secondary, row=0)
     async def create_channel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         bot = interaction.client
         if not isinstance(bot, GameAssistBot) or interaction.guild is None or not await _can_manage_awards(interaction, bot):
-            await interaction.response.send_message("Only the server owner or award manager can create this channel.", ephemeral=True)
+            await interaction.response.send_message("Only the server owner or award manager can create this category.", ephemeral=True)
             return
         if interaction.guild.me is None or not interaction.guild.me.guild_permissions.manage_channels:
             await interaction.response.send_message("SC Companion needs Manage Channels permission first.", ephemeral=True)
             return
-        channel = discord.utils.find(lambda item: item.name == "award-announcements", interaction.guild.text_channels)
-        if channel is None:
-            category = discord.utils.find(lambda item: item.name == "SC Companion", interaction.guild.categories)
-            channel = await interaction.guild.create_text_channel(
-                "award-announcements", category=category, topic="SC Companion award recipient announcements.",
-                reason="SC Companion award system setup",
+        category = discord.utils.find(
+            lambda item: item.name.casefold() == "🏆 awards & progress".casefold(), interaction.guild.categories
+        )
+        if category is None:
+            category = await interaction.guild.create_category(
+                "🏆 AWARDS & PROGRESS", reason="SC Companion award system setup"
             )
+        channel_specs = (
+            ("award-guidelines", "How SC Companion awards, reports, reviews, and citations work."),
+            ("award-list-criteria", "Current awards and the requirements for earning them."),
+            ("award-progress-tracker", "Use /award report here to submit completed award requirements."),
+            ("award-announcements", "SC Companion award recipient announcements and recognition."),
+        )
+        award_channels: dict[str, discord.TextChannel] = {}
+        for name, topic in channel_specs:
+            aliases = {name, "awards"} if name == "award-announcements" else {name}
+            channel = discord.utils.find(lambda item: item.name in aliases, interaction.guild.text_channels)
+            if channel is None:
+                channel = await interaction.guild.create_text_channel(
+                    name, category=category, topic=topic, reason="SC Companion award system setup"
+                )
+            elif channel.category_id != category.id or channel.name != name:
+                await channel.edit(name=name, category=category, topic=topic, reason="SC Companion award system repair")
+            award_channels[name] = channel
+        channel = award_channels["award-announcements"]
         settings = await bot.cache.award_settings(interaction.guild.id)
         await bot.cache.save_award_settings(
             interaction.guild.id, settings["enabled"], settings.get("manager_role_id"), interaction.user.id, channel.id
         )
-        await interaction.response.send_message(f"Award announcements are set to {channel.mention}.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Created or repaired {category.name} and set announcements to {channel.mention}.", ephemeral=True
+        )
 
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=0)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -6768,8 +6788,8 @@ class NativeAdminView(discord.ui.View):
         settings = await bot.cache.award_settings(interaction.guild.id)
         embed = discord.Embed(
             title="SC Companion Award Setup",
-            description=("Enable this optional system, choose the role that manages awards, and select or create "
-                         "the Discord channel where earned awards are announced."),
+            description=("Enable this optional system, choose the role that manages awards, and create the dedicated "
+                         "Awards & Progress category for guidelines, criteria, reports, and announcements."),
             color=discord.Color.gold(),
         )
         embed.add_field(name="Status", value="Enabled" if settings["enabled"] else "Disabled", inline=True)

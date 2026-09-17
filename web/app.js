@@ -1255,8 +1255,8 @@ function renderAwardChannelFeature(config) {
   const channelId = String(config.awards?.settings?.announcement_channel_id || "");
   const channel = config.channels.find((item) => String(item.id) === channelId);
   return `<div class="bot-feature-row award-channel-feature" data-award-feature data-manager-role-id="${escapeAttribute(settings.manager_role_id || "")}" data-announcement-channel-id="${escapeAttribute(settings.announcement_channel_id || "")}">
-    <label class="bot-module-copy"><input type="checkbox" data-award-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Awards</strong><small>Optional contract tracking, custom recognition, and Discord award announcements.</small><small>Create a dedicated channel below; it will be selected automatically in Award settings.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No award announcement channel is associated yet."}</small></span></label>
-    <div class="bot-management-actions"><button type="button" data-award-channel-create>${channel ? "Use or Repair Awards Channel" : "Create Awards Channel"}</button><span class="form-note" data-award-channel-status></span></div>
+    <label class="bot-module-copy"><input type="checkbox" data-award-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Awards & Progress Tracker</strong><small>Optional contract tracking, custom recognition, progress reports, and Discord announcements.</small><small>Create a dedicated category with guidelines, award criteria, progress tracking, and announcement channels.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No awards category is associated yet."}</small></span></label>
+    <div class="bot-management-actions"><button type="button" data-award-channel-create>${channel ? "Use or Repair Awards Category" : "Create Awards Category"}</button><span class="form-note" data-award-channel-status></span></div>
   </div>`;
 }
 
@@ -1264,11 +1264,11 @@ async function createAwardChannel(event) {
   const button = event.currentTarget;
   const status = button.parentElement.querySelector("[data-award-channel-status]");
   const form = button.closest("[data-bot-management-form]");
-  status.textContent = "Creating and associating the channel...";
+  status.textContent = "Creating and associating the awards category...";
   button.disabled = true;
   try {
     const result = await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/channel`, { method: "POST" });
-    status.textContent = result.status === "created" ? "Awards channel created and associated." : "Existing awards channel associated.";
+    status.textContent = result.status === "created" ? "Awards category and channels created." : "Awards category and channels are ready.";
     await loadGuildBotConfiguration(form.dataset.guildId);
   } catch (error) {
     status.textContent = error.message;
@@ -2041,7 +2041,7 @@ function renderAwardManagement(config) {
     <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Awards</h3><p>Create contract trackers and custom awards, review reports, and announce recipients in Discord.</p></div>
     <form data-award-settings-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Award settings</h4><p>Control who manages awards and where earned awards are announced.</p></div></div>
       <label class="award-toggle"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}><span><strong>Enable awards</strong><small>Members can report completed requirements while enabled.</small></span></label>
-      <div class="award-field-grid"><label><span>Who can manage awards?</span><select name="manager_role_id">${roleOptions}</select><small>The server owner always has access.</small></label><label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create an awards channel from the Features tab if needed.</small></label></div>
+      <div class="award-field-grid"><label><span>Who can manage awards?</span><select name="manager_role_id">${roleOptions}</select><small>The server owner always has access.</small></label><label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create or repair the Awards & Progress category from the Features tab if needed.</small></label></div>
       <div class="award-form-actions"><button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span></div>
     </form>
     <form data-award-create-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Create an award</h4><p>Add requirements for a tracked award, or leave them blank for a custom recognition such as Good Conduct or Bro Award.</p></div></div>
