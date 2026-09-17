@@ -1670,14 +1670,42 @@ class GameAssistBot(commands.Bot):
             message_id = await self.cache.get(cache_key)
             message = None
             if message_id:
-                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                try:
                     message = await channel.fetch_message(int(message_id))
+                except discord.NotFound:
+                    message = None
+                except (discord.Forbidden, discord.HTTPException):
+                    logging.warning(
+                        "Could not fetch the saved command guide in channel %s; will retry without posting a replacement",
+                        channel_id,
+                    )
+                    continue
             embed = build_guild_command_guide_embed(module_keys)
+
+            existing = (
+                await self.find_recent_embed_messages(channel, {embed.title or ""}, limit=100)
+            ).get(embed.title or "", [])
+            if message is None and existing:
+                # Prefer the oldest surviving guide after a cache reset so a
+                # restart cannot move the permanent message down the channel.
+                message = min(existing, key=lambda candidate: candidate.id)
+
             if message is None:
                 message = await channel.send(embed=embed)
-                await self.cache.set(cache_key, message.id, 315360000)
             else:
                 await message.edit(embed=embed)
+            await self.cache.set(cache_key, message.id, 315360000)
+
+            for duplicate in existing:
+                if duplicate.id == message.id:
+                    continue
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await duplicate.delete()
+                    logging.info(
+                        "Deleted duplicate SC Companion command guide %s in channel %s",
+                        duplicate.id,
+                        channel_id,
+                    )
         await self.sync_guild_timer_dashboard(guild, modules)
 
     async def remove_sc_companion_category_examples(
