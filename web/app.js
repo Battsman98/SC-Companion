@@ -1238,10 +1238,11 @@ async function loadGuildBotConfiguration(guildId) {
 }
 
 function renderAwardChannelFeature(config) {
+  const settings = config.awards?.settings || {};
   const channelId = String(config.awards?.settings?.announcement_channel_id || "");
   const channel = config.channels.find((item) => String(item.id) === channelId);
-  return `<div class="bot-feature-row award-channel-feature">
-    <div class="bot-module-copy"><span><strong>Awards</strong><small>Create a dedicated Discord channel for award announcements. The channel is automatically selected in Award settings.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No award announcement channel is associated yet."}</small></span></div>
+  return `<div class="bot-feature-row award-channel-feature" data-award-feature data-manager-role-id="${escapeAttribute(settings.manager_role_id || "")}" data-announcement-channel-id="${escapeAttribute(settings.announcement_channel_id || "")}">
+    <label class="bot-module-copy"><input type="checkbox" data-award-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Awards</strong><small>Optional contract tracking, custom recognition, and Discord award announcements.</small><small>Create a dedicated channel below; it will be selected automatically in Award settings.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No award announcement channel is associated yet."}</small></span></label>
     <div class="bot-management-actions"><button type="button" data-award-channel-create>${channel ? "Use or Repair Awards Channel" : "Create Awards Channel"}</button><span class="form-note" data-award-channel-status></span></div>
   </div>`;
 }
@@ -1285,6 +1286,17 @@ async function saveGuildBotConfiguration(event) {
   status.textContent = "Saving...";
   try {
     await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: { modules, channel_setup_mode: channelSetupMode } });
+    const awardFeature = form.querySelector("[data-award-feature]");
+    if (awardFeature) {
+      await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/settings`, {
+        method: "PUT",
+        body: {
+          enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked,
+          manager_role_id: awardFeature.dataset.managerRoleId || null,
+          announcement_channel_id: awardFeature.dataset.announcementChannelId || null,
+        },
+      });
+    }
     status.textContent = channelSetupMode === "automatic" ? "Settings saved. The bot will make the channels shortly." : "Bot settings saved.";
   } catch (error) {
     status.textContent = error.message;

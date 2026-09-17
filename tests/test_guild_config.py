@@ -73,6 +73,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Discord announcement channel" in javascript
     assert "Create Awards Channel" in javascript
     assert "/awards/channel" in javascript
+    assert "data-award-feature-enabled" in javascript
+    assert 'enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked' in javascript
     assert 'data-award-review' in javascript
     assert 'data-bot-management-tab="${key}"' in javascript
     assert '["setup", "Setup"]' in javascript
