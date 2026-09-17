@@ -11,7 +11,10 @@ import re
 from typing import Any, Iterable
 
 
-_INSERT_ID_TABLES = {"user_inventory_items", "user_refinery_orders", "loot_sighting_reports"}
+_INSERT_ID_TABLES = {
+    "user_inventory_items", "user_refinery_orders", "loot_sighting_reports",
+    "award_definitions", "award_completion_reports", "award_grants",
+}
 
 
 def _translate_sql(sql: str) -> str:
@@ -89,7 +92,8 @@ class PostgresConnection:
         if wants_id and " RETURNING " not in translated.upper():
             translated = f"{translated.rstrip().rstrip(';')} RETURNING id"
         cursor = self._connection.execute(translated, tuple(parameters))
-        lastrowid = int(cursor.fetchone()[0]) if wants_id else None
+        returned = cursor.fetchone() if wants_id else None
+        lastrowid = int(returned[0]) if returned else None
         return PostgresCursor(cursor, lastrowid)
 
     def executemany(self, sql: str, parameters: Iterable[Iterable[Any]]) -> PostgresCursor:

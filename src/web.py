@@ -372,6 +372,36 @@ class GuildBotSettingsRequest(BaseModel):
     channel_setup_mode: str = Field(default="manual", pattern="^(automatic|manual)$")
 
 
+class AwardSettingsRequest(BaseModel):
+    enabled: bool
+    manager_role_id: int | None = None
+    announcement_channel_id: int | None = None
+
+
+class AwardDefinitionRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=1, max_length=500)
+    award_type: str = Field(pattern="^(tracker|custom)$")
+    requirements: list[str] = Field(default_factory=list, max_length=20)
+
+
+class AwardDefinitionUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=1, max_length=500)
+    requirements: list[str] = Field(default_factory=list, max_length=20)
+    active: bool = True
+
+
+class AwardReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+
+
+class AwardGrantRequest(BaseModel):
+    award_id: int
+    member_id: int
+    citation: str = Field(min_length=1, max_length=280)
+
+
 class ReviewDecisionRequest(BaseModel):
     decision: str = Field(pattern="^(approved|rejected)$")
     queue: str = Field(default="global", pattern="^(global|loot)$")
@@ -995,6 +1025,49 @@ async def _discord_guild_channels(guild_id: int) -> list[dict[str, Any]]:
             ]
 
 
+async def _discord_guild_roles(guild_id: int) -> list[dict[str, Any]]:
+    headers = {"Authorization": f"Bot {_public_bot_token()}"}
+    timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(f"https://discord.com/api/v10/guilds/{guild_id}/roles", headers=headers) as response:
+            payload = await response.json()
+            if response.status >= 400 or not isinstance(payload, list):
+                raise HTTPException(status_code=503, detail="Discord roles are temporarily unavailable.")
+    return [{"id": int(role["id"]), "name": str(role.get("name") or "role"),
+             "managed": bool(role.get("managed"))} for role in payload]
+
+
+async def _discord_guild_member(guild_id: int, member_id: int) -> dict[str, Any]:
+    headers = {"Authorization": f"Bot {_public_bot_token()}"}
+    timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(
+            f"https://discord.com/api/v10/guilds/{guild_id}/members/{member_id}", headers=headers
+        ) as response:
+            payload = await response.json()
+            if response.status == 404:
+                raise HTTPException(status_code=422, detail="That Discord member was not found in this server.")
+            if response.status >= 400:
+                raise HTTPException(status_code=503, detail="Discord member details are temporarily unavailable.")
+    user = payload.get("user") or {}
+    return {"id": int(user.get("id") or member_id),
+            "name": str(payload.get("nick") or user.get("global_name") or user.get("username") or member_id)}
+
+
+async def _send_award_announcement(channel_id: int | None, content: str) -> None:
+    if not channel_id:
+        return
+    headers = {"Authorization": f"Bot {_public_bot_token()}", "Content-Type": "application/json"}
+    timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages", headers=headers,
+            json={"content": content[:2000], "allowed_mentions": {"parse": ["users"]}},
+        ) as response:
+            if response.status >= 400:
+                raise HTTPException(status_code=502, detail="The award was saved, but its Discord announcement failed.")
+
+
 async def _verify_live_guild_manager(guild_id: int, user_id: int) -> None:
     headers = {"Authorization": f"Bot {_public_bot_token()}"}
     timeout = aiohttp.ClientTimeout(total=state().settings.http_timeout_seconds)
@@ -1130,6 +1203,11 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     enabled_default = guild_id == state().settings.discord_guild_id and stored is None
     modules = normalize_module_settings(stored.get("modules") if stored else None, enabled_default=enabled_default)
     channels = await _discord_guild_channels(guild_id) if bot_guild is not None else []
+    awards_available = guild_id == state().settings.award_test_guild_id
+    award_settings = await state().cache.award_settings(guild_id) if awards_available else None
+    award_definitions = await state().cache.award_definitions(guild_id, active_only=False) if awards_available else []
+    award_reports = await state().cache.pending_award_reports(guild_id, 50) if awards_available else []
+    roles = await _discord_guild_roles(guild_id) if bot_guild is not None and awards_available else []
     detected_routes = _discover_existing_routes(channels)
     if stored is None:
         for key, routes in detected_routes.items():
@@ -1169,6 +1247,17 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             {**channel, "id": _snowflake(channel["id"])}
             for channel in channels
         ],
+        "awards_available": awards_available,
+        "awards": {
+            "settings": {
+                **award_settings,
+                "manager_role_id": _snowflake(award_settings.get("manager_role_id")),
+                "announcement_channel_id": _snowflake(award_settings.get("announcement_channel_id")),
+            } if award_settings else None,
+            "definitions": award_definitions,
+            "pending_reports": award_reports,
+            "roles": [{**role, "id": _snowflake(role["id"])} for role in roles if not role["managed"]],
+        } if awards_available else None,
         "updated_at": stored.get("updated_at") if stored else None,
     }
 
@@ -1216,6 +1305,127 @@ async def save_guild_bot_configuration(
     )
     return {"status": "saved", "guild_id": guild_id, "modules": modules,
             "channel_setup_mode": payload.channel_setup_mode}
+
+
+async def _award_dashboard_manager(guild_id: int, user: Any) -> dict[str, Any]:
+    if guild_id != state().settings.award_test_guild_id:
+        raise HTTPException(status_code=404, detail="Awards are limited to the SC Companion testing Discord.")
+    guild = await _managed_guild(user, guild_id)
+    await _verify_live_guild_manager(guild_id, user.id)
+    return guild
+
+
+def _clean_award_requirements(requirements: list[str], award_type: str) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in requirements:
+        value = str(raw).strip()
+        if not value or len(value) > 100:
+            raise HTTPException(status_code=422, detail="Each requirement must be 1-100 characters.")
+        if value.casefold() not in seen:
+            cleaned.append(value)
+            seen.add(value.casefold())
+    if award_type == "tracker" and not cleaned:
+        raise HTTPException(status_code=422, detail="Tracked awards need at least one task or contract.")
+    if award_type == "custom" and cleaned:
+        raise HTTPException(status_code=422, detail="Custom awards cannot have tracker requirements.")
+    return cleaned
+
+
+@app.put("/api/bot-management/guilds/{guild_id}/awards/settings")
+async def save_award_dashboard_settings(guild_id: int, payload: AwardSettingsRequest,
+                                        user=Depends(require_user)) -> dict[str, str]:
+    await _award_dashboard_manager(guild_id, user)
+    roles = await _discord_guild_roles(guild_id)
+    valid_roles = {role["id"] for role in roles if not role["managed"]}
+    channels = await _discord_guild_channels(guild_id)
+    valid_channels = {channel["id"] for channel in channels if channel["type"] in {0, 5}}
+    if payload.manager_role_id is not None and payload.manager_role_id not in valid_roles:
+        raise HTTPException(status_code=422, detail="The selected award-manager role is unavailable.")
+    if payload.announcement_channel_id is not None and payload.announcement_channel_id not in valid_channels:
+        raise HTTPException(status_code=422, detail="The selected announcement channel is unavailable.")
+    await state().cache.save_award_settings(
+        guild_id, payload.enabled, payload.manager_role_id, user.id, payload.announcement_channel_id
+    )
+    return {"status": "saved"}
+
+
+@app.post("/api/bot-management/guilds/{guild_id}/awards")
+async def create_award_from_dashboard(guild_id: int, payload: AwardDefinitionRequest,
+                                      user=Depends(require_user)) -> dict[str, Any]:
+    await _award_dashboard_manager(guild_id, user)
+    requirements = _clean_award_requirements(payload.requirements, payload.award_type)
+    existing = await state().cache.award_definitions(guild_id, active_only=False)
+    if any(item["name"].casefold() == payload.name.strip().casefold() for item in existing):
+        raise HTTPException(status_code=409, detail="An award with that name already exists.")
+    award_id = await state().cache.create_award_definition(
+        guild_id, payload.name.strip(), payload.description.strip(), payload.award_type, requirements, user.id
+    )
+    return {"status": "created", "award_id": award_id}
+
+
+@app.put("/api/bot-management/guilds/{guild_id}/awards/{award_id}")
+async def update_award_from_dashboard(guild_id: int, award_id: int, payload: AwardDefinitionUpdateRequest,
+                                      user=Depends(require_user)) -> dict[str, str]:
+    await _award_dashboard_manager(guild_id, user)
+    award = await state().cache.award_definition(guild_id, award_id)
+    if award is None:
+        raise HTTPException(status_code=404, detail="That award was not found.")
+    requirements = _clean_award_requirements(payload.requirements, award["award_type"])
+    existing = await state().cache.award_definitions(guild_id, active_only=False)
+    if any(item["id"] != award_id and item["name"].casefold() == payload.name.strip().casefold()
+           for item in existing):
+        raise HTTPException(status_code=409, detail="An award with that name already exists.")
+    await state().cache.update_award_definition(
+        guild_id, award_id, name=payload.name.strip(), description=payload.description.strip(),
+        requirements=requirements, active=payload.active,
+    )
+    return {"status": "saved"}
+
+
+@app.post("/api/bot-management/guilds/{guild_id}/awards/reports/{report_id}")
+async def review_award_from_dashboard(guild_id: int, report_id: int, payload: AwardReviewRequest,
+                                      user=Depends(require_user)) -> dict[str, Any]:
+    await _award_dashboard_manager(guild_id, user)
+    result = await state().cache.review_award_report(guild_id, report_id, payload.decision, user.id)
+    if result is None:
+        raise HTTPException(status_code=409, detail="That pending report was not found or was already reviewed.")
+    awarded = False
+    if payload.decision == "approved":
+        award = await state().cache.award_definition(guild_id, result["award_id"])
+        approved = await state().cache.approved_award_tasks(guild_id, result["award_id"], result["user_id"])
+        if award and all(task.casefold() in approved for task in award["requirements"]):
+            awarded = await state().cache.grant_award(
+                guild_id, award["id"], result["user_id"], result["user_name"], result["citation"], user.id
+            )
+            if awarded:
+                settings = await state().cache.award_settings(guild_id)
+                await _send_award_announcement(
+                    settings.get("announcement_channel_id"),
+                    f"🏆 <@{result['user_id']}> earned **{award['name']}** — {result['citation']}",
+                )
+    return {"status": payload.decision, "award_granted": awarded}
+
+
+@app.post("/api/bot-management/guilds/{guild_id}/awards/grants")
+async def grant_award_from_dashboard(guild_id: int, payload: AwardGrantRequest,
+                                     user=Depends(require_user)) -> dict[str, Any]:
+    await _award_dashboard_manager(guild_id, user)
+    award = await state().cache.award_definition(guild_id, payload.award_id)
+    if award is None or not award["active"] or award["award_type"] != "custom":
+        raise HTTPException(status_code=422, detail="Choose an active custom award.")
+    member = await _discord_guild_member(guild_id, payload.member_id)
+    granted = await state().cache.grant_award(
+        guild_id, award["id"], member["id"], member["name"], payload.citation.strip(), user.id
+    )
+    if not granted:
+        raise HTTPException(status_code=409, detail="That member already has this award.")
+    settings = await state().cache.award_settings(guild_id)
+    await _send_award_announcement(
+        settings.get("announcement_channel_id"),
+        f"🏆 <@{member['id']}> earned **{award['name']}** — {payload.citation.strip()}",
+    )
+    return {"status": "granted", "member": member, "award": award["name"]}
 
 
 @app.get("/api/bot-management/analytics", dependencies=[Depends(require_bot_admin)])
