@@ -1175,19 +1175,45 @@ async function loadGuildBotConfiguration(guildId) {
       ...config.channels.filter((channel) => [15, 16].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
     ].join("");
     const setupMode = config.channel_setup_mode || "";
-    outputs.botManagement.innerHTML = `<form data-bot-management-form data-guild-id="${config.guild.id}">
-      <fieldset class="bot-setup-choice"><legend>First, how do you want to set up channels?</legend>
+    const managementSections = [
+      ["setup", "Setup"],
+      ["features", "Features"],
+      ["channels", "Channel Management"],
+      ...(config.awards_available ? [["awards", "Awards"]] : []),
+    ];
+    outputs.botManagement.innerHTML = `<nav class="bot-management-tabs" role="tablist" aria-label="Bot management sections">
+      ${managementSections.map(([key, label]) => `<button type="button" role="tab" data-bot-management-tab="${key}" aria-controls="bot-management-${key}">${label}</button>`).join("")}
+    </nav>
+    <form data-bot-management-form data-guild-id="${config.guild.id}">
+      <section id="bot-management-setup" class="bot-management-panel" data-bot-management-panel="setup" role="tabpanel">
+        <article class="bot-setup-guide" aria-labelledby="botSetupGuideTitle">
+          <p class="guide-kicker">START HERE</p><h3 id="botSetupGuideTitle">How to set up the bot</h3>
+          <p>You must have the <strong>Manage Server</strong> permission in Discord.</p>
+          <ol><li>Choose whether SC Companion should create its channels automatically.</li><li>Open <strong>Features</strong> and enable the tools your server will use.</li><li>For manual setup, open <strong>Channel Management</strong> and assign each feature.</li><li>Save the settings, then test the bot with <strong>/admin health</strong> in Discord.</li></ol>
+          <p class="form-note">Your choices apply only to ${escapeHtml(config.guild.name)}.</p>
+        </article>
+        <fieldset class="bot-setup-choice"><legend>How should channels be set up?</legend>
         <label><input type="radio" name="channel_setup_mode" value="automatic" ${setupMode === "automatic" ? "checked" : ""} required><span><strong>Let the bot set up channels</strong><small>The bot makes a channel for each feature you turn on. It also adds command examples.</small></span></label>
         <label><input type="radio" name="channel_setup_mode" value="manual" ${setupMode === "manual" ? "checked" : ""} required><span><strong>I will set up channels</strong><small>You choose the channel for each feature. Choose Any channel if it may work everywhere.</small></span></label>
-      </fieldset>
-      <div class="bot-module-list">
-        ${config.modules.map((module) => `<div class="bot-module-row" data-module-key="${escapeAttribute(module.key)}">
+        </fieldset>
+        <div class="bot-management-actions"><button type="submit">Save Setup</button><span data-bot-management-status>${config.setup_source === "detected" ? "Existing Discord setup found. Review it before saving changes." : config.configured ? "Saved settings loaded." : "Choose a setup mode, then continue to Features."}</span></div>
+      </section>
+      <section id="bot-management-features" class="bot-management-panel" data-bot-management-panel="features" role="tabpanel" hidden>
+        <div class="section-heading"><h3>Features</h3><p>Choose which SC Companion tools members can use in this server.</p></div>
+        <div class="bot-module-list">
+        ${config.modules.map((module) => `<div class="bot-feature-row" data-module-feature-key="${escapeAttribute(module.key)}">
           <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small>${module.detected_routes?.length ? `<small class="bot-detected-routes"><strong>Current Discord setup</strong>${module.detected_routes.map((route) => `<span><code>/${escapeHtml(route.command)}</code> → #${escapeHtml(route.channel_name)}</span>`).join("")}</small>` : ""}</span></label>
-          <div><label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>${module.key === "trade_tools" ? `<label>Marketplace forum<select data-module-resource-channel>${forumOptions(module.resource_channel_id)}</select></label>` : ""}</div>
         </div>`).join("")}
-      </div>
-      <div class="bot-management-actions"><button type="submit">Save Bot Settings</button><span data-bot-management-status>${config.setup_source === "detected" ? "Existing Discord setup found. Review it before saving changes." : config.configured ? "Saved settings loaded." : "Choose modules, then save to complete setup."}</span></div>
-    </form>${config.awards_available ? renderAwardManagement(config) : ""}`;
+        </div><div class="bot-management-actions"><button type="submit">Save Features</button><span data-bot-management-status></span></div>
+      </section>
+      <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
+        <div class="section-heading"><h3>Channel Management</h3><p>Choose where commands run and where feature-specific content is posted. These choices are used when manual setup is selected.</p></div>
+        <div class="bot-module-list">${config.modules.map((module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>${module.key === "trade_tools" ? `<label>Marketplace forum<select data-module-resource-channel>${forumOptions(module.resource_channel_id)}</select></label>` : ""}</div></div>`).join("")}</div>
+        <div class="bot-management-actions"><button type="submit">Save Channels</button><span data-bot-management-status></span></div>
+      </section>
+    </form>
+    ${config.awards_available ? `<section id="bot-management-awards" class="bot-management-panel" data-bot-management-panel="awards" role="tabpanel" hidden>${renderAwardManagement(config)}</section>` : ""}`;
+    initializeBotManagementTabs();
     outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
     const managementForm = outputs.botManagement.querySelector("[data-bot-management-form]");
     const updateChannelMode = () => {
@@ -1212,18 +1238,21 @@ async function loadGuildBotConfiguration(guildId) {
 async function saveGuildBotConfiguration(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const status = form.querySelector("[data-bot-management-status]");
+  const status = event.submitter?.closest("[data-bot-management-panel]")?.querySelector("[data-bot-management-status]")
+    || form.querySelector("[data-bot-management-status]");
   const modules = {};
   const channelSetupMode = form.querySelector('[name="channel_setup_mode"]:checked')?.value;
   if (!channelSetupMode) {
     status.textContent = "Choose how you want to set up channels first.";
     return;
   }
-  form.querySelectorAll("[data-module-key]").forEach((row) => {
-    modules[row.dataset.moduleKey] = {
+  form.querySelectorAll("[data-module-feature-key]").forEach((row) => {
+    const key = row.dataset.moduleFeatureKey;
+    const channelRow = form.querySelector(`[data-module-channel-key="${CSS.escape(key)}"]`);
+    modules[key] = {
       enabled: row.querySelector("[data-module-enabled]").checked,
-      channel_id: row.querySelector("[data-module-channel]").value || null,
-      resource_channel_id: row.querySelector("[data-module-resource-channel]")?.value || null,
+      channel_id: channelRow?.querySelector("[data-module-channel]")?.value || null,
+      resource_channel_id: channelRow?.querySelector("[data-module-resource-channel]")?.value || null,
     };
   });
   status.textContent = "Saving...";
@@ -1233,6 +1262,28 @@ async function saveGuildBotConfiguration(event) {
   } catch (error) {
     status.textContent = error.message;
   }
+}
+
+let activeBotManagementSection = "setup";
+
+function initializeBotManagementTabs() {
+  const root = outputs.botManagement;
+  const available = [...root.querySelectorAll("[data-bot-management-tab]")].map((button) => button.dataset.botManagementTab);
+  if (!available.includes(activeBotManagementSection)) activeBotManagementSection = "setup";
+  const activate = (section) => {
+    activeBotManagementSection = section;
+    root.querySelectorAll("[data-bot-management-tab]").forEach((button) => {
+      const selected = button.dataset.botManagementTab === section;
+      button.classList.toggle("active", selected);
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+    root.querySelectorAll("[data-bot-management-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.botManagementPanel !== section;
+    });
+  };
+  root.querySelectorAll("[data-bot-management-tab]").forEach((button) => button.addEventListener("click", () => activate(button.dataset.botManagementTab)));
+  activate(activeBotManagementSection);
 }
 
 function setAdminVisibility(canManageAdmin) {

@@ -538,6 +538,41 @@ button:hover, .button-link:hover, .tabs button.active {
   margin: 8px 0 18px;
 }
 
+.bot-management-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.bot-management-tabs button {
+  width: auto;
+  flex: 0 0 auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.bot-management-tabs button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.bot-management-panel[hidden] {
+  display: none;
+}
+
+.bot-management-panel > .section-heading:first-child,
+.bot-management-panel .bot-award-management > .section-heading:first-child {
+  margin-top: 0;
+}
+
 .bot-module-list {
   display: grid;
   gap: 10px;
@@ -589,6 +624,13 @@ button:hover, .button-link:hover, .tabs button.active {
   grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr);
   gap: 16px;
   align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+}
+
+.bot-feature-row {
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;

@@ -65,11 +65,18 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert 'id="botManagementTabTemplate"' in html
     assert "setBotManagementVisibility(Boolean(currentUser.authenticated && currentUser.can_manage_bot))" in javascript
     assert 'api("/api/bot-management/guilds")' in javascript
-    assert "Save Bot Settings" in javascript
+    assert "Save Setup" in javascript
+    assert "Save Features" in javascript
+    assert "Save Channels" in javascript
     assert "Add SC Companion to Discord" in javascript
     assert "Create an award" in javascript
     assert "Discord announcement channel" in javascript
     assert 'data-award-review' in javascript
+    assert 'data-bot-management-tab="${key}"' in javascript
+    assert '["setup", "Setup"]' in javascript
+    assert '["features", "Features"]' in javascript
+    assert '["channels", "Channel Management"]' in javascript
+    assert '[["awards", "Awards"]]' in javascript
 
 
 def test_discord_ids_are_sent_to_browsers_without_number_rounding() -> None:
