@@ -6,7 +6,7 @@ import re
 import secrets
 import time
 from contextlib import suppress
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiohttp
@@ -18,6 +18,7 @@ from src.cache import SQLiteCache
 from src.config import Settings
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
+from src.reputation import REPUTATION_PRIMARY_LADDERS
 from src.sources.base import (
     BlueprintIngredient,
     BlueprintMission,
@@ -752,6 +753,25 @@ class MembershipReviewView(discord.ui.View):
             await bot.review_membership_application(interaction, approved=False)
 
 
+class ReputationApplicationReviewView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success,
+                       custom_id="reputation_application:approve")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        bot = interaction.client
+        if isinstance(bot, GameAssistBot):
+            await bot.review_reputation_application(interaction, approved=True)
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger,
+                       custom_id="reputation_application:deny")
+    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        bot = interaction.client
+        if isinstance(bot, GameAssistBot):
+            await bot.review_reputation_application(interaction, approved=False)
+
+
 class GameAssistBot(commands.Bot):
     def __init__(self, settings: Settings, cache: SQLiteCache, sources: SourceRegistry) -> None:
         intents = discord.Intents.default()
@@ -760,6 +780,7 @@ class GameAssistBot(commands.Bot):
         # Discord deliberately returns those message fields as empty.
         intents.message_content = True
         intents.members = True
+        intents.voice_states = True
 
         super().__init__(
             command_prefix=settings.command_prefix,
@@ -804,6 +825,7 @@ class GameAssistBot(commands.Bot):
         if self.settings.runtime_profile == "public":
             self.add_view(CZTimerDashboardView())
             self.add_view(FirstRunSetupView())
+            self.add_view(ReputationApplicationReviewView())
         else:
             self.add_view(MembershipApplicationPanelView())
             self.add_view(MembershipReviewView())
@@ -854,6 +876,7 @@ class GameAssistBot(commands.Bot):
             if self.settings.award_test_guild_id == self.settings.discord_guild_id:
                 self.tree.add_command(award_group, guild=guild)
                 self.tree.add_command(reputation_group, guild=guild)
+                self.tree.add_command(progress_command, guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
         if (self.settings.award_test_guild_id
@@ -862,6 +885,7 @@ class GameAssistBot(commands.Bot):
             self.tree.copy_global_to(guild=award_guild)
             self.tree.add_command(award_group, guild=award_guild)
             self.tree.add_command(reputation_group, guild=award_guild)
+            self.tree.add_command(progress_command, guild=award_guild)
             await self.tree.sync(guild=award_guild)
             logging.info("Synced testing-only award commands to guild %s", self.settings.award_test_guild_id)
 
@@ -1189,7 +1213,11 @@ class GameAssistBot(commands.Bot):
                     logging.info("Removed mirrored feedback template thread %s", thread.id)
 
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or not isinstance(message.channel, discord.Thread) or message.guild is None:
+        if message.author.bot or message.guild is None:
+            return
+        if message.guild.id == self.settings.award_test_guild_id:
+            await self.cache.record_discord_message_activity(message.guild.id, message.author.id)
+        if not isinstance(message.channel, discord.Thread):
             return
         support_guild_id = self.settings.discord_support_guild_id or self.settings.discord_guild_id
         if message.guild.id != support_guild_id:
@@ -1236,6 +1264,16 @@ class GameAssistBot(commands.Bot):
                 await origin.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
             logging.exception("Could not sync official feedback response from thread %s", message.channel.id)
+
+    async def on_voice_state_update(
+        self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+    ) -> None:
+        if member.bot or member.guild.id != self.settings.award_test_guild_id or before.channel == after.channel:
+            return
+        if before.channel is None and after.channel is not None:
+            await self.cache.start_discord_voice_session(member.guild.id, member.id)
+        elif before.channel is not None and after.channel is None:
+            await self.cache.finish_discord_voice_session(member.guild.id, member.id)
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
         support_guild_id = self.settings.discord_support_guild_id or self.settings.discord_guild_id
@@ -3321,6 +3359,54 @@ class GameAssistBot(commands.Bot):
             await applicant.send(
                 f"Your membership application for **{guild.name}** was {result.lower()}."
             )
+
+    async def review_reputation_application(
+        self, interaction: discord.Interaction, approved: bool
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("This review is only available in the server.", ephemeral=True)
+            return
+        settings = await self.cache.get(f"guild:{guild.id}:reputation-settings") or {}
+        reviewer_role_id = settings.get("reviewer_role_id")
+        can_review = (
+            interaction.user.id == guild.owner_id
+            or interaction.user.guild_permissions.manage_guild
+            or bool(reviewer_role_id and any(role.id == int(reviewer_role_id) for role in interaction.user.roles))
+        )
+        if not can_review:
+            await interaction.response.send_message(
+                "Only the configured reputation reviewer role can review this application.", ephemeral=True
+            )
+            return
+        message = interaction.message
+        embed = message.embeds[0] if message and message.embeds else None
+        fields = {field.name: field.value for field in embed.fields} if embed else {}
+        applicant_match = re.fullmatch(r"<@(\d+)>", fields.get("Applicant", ""))
+        giver = fields.get("Reputation giver", "").strip()
+        level = fields.get("Current level", "").strip()
+        if embed is None or applicant_match is None or not giver or not level:
+            await interaction.response.send_message("This application has invalid review details.", ephemeral=True)
+            return
+        member = guild.get_member(int(applicant_match.group(1)))
+        if member is None:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                member = await guild.fetch_member(int(applicant_match.group(1)))
+        if member is None:
+            await interaction.response.send_message("The applicant is no longer in this server.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if approved:
+            await self.cache.save_reputation_progress(
+                guild.id, member.id, giver, level, interaction.user.id
+            )
+        status = "Approved" if approved else "Denied"
+        embed.color = discord.Color.green() if approved else discord.Color.red()
+        embed.add_field(name="Review", value=f"{status} by {interaction.user.mention}", inline=False)
+        if approved:
+            embed.add_field(name="Saved progress", value=f"{giver} — {level}", inline=False)
+        await message.edit(embed=embed, view=None)
+        await interaction.followup.send(f"Application {status.lower()}.", ephemeral=True)
 
     async def ensure_bot_manager_role(self) -> None:
         guild = self.get_guild(self.settings.discord_guild_id or 0)
@@ -7159,6 +7245,76 @@ def _reputation_settings_key(guild_id: int) -> str:
     return f"guild:{guild_id}:reputation-settings"
 
 
+def _progress_card_image(member: discord.Member, avatar_bytes: bytes, activity: dict, progress: list[dict]) -> io.BytesIO:
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+    def font(size: int, bold: bool = False):
+        names = ("DejaVuSans-Bold.ttf", "arialbd.ttf") if bold else ("DejaVuSans.ttf", "arial.ttf")
+        for name in names:
+            with suppress(OSError):
+                return ImageFont.truetype(name, size)
+        return ImageFont.load_default()
+
+    width = 1000
+    row_count = max(1, len(progress))
+    height = 470 + row_count * 54
+    image = Image.new("RGB", (width, height), "#090c13")
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((20, 20, width - 20, height - 20), radius=30, fill="#111827", outline="#d5a94e", width=3)
+    avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGB").resize((128, 128))
+    mask = Image.new("L", avatar.size, 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, 127, 127), fill=255)
+    avatar = ImageOps.fit(avatar, (128, 128))
+    image.paste(avatar, (60, 58), mask)
+    draw.text((220, 66), member.display_name[:32], font=font(42, True), fill="#f8fafc")
+    month = datetime.strptime(str(activity["month"]), "%Y-%m").strftime("%B %Y")
+    draw.text((220, 124), f"SC Companion Progress  |  {month} (UTC)", font=font(22), fill="#94a3b8")
+
+    stats = (
+        ("MESSAGES", f"{int(activity['message_count']):,}"),
+        ("VOICE", f"{int(activity['voice_seconds']) / 3600:.1f} hrs"),
+        ("ACTIVE DAYS", str(activity["active_days"])),
+        ("REP GIVERS", str(len(progress))),
+    )
+    for index, (label, value) in enumerate(stats):
+        left = 60 + index * 225
+        draw.rounded_rectangle((left, 220, left + 205, 330), radius=16, fill="#1e293b")
+        draw.text((left + 18, 240), label, font=font(16, True), fill="#d5a94e")
+        draw.text((left + 18, 275), value, font=font(28, True), fill="#f8fafc")
+
+    draw.text((60, 370), "APPROVED PRIMARY REPUTATION", font=font(20, True), fill="#d5a94e")
+    rows = progress or [{"giver": "No approved reputation yet", "level": "Use /rep submit to apply"}]
+    for index, item in enumerate(rows):
+        top = 410 + index * 54
+        if index % 2 == 0:
+            draw.rounded_rectangle((50, top - 8, width - 50, top + 40), radius=10, fill="#172033")
+        draw.text((72, top), str(item["giver"])[:42], font=font(19, True), fill="#e2e8f0")
+        draw.text((600, top), str(item["level"])[:32], font=font(19), fill="#f4cf70")
+    output = io.BytesIO()
+    image.save(output, "PNG", optimize=True)
+    output.seek(0)
+    return output
+
+
+@app_commands.command(name="progress", description="Display an on-demand reputation and monthly activity card.")
+@app_commands.describe(member="Member to display; leave blank to show yourself")
+async def progress_command(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or not _award_test_guild(interaction, bot) or interaction.guild is None:
+        await interaction.response.send_message("Progress tracking is limited to the SC Companion testing Discord.", ephemeral=True)
+        return
+    target = member or interaction.user
+    if not isinstance(target, discord.Member):
+        await interaction.response.send_message("That member is unavailable.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    activity = await bot.cache.discord_monthly_activity(interaction.guild.id, target.id)
+    progress = await bot.cache.reputation_progress(interaction.guild.id, target.id)
+    avatar_bytes = await target.display_avatar.with_size(256).read()
+    card = _progress_card_image(target, avatar_bytes, activity, progress)
+    await interaction.followup.send(file=discord.File(card, filename=f"sc-progress-{target.id}.png"))
+
+
 @reputation_group.command(name="submit", description="Submit a Star Citizen reputation level for review.")
 @app_commands.describe(rep_giver="Reputation giver, such as Head Hunters or Covalex",
                        level="Your current reputation level", screenshot="Screenshot showing the reputation status")
@@ -7179,6 +7335,22 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
     if not giver or len(giver) > 80 or not rep_level or len(rep_level) > 80:
         await interaction.response.send_message("Rep giver and level must each be 1-80 characters.", ephemeral=True)
         return
+    canonical_giver = next(
+        (name for name in REPUTATION_PRIMARY_LADDERS if name.casefold() == giver.casefold()), None
+    )
+    canonical_level = next(
+        (
+            name for name in REPUTATION_PRIMARY_LADDERS.get(canonical_giver, ())
+            if name.casefold() == rep_level.casefold()
+        ),
+        None,
+    )
+    if canonical_giver is None or canonical_level is None:
+        await interaction.response.send_message(
+            "Choose a reputation giver and level from the supported primary ladders.", ephemeral=True
+        )
+        return
+    giver, rep_level = canonical_giver, canonical_level
     channel = interaction.guild.get_channel(int(settings["submission_channel_id"]))
     if not isinstance(channel, discord.TextChannel):
         await interaction.response.send_message("The private reputation application queue is unavailable.", ephemeral=True)
@@ -7203,11 +7375,38 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
         content=f"<@&{reviewer_role_id}>",
         embed=embed,
         file=file,
+        view=ReputationApplicationReviewView(),
         allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
     )
     await interaction.followup.send(
         "Your reputation application was submitted privately for reviewer approval.", ephemeral=True
     )
+
+
+@reputation_submit_command.autocomplete("rep_giver")
+async def reputation_giver_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    del interaction
+    query = current.casefold().strip()
+    values = [name for name in REPUTATION_PRIMARY_LADDERS if query in name.casefold()][:25]
+    return [app_commands.Choice(name=value[:100], value=value[:100]) for value in values]
+
+
+@reputation_submit_command.autocomplete("level")
+async def reputation_level_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    giver = str(getattr(interaction.namespace, "rep_giver", "") or "")
+    canonical_giver = next(
+        (name for name in REPUTATION_PRIMARY_LADDERS if name.casefold() == giver.casefold()), None
+    )
+    query = current.casefold().strip()
+    values = [
+        level for level in REPUTATION_PRIMARY_LADDERS.get(canonical_giver, ())
+        if query in level.casefold()
+    ][:25]
+    return [app_commands.Choice(name=value[:100], value=value[:100]) for value in values]
 
 
 @award_group.command(name="configure", description="Enable awards and choose the role that can manage them.")

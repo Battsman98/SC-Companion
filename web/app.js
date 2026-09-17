@@ -1266,7 +1266,7 @@ function renderAwardChannelFeature(config) {
 function renderReputationFeature(config) {
   const settings = config.reputation || {};
   return `<div class="bot-feature-row" data-reputation-feature data-reviewer-role-id="${escapeAttribute(settings.reviewer_role_id || "")}">
-    <label class="bot-module-copy"><input type="checkbox" data-reputation-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Reputation Progress Tracker</strong><small>Screenshot-backed applications for Star Citizen reputation givers and levels.</small><small>${settings.submission_channel_id ? "Private application queue configured." : "No private application queue is associated yet."}</small></span></label>
+    <label class="bot-module-copy"><input type="checkbox" data-reputation-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Reputation Progress Tracker</strong><small>Tracks approved primary reputation ranks plus each member's monthly message and voice activity. The <code>/progress</code> command generates a profile card only when requested, without creating reputation roles or a permanent profile message.</small><small>Screenshot applications stay private for reviewers. Secondary and affinity ladders are excluded. ${settings.submission_channel_id ? "Private application queue configured." : "No private application queue is associated yet."}</small></span></label>
   </div>`;
 }
 
@@ -1275,7 +1275,7 @@ function renderReputationManagement(config) {
   const roles = config.awards?.roles || [];
   const options = ['<option value="">Choose a reviewer role...</option>', ...roles.map((role) => `<option value="${role.id}" ${String(settings.reviewer_role_id || "") === String(role.id) ? "selected" : ""}>${escapeHtml(role.name)}</option>`)].join("");
   return `<section class="bot-award-management" data-reputation-management data-guild-id="${config.guild.id}" data-enabled="${settings.enabled ? "true" : "false"}">
-    <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Reputation Progress Tracker</h3><p>Members submit a rep giver, current level, and screenshot through <code>/rep submit</code>. The bot opens a review ticket in Discord.</p></div>
+    <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Reputation Progress Tracker</h3><p>SC Companion stores each approved primary reputation rank without consuming Discord role slots. Members submit a giver, level, and screenshot through <code>/rep submit</code>; the application is visible only to reviewers, and approval updates the member's saved rank for that giver. <code>/progress</code> generates an on-demand profile card with those ranks and the current month's message count, voice time, and active days. It does not maintain a permanent profile message. Secondary and affinity ladders are not included.</p></div>
     <form data-reputation-settings-form class="tool-card award-form reputation-settings-form">
       <div class="reputation-reviewer-row">
         <label class="award-toggle reputation-role-toggle"><input type="checkbox" name="auto_create_role"><span><strong>Create reviewer role</strong><small>SC Companion creates or reuses the Reputation Reviewer role.</small></span></label>

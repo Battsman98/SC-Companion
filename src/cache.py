@@ -462,6 +462,46 @@ class SQLiteCache:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS discord_monthly_activity (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                activity_month TEXT NOT NULL,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                voice_seconds INTEGER NOT NULL DEFAULT 0,
+                active_days_json TEXT NOT NULL DEFAULT '[]',
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, user_id, activity_month)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discord_voice_sessions (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                joined_at INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reputation_progress (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                giver TEXT NOT NULL,
+                level TEXT NOT NULL,
+                approved_by INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, user_id, giver)
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reputation_progress_user ON reputation_progress(guild_id, user_id, updated_at)"
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS guild_setup_leases (
                 guild_id INTEGER PRIMARY KEY,
                 holder TEXT NOT NULL,
@@ -2099,6 +2139,106 @@ class SQLiteCache:
             (content_hash, last_synced_at, last_error, int(active), int(time.time()), thread_id),
         )
         self._connection.commit()
+
+    async def record_discord_message_activity(self, guild_id: int, user_id: int, at: int | None = None) -> None:
+        timestamp = int(at or time.time())
+        moment = datetime.fromtimestamp(timestamp, timezone.utc)
+        month, day = moment.strftime("%Y-%m"), moment.strftime("%Y-%m-%d")
+        row = self._connection.execute(
+            "SELECT active_days_json FROM discord_monthly_activity WHERE guild_id = ? AND user_id = ? AND activity_month = ?",
+            (guild_id, user_id, month),
+        ).fetchone()
+        active_days = set(json.loads(row[0])) if row else set()
+        active_days.add(day)
+        self._connection.execute(
+            """
+            INSERT INTO discord_monthly_activity
+                (guild_id, user_id, activity_month, message_count, voice_seconds, active_days_json, updated_at)
+            VALUES (?, ?, ?, 1, 0, ?, ?)
+            ON CONFLICT(guild_id, user_id, activity_month) DO UPDATE SET
+                message_count = discord_monthly_activity.message_count + 1,
+                active_days_json = excluded.active_days_json,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, user_id, month, json.dumps(sorted(active_days)), timestamp),
+        )
+        self._connection.commit()
+
+    async def start_discord_voice_session(self, guild_id: int, user_id: int, at: int | None = None) -> None:
+        self._connection.execute(
+            """INSERT INTO discord_voice_sessions (guild_id, user_id, joined_at) VALUES (?, ?, ?)
+               ON CONFLICT(guild_id, user_id) DO NOTHING""",
+            (guild_id, user_id, int(at or time.time())),
+        )
+        self._connection.commit()
+
+    async def finish_discord_voice_session(self, guild_id: int, user_id: int, at: int | None = None) -> None:
+        timestamp = int(at or time.time())
+        row = self._connection.execute(
+            "SELECT joined_at FROM discord_voice_sessions WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        ).fetchone()
+        self._connection.execute(
+            "DELETE FROM discord_voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        if row:
+            joined_at = min(int(row[0]), timestamp)
+            moment = datetime.fromtimestamp(timestamp, timezone.utc)
+            month, day = moment.strftime("%Y-%m"), moment.strftime("%Y-%m-%d")
+            existing = self._connection.execute(
+                "SELECT active_days_json FROM discord_monthly_activity WHERE guild_id = ? AND user_id = ? AND activity_month = ?",
+                (guild_id, user_id, month),
+            ).fetchone()
+            active_days = set(json.loads(existing[0])) if existing else set()
+            active_days.add(day)
+            self._connection.execute(
+                """
+                INSERT INTO discord_monthly_activity
+                    (guild_id, user_id, activity_month, message_count, voice_seconds, active_days_json, updated_at)
+                VALUES (?, ?, ?, 0, ?, ?, ?)
+                ON CONFLICT(guild_id, user_id, activity_month) DO UPDATE SET
+                    voice_seconds = discord_monthly_activity.voice_seconds + excluded.voice_seconds,
+                    active_days_json = excluded.active_days_json,
+                    updated_at = excluded.updated_at
+                """,
+                (guild_id, user_id, month, timestamp - joined_at, json.dumps(sorted(active_days)), timestamp),
+            )
+        self._connection.commit()
+
+    async def discord_monthly_activity(self, guild_id: int, user_id: int, month: str | None = None) -> dict[str, int | str]:
+        month = month or datetime.now(timezone.utc).strftime("%Y-%m")
+        row = self._connection.execute(
+            """SELECT message_count, voice_seconds, active_days_json FROM discord_monthly_activity
+               WHERE guild_id = ? AND user_id = ? AND activity_month = ?""",
+            (guild_id, user_id, month),
+        ).fetchone()
+        messages, voice_seconds, days = (int(row[0]), int(row[1]), len(json.loads(row[2]))) if row else (0, 0, 0)
+        session = self._connection.execute(
+            "SELECT joined_at FROM discord_voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        ).fetchone()
+        if session and month == datetime.now(timezone.utc).strftime("%Y-%m"):
+            voice_seconds += max(0, int(time.time()) - int(session[0]))
+        return {"month": month, "message_count": messages, "voice_seconds": voice_seconds, "active_days": days}
+
+    async def save_reputation_progress(
+        self, guild_id: int, user_id: int, giver: str, level: str, approved_by: int, at: int | None = None
+    ) -> None:
+        self._connection.execute(
+            """INSERT INTO reputation_progress (guild_id, user_id, giver, level, approved_by, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(guild_id, user_id, giver) DO UPDATE SET
+                   level = excluded.level, approved_by = excluded.approved_by, updated_at = excluded.updated_at""",
+            (guild_id, user_id, giver, level, approved_by, int(at or time.time())),
+        )
+        self._connection.commit()
+
+    async def reputation_progress(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            """SELECT giver, level, approved_by, updated_at FROM reputation_progress
+               WHERE guild_id = ? AND user_id = ? ORDER BY giver COLLATE NOCASE""",
+            (guild_id, user_id),
+        ).fetchall()
+        return [dict(zip(("giver", "level", "approved_by", "updated_at"), row)) for row in rows]
 
     async def close(self) -> None:
         self._connection.close()

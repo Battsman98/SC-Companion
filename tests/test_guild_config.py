@@ -76,11 +76,12 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Create or Repair All Feature Channels" in javascript
     assert "updateAllFeatureChannels" in javascript
     assert "All enabled feature channels are being created or repaired" in javascript
-    assert "Screenshot-backed applications for Star Citizen reputation givers and levels." in javascript
+    assert "without consuming Discord role slots" in javascript
+    assert "Secondary and affinity ladders are excluded." in javascript
     assert "Create reviewer role" in javascript
     assert "Create manager role" in javascript
     assert "SC Companion creates or reuses the Award Manager role." in javascript
-    assert "rep giver, current level, and screenshot" in javascript
+    assert "Members submit a giver, level, and screenshot" in javascript
     assert "Only this role, server administrators, and SC Companion can see applications." in javascript
     assert "Private application queue configured." in javascript
     assert "reputation-reviewer-row" in javascript

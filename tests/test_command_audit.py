@@ -411,3 +411,26 @@ def test_discord_audit_is_saved_when_channel_is_not_configured() -> None:
     asyncio.run(bot.log_audit_event("Command Used", {"Command": "/mining"}))
 
     cache.add_audit_event.assert_awaited_once_with("Command Used", {"Command": "/mining"})
+def test_reputation_approval_saves_progress_without_creating_roles() -> None:
+    source = inspect.getsource(GameAssistBot.review_reputation_application)
+
+    assert "await self.cache.save_reputation_progress(" in source
+    assert "create_role" not in source
+    assert "add_roles" not in source
+    assert "remove_roles" not in source
+    assert 'role.id == int(reviewer_role_id)' in source
+
+
+def test_reputation_review_buttons_survive_bot_restarts() -> None:
+    setup_source = inspect.getsource(GameAssistBot.setup_hook)
+
+    assert "self.add_view(ReputationApplicationReviewView())" in setup_source
+
+
+def test_activity_tracking_uses_message_and_voice_events() -> None:
+    message_source = inspect.getsource(GameAssistBot.on_message)
+    voice_source = inspect.getsource(GameAssistBot.on_voice_state_update)
+
+    assert "record_discord_message_activity" in message_source
+    assert "start_discord_voice_session" in voice_source
+    assert "finish_discord_voice_session" in voice_source
