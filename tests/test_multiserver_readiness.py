@@ -82,7 +82,8 @@ def test_shared_channels_wait_for_setup_and_use_sc_companion_category() -> None:
     feedback_source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
 
     assert "if configured is None" in about_source
-    assert 'item.name == "SC Companion"' in about_source
+    assert "SC_COMPANION_CATEGORY_ALIASES" in about_source
+    assert "SC_COMPANION_CATEGORY_NAME" in about_source
     assert '"about-the-bot", category=category' in about_source
     assert '"feedback-and-issues"' in feedback_source
     assert "category=category" in feedback_source
