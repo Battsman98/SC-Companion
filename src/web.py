@@ -1447,21 +1447,59 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
     if category is None:
         category = await _discord_api("POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
                                       json_payload={"name": "📊 REPUTATION PROGRESS", "type": 4})
+    settings = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
+    reviewer_role_id = settings.get("reviewer_role_id")
+    if not reviewer_role_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Choose a reputation reviewer role before creating the private application queue.",
+        )
+    private_overwrites = [
+        {"id": str(guild_id), "type": 0, "allow": "0", "deny": str(1 << 10)},
+        {
+            "id": str(reviewer_role_id),
+            "type": 0,
+            "allow": str((1 << 10) | (1 << 11) | (1 << 14) | (1 << 15) | (1 << 16)),
+            "deny": "0",
+        },
+    ]
+    legacy_forum = next(
+        (item for item in channels if item["name"] == "rep-submissions" and item["type"] == 15), None
+    )
+    if legacy_forum is not None:
+        await _discord_api(
+            "PATCH", f"/channels/{legacy_forum['id']}", bot_token=_public_bot_token(),
+            json_payload={
+                "name": "rep-submissions-archive",
+                "permission_overwrites": [{
+                    "id": str(guild_id), "type": 0, "allow": "0", "deny": str(1 << 10),
+                }],
+            },
+        )
     specs = (("rep-guidelines", 0, "How to submit Star Citizen reputation progress."),
              ("rep-progress", 0, "Reviewed Star Citizen reputation progress."),
-             ("rep-submissions", 15, "Screenshot-backed reputation applications for reviewer approval."))
+             ("rep-submissions", 0, "Private reputation application queue for the configured reviewer role."))
     made = {}
     for name, channel_type, topic in specs:
         channel = next((item for item in channels if item["name"] == name and item["type"] == channel_type), None)
         if channel is None:
+            payload = {"name": name, "type": channel_type,
+                       "parent_id": str(category["id"]), "topic": topic}
+            if name == "rep-submissions":
+                payload["permission_overwrites"] = private_overwrites
             channel = await _discord_api("POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
-                                         json_payload={"name": name, "type": channel_type,
-                                                       "parent_id": str(category["id"]), "topic": topic})
+                                         json_payload=payload)
+        elif name == "rep-submissions":
+            channel = await _discord_api(
+                "PATCH", f"/channels/{channel['id']}", bot_token=_public_bot_token(),
+                json_payload={"parent_id": str(category["id"]), "topic": topic,
+                              "permission_overwrites": private_overwrites},
+            )
         made[name] = channel
-    current = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
-    current["submission_forum_id"] = int(made["rep-submissions"]["id"])
-    await state().cache.set(f"guild:{guild_id}:reputation-settings", current, 315360000)
-    return {"status": "ready", "forum_id": _snowflake(made["rep-submissions"]["id"])}
+    settings["submission_channel_id"] = int(made["rep-submissions"]["id"])
+    settings.pop("submission_forum_id", None)
+    await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
+    return {"status": "ready", "channel_id": _snowflake(made["rep-submissions"]["id"])}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards")

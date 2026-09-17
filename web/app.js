@@ -1266,7 +1266,7 @@ function renderAwardChannelFeature(config) {
 function renderReputationFeature(config) {
   const settings = config.reputation || {};
   return `<div class="bot-feature-row" data-reputation-feature data-reviewer-role-id="${escapeAttribute(settings.reviewer_role_id || "")}">
-    <label class="bot-module-copy"><input type="checkbox" data-reputation-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Reputation Progress Tracker</strong><small>Screenshot-backed applications for Star Citizen reputation givers and levels.</small><small>${settings.submission_forum_id ? "Submission forum configured." : "No reputation submission forum is associated yet."}</small></span></label>
+    <label class="bot-module-copy"><input type="checkbox" data-reputation-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Reputation Progress Tracker</strong><small>Screenshot-backed applications for Star Citizen reputation givers and levels.</small><small>${settings.submission_channel_id ? "Private application queue configured." : "No private application queue is associated yet."}</small></span></label>
   </div>`;
 }
 
@@ -1276,10 +1276,12 @@ function renderReputationManagement(config) {
   const options = ['<option value="">Choose a reviewer role...</option>', ...roles.map((role) => `<option value="${role.id}" ${String(settings.reviewer_role_id || "") === String(role.id) ? "selected" : ""}>${escapeHtml(role.name)}</option>`)].join("");
   return `<section class="bot-award-management" data-reputation-management data-guild-id="${config.guild.id}">
     <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Reputation Progress Tracker</h3><p>Members submit a rep giver, current level, and screenshot through <code>/rep submit</code>. The bot opens a review ticket in Discord.</p></div>
-    <form data-reputation-settings-form class="tool-card award-form">
-      <label class="award-toggle"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}><span><strong>Enable Progress Tracker</strong><small>Allow screenshot-backed reputation applications.</small></span></label>
-      <label><span>Submission reviewer role</span><select name="reviewer_role_id">${options}</select><small>This role is mentioned on every new submission ticket.</small></label>
-      <label class="award-toggle"><input type="checkbox" name="auto_create_role"><span><strong>Let SC Companion create the role</strong><small>Creates or reuses a mentionable Reputation Reviewer role.</small></span></label>
+    <form data-reputation-settings-form class="tool-card award-form reputation-settings-form">
+      <label class="award-toggle reputation-enable-toggle"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}><span><strong>Enable Progress Tracker</strong><small>Turns member reputation applications on or off.</small></span></label>
+      <div class="reputation-reviewer-row">
+        <label class="award-toggle reputation-role-toggle"><input type="checkbox" name="auto_create_role"><span><strong>Create reviewer role</strong><small>SC Companion creates or reuses the Reputation Reviewer role.</small></span></label>
+        <label class="reputation-role-field"><span>Or choose an existing role</span><select name="reviewer_role_id">${options}</select><small>Only this role, server administrators, and SC Companion can see applications.</small></label>
+      </div>
       <div class="award-form-actions"><button type="submit">Save Progress Tracker</button><span class="form-note" data-reputation-status></span></div>
     </form>
   </section>`;

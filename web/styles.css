@@ -717,8 +717,51 @@ button:hover, .button-link:hover, .tabs button.active {
   align-items: center;
 }
 
+.reputation-settings-form {
+  max-width: 780px;
+  gap: 12px;
+}
+
+.reputation-enable-toggle {
+  width: fit-content;
+  max-width: 430px;
+  align-items: center;
+  padding: 9px 11px;
+}
+
+.reputation-reviewer-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(240px, 0.9fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.reputation-role-toggle {
+  min-height: 68px;
+  align-items: center;
+  padding: 9px 11px;
+}
+
+.reputation-role-field select {
+  max-width: 320px;
+  min-height: 36px;
+  padding-block: 6px;
+}
+
+.reputation-settings-form .award-toggle input[type="checkbox"] {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+}
+
 @media (max-width: 760px) {
   .award-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reputation-reviewer-row {
     grid-template-columns: 1fr;
   }
 }

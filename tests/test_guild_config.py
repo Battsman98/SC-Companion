@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -75,8 +76,12 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "updateAllFeatureChannels" in javascript
     assert "All enabled feature channels are being created or repaired" in javascript
     assert "Screenshot-backed applications for Star Citizen reputation givers and levels." in javascript
-    assert "Let SC Companion create the role" in javascript
+    assert "Create reviewer role" in javascript
     assert "rep giver, current level, and screenshot" in javascript
+    assert "Only this role, server administrators, and SC Companion can see applications." in javascript
+    assert "Private application queue configured." in javascript
+    assert "reputation-reviewer-row" in javascript
+    assert "Or choose an existing role" in javascript
     assert "/awards/channel" in javascript
     assert "data-award-feature-enabled" in javascript
     assert 'enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked' in javascript
@@ -92,6 +97,17 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert '["features", "Features"]' in javascript
     assert '["channels", "Channel Management"]' in javascript
     assert '[["awards", "Awards"]]' in javascript
+
+
+def test_reputation_submissions_use_a_private_application_queue() -> None:
+    provision_source = inspect.getsource(web.create_reputation_channels)
+
+    assert '("rep-submissions", 0,' in provision_source
+    assert '"deny": str(1 << 10)' in provision_source
+    assert 'str(reviewer_role_id)' in provision_source
+    assert 'settings["submission_channel_id"]' in provision_source
+    assert 'settings.pop("submission_forum_id", None)' in provision_source
+    assert '"rep-submissions-archive"' in provision_source
 
 
 def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
