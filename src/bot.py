@@ -3071,7 +3071,6 @@ class GameAssistBot(commands.Bot):
 
     async def sync_visitor_welcome(self, channel: discord.TextChannel, role: discord.Role) -> None:
         cache_key = f"discord:visitor-welcome:{channel.id}"
-        message_id = await self.cache.get(cache_key)
         embed = discord.Embed(
             title="Welcome to the Star Citizen Companion Bot Hub",
             description=(
@@ -3083,18 +3082,12 @@ class GameAssistBot(commands.Bot):
         )
         embed.add_field(name="Getting started", value="Open a topic channel and type `/` to see the available commands.", inline=False)
         embed.add_field(name="Website", value="https://sccompanion.org", inline=False)
-        message = None
-        if isinstance(message_id, int):
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                message = await channel.fetch_message(message_id)
-        if message is None:
-            message = await self.find_recent_embed_message(channel, embed.title or "")
-        if message:
-            await message.edit(embed=embed)
-        else:
-            message = await channel.send(embed=embed)
-        await self.cache.set(cache_key, message.id, 315360000)
-        await self.delete_recent_duplicate_embed_messages(channel, embed.title or "", message.id, limit=250)
+        await self._sync_singleton_embed(
+            channel,
+            cache_key,
+            embed,
+            history_limit=250,
+        )
 
     async def ensure_membership_applications(self) -> None:
         """Serialize startup and recovery provisioning to prevent duplicate channels/messages."""

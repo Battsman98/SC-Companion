@@ -135,3 +135,12 @@ def test_loot_example_uses_singleton_embed_helper() -> None:
     assert "_sync_singleton_embed" in source
     assert "silent=True" in source
     assert "clear_content=True" in source
+
+
+def test_visitor_welcome_uses_singleton_embed_helper() -> None:
+    source = inspect.getsource(GameAssistBot.sync_visitor_welcome)
+
+    assert "_sync_singleton_embed" in source
+    assert "history_limit=250" in source
+    assert "silent=True" not in source
+    assert "delete_recent_duplicate_embed_messages" not in source
