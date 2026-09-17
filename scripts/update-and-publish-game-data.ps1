@@ -4,6 +4,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $snapshotRelative = "data/blueprints_snapshot.json"
 $pythonPath = Join-Path $projectRoot ".venv\Scripts\python.exe"
 $importerRelative = "scripts/update_game_data_from_p4k.py"
+$toolsPath = Join-Path $projectRoot "tools\sc-game-data"
 $gameArchive = "C:\StarCitizen\LIVE\Data.p4k"
 $productionStatusUrl = "https://sccompanion.org/api/game-data/status"
 
@@ -22,7 +23,13 @@ Write-Host ""
 Write-Host "STAR CITIZEN MISSION + BLUEPRINT UPDATE" -ForegroundColor Cyan
 Write-Host "This publishes data from your installed LIVE game files." -ForegroundColor DarkGray
 
-foreach ($requiredPath in @($gameArchive, $pythonPath, (Join-Path $projectRoot $importerRelative))) {
+foreach ($requiredPath in @(
+    $gameArchive,
+    $pythonPath,
+    (Join-Path $projectRoot $importerRelative),
+    (Join-Path $toolsPath "unp4k.exe"),
+    (Join-Path $toolsPath "unforge.exe")
+)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required file not found: $requiredPath"
     }
@@ -46,7 +53,7 @@ try {
 
     Write-Host ""
     Write-Host "2/5  Reading Data.p4k and rebuilding the database..."
-    Invoke-Checked $pythonPath $importerPath
+    Invoke-Checked $pythonPath $importerPath --tools-dir $toolsPath
 
     & git diff --quiet -- $snapshotRelative
     if ($LASTEXITCODE -eq 0) {
