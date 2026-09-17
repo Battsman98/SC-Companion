@@ -1230,8 +1230,6 @@ async function loadGuildBotConfiguration(guildId) {
     outputs.botManagement.querySelector("[data-award-channel-create]")?.addEventListener("click", createAwardChannel);
     const awardCreateForm = outputs.botManagement.querySelector("[data-award-create-form]");
     awardCreateForm?.addEventListener("submit", createDashboardAward);
-    awardCreateForm?.elements.award_type?.addEventListener("change", () => updateAwardRequirementField(awardCreateForm));
-    if (awardCreateForm) updateAwardRequirementField(awardCreateForm);
     outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
     outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
     outputs.botManagement.querySelectorAll("[data-award-review]").forEach((button) => button.addEventListener("click", reviewDashboardAward));
@@ -2034,10 +2032,10 @@ function renderAwardManagement(config) {
       <div class="award-field-grid"><label><span>Who can manage awards?</span><select name="manager_role_id">${roleOptions}</select><small>The server owner always has access.</small></label><label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create an awards channel from the Features tab if needed.</small></label></div>
       <div class="award-form-actions"><button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span></div>
     </form>
-    <form data-award-create-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Create an award</h4><p>Build a progress-based award or a custom recognition such as Good Conduct or Bro Award.</p></div></div>
-      <div class="award-field-grid"><label><span>Award name</span><input name="name" maxlength="80" placeholder="Example: Contract Ace" required><small>Up to 80 characters.</small></label><label><span>Award type</span><select name="award_type"><option value="tracker">Tracked contracts or tasks</option><option value="custom">Custom recognition</option></select><small>Tracked awards require every listed item.</small></label></div>
+    <form data-award-create-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Create an award</h4><p>Add requirements for a tracked award, or leave them blank for a custom recognition such as Good Conduct or Bro Award.</p></div></div>
+      <label><span>Title</span><input name="title" maxlength="80" placeholder="Example: Contract Ace" required><small>The name members will see. Up to 80 characters.</small></label>
       <label><span>Description</span><textarea name="description" maxlength="500" rows="3" placeholder="Explain what this award recognizes and why it matters." required></textarea><small>Shown to managers and recipients. Up to 500 characters.</small></label>
-      <label data-award-requirements-field><span>Required contracts or tasks</span><textarea name="requirements" rows="4" placeholder="Enter one requirement per line"></textarea><small>One item per line. Reports are reviewed before progress counts.</small></label>
+      <label><span>Requirements</span><textarea name="requirements" rows="4" placeholder="Enter one contract or task per line, or leave blank for a custom award"></textarea><small>Optional. When provided, members must complete every listed item.</small></label>
       <div class="award-form-actions"><button type="submit">Create Award</button><span class="form-note" data-award-status></span></div>
     </form>
     <div class="bot-module-list"><h4>Existing awards</h4>${definitions.length ? definitions.map((award) => `<form data-award-edit-form data-award-id="${award.id}" class="bot-module-row">
@@ -2051,15 +2049,6 @@ function renderAwardManagement(config) {
       <div class="award-form-actions"><button type="submit" ${customAwards.length ? "" : "disabled"}>Grant and Announce</button><span class="form-note" data-award-status>${customAwards.length ? "" : "Create an active custom award first."}</span></div>
     </form>
   </section>`;
-}
-
-function updateAwardRequirementField(form) {
-  const custom = form.elements.award_type.value === "custom";
-  const field = form.querySelector("[data-award-requirements-field]");
-  const input = form.elements.requirements;
-  input.disabled = custom;
-  field.classList.toggle("control-disabled", custom);
-  if (custom) input.value = "";
 }
 
 function awardRequirements(value) {
@@ -2087,7 +2076,8 @@ async function saveAwardSettings(event) {
 async function createDashboardAward(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  await awardDashboardRequest(form, "", "POST", { name: form.elements.name.value, description: form.elements.description.value, award_type: form.elements.award_type.value, requirements: awardRequirements(form.elements.requirements.value) });
+  const requirements = awardRequirements(form.elements.requirements.value);
+  await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements });
 }
 
 async function editDashboardAward(event) {
