@@ -2,9 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $snapshotRelative = "data/blueprints_snapshot.json"
-$snapshotPath = Join-Path $projectRoot $snapshotRelative
 $pythonPath = Join-Path $projectRoot ".venv\Scripts\python.exe"
-$importerPath = Join-Path $projectRoot "scripts\update_game_data_from_p4k.py"
+$importerRelative = "scripts/update_game_data_from_p4k.py"
 $gameArchive = "C:\StarCitizen\LIVE\Data.p4k"
 $productionStatusUrl = "https://sccompanion.org/api/game-data/status"
 
@@ -23,29 +22,27 @@ Write-Host ""
 Write-Host "STAR CITIZEN MISSION + BLUEPRINT UPDATE" -ForegroundColor Cyan
 Write-Host "This publishes data from your installed LIVE game files." -ForegroundColor DarkGray
 
-foreach ($requiredPath in @($gameArchive, $pythonPath, $importerPath)) {
+foreach ($requiredPath in @($gameArchive, $pythonPath, (Join-Path $projectRoot $importerRelative))) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required file not found: $requiredPath"
     }
 }
 
 Push-Location $projectRoot
+$worktreePath = $null
 try {
-    $branch = (& git branch --show-current).Trim()
-    if ($LASTEXITCODE -ne 0 -or $branch -ne "main") {
-        throw "Open the project on the main branch before running the updater."
-    }
-    $trackedChanges = @(& git status --porcelain --untracked-files=no)
-    if ($LASTEXITCODE -ne 0) {
-        throw "The project status could not be checked."
-    }
-    if ($trackedChanges.Count -gt 0) {
-        throw "The project has other unfinished changes. Finish or set them aside before updating game data."
-    }
-
     Write-Host ""
     Write-Host "1/5  Checking for the latest project version..."
-    Invoke-Checked git pull --ff-only origin main
+    Invoke-Checked git fetch origin main
+
+    # Build and publish from an isolated checkout. This leaves the user's current
+    # branch and any unfinished work exactly as they are.
+    $worktreePath = Join-Path ([System.IO.Path]::GetTempPath()) ("sc-game-data-update-" + [guid]::NewGuid().ToString("N"))
+    Invoke-Checked git worktree add --detach $worktreePath origin/main
+    Set-Location $worktreePath
+
+    $snapshotPath = Join-Path $worktreePath $snapshotRelative
+    $importerPath = Join-Path $worktreePath $importerRelative
 
     Write-Host ""
     Write-Host "2/5  Reading Data.p4k and rebuilding the database..."
@@ -75,7 +72,7 @@ try {
     Write-Host "4/5  Publishing $version..."
     Invoke-Checked git add -- $snapshotRelative
     Invoke-Checked git commit -m "Update game data to $version" -- $snapshotRelative
-    Invoke-Checked git push origin main
+    Invoke-Checked git push origin HEAD:main
 
     Write-Host ""
     Write-Host "5/5  Waiting for the hosted website to confirm the update..."
@@ -102,5 +99,12 @@ try {
     }
 }
 finally {
+    Set-Location $projectRoot
+    if ($null -ne $worktreePath -and (Test-Path -LiteralPath $worktreePath)) {
+        & git worktree remove --force $worktreePath
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "The temporary checkout could not be removed: $worktreePath"
+        }
+    }
     Pop-Location
 }
