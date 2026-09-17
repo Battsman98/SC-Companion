@@ -722,13 +722,6 @@ button:hover, .button-link:hover, .tabs button.active {
   gap: 12px;
 }
 
-.reputation-enable-toggle {
-  width: fit-content;
-  max-width: 430px;
-  align-items: center;
-  padding: 9px 11px;
-}
-
 .reputation-reviewer-row {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(240px, 0.9fr);

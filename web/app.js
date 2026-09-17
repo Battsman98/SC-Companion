@@ -1274,10 +1274,9 @@ function renderReputationManagement(config) {
   const settings = config.reputation || {};
   const roles = config.awards?.roles || [];
   const options = ['<option value="">Choose a reviewer role...</option>', ...roles.map((role) => `<option value="${role.id}" ${String(settings.reviewer_role_id || "") === String(role.id) ? "selected" : ""}>${escapeHtml(role.name)}</option>`)].join("");
-  return `<section class="bot-award-management" data-reputation-management data-guild-id="${config.guild.id}">
+  return `<section class="bot-award-management" data-reputation-management data-guild-id="${config.guild.id}" data-enabled="${settings.enabled ? "true" : "false"}">
     <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Reputation Progress Tracker</h3><p>Members submit a rep giver, current level, and screenshot through <code>/rep submit</code>. The bot opens a review ticket in Discord.</p></div>
     <form data-reputation-settings-form class="tool-card award-form reputation-settings-form">
-      <label class="award-toggle reputation-enable-toggle"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}><span><strong>Enable Progress Tracker</strong><small>Turns member reputation applications on or off.</small></span></label>
       <div class="reputation-reviewer-row">
         <label class="award-toggle reputation-role-toggle"><input type="checkbox" name="auto_create_role"><span><strong>Create reviewer role</strong><small>SC Companion creates or reuses the Reputation Reviewer role.</small></span></label>
         <label class="reputation-role-field"><span>Or choose an existing role</span><select name="reviewer_role_id">${options}</select><small>Only this role, server administrators, and SC Companion can see applications.</small></label>
@@ -2104,10 +2103,9 @@ function renderAwardManagement(config) {
   const channelOptions = ['<option value="">No Discord announcements</option>', ...config.channels.filter((channel) => [0, 5].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(settings.announcement_channel_id || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`)].join("");
   const definitions = awards.definitions || [];
   const activeAwards = definitions.filter((award) => award.active);
-  return `<section class="bot-award-management" data-award-management data-guild-id="${config.guild.id}">
+  return `<section class="bot-award-management" data-award-management data-guild-id="${config.guild.id}" data-enabled="${settings.enabled ? "true" : "false"}">
     <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Awards</h3><p>Create contract trackers and custom awards, review reports, and announce recipients in Discord.</p></div>
     <form data-award-settings-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Award settings</h4><p>Control who manages awards and where earned awards are announced.</p></div></div>
-      <label class="award-toggle"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}><span><strong>Enable awards</strong><small>Members can report completed requirements while enabled.</small></span></label>
       <div class="award-field-grid"><label><span>Who can manage awards?</span><select name="manager_role_id">${roleOptions}</select><small>The server owner always has access.</small></label><label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create or repair the Awards & Progress category from the Features tab if needed.</small></label></div>
       <div class="award-form-actions"><button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span></div>
     </form>
@@ -2150,7 +2148,8 @@ async function awardDashboardRequest(form, path, method, body) {
 async function saveAwardSettings(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  await awardDashboardRequest(form, "/settings", "PUT", { enabled: form.elements.enabled.checked, manager_role_id: form.elements.manager_role_id.value || null, announcement_channel_id: form.elements.announcement_channel_id.value || null });
+  const section = form.closest("[data-award-management]");
+  await awardDashboardRequest(form, "/settings", "PUT", { enabled: section.dataset.enabled === "true", manager_role_id: form.elements.manager_role_id.value || null, announcement_channel_id: form.elements.announcement_channel_id.value || null });
 }
 
 async function createDashboardAward(event) {
@@ -2167,8 +2166,9 @@ async function saveReputationSettings(event) {
   const status = form.querySelector("[data-reputation-status]");
   status.textContent = "Saving...";
   try {
-    const result = await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled: form.elements.enabled.checked, reviewer_role_id: form.elements.reviewer_role_id.value || null, auto_create_role: form.elements.auto_create_role.checked } });
-    if (form.elements.enabled.checked) await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/channels`, { method: "POST" });
+    const enabled = section.dataset.enabled === "true";
+    const result = await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled, reviewer_role_id: form.elements.reviewer_role_id.value || null, auto_create_role: form.elements.auto_create_role.checked } });
+    if (enabled) await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/channels`, { method: "POST" });
     status.textContent = result.reviewer_role_id ? "Progress Tracker saved and reviewer role assigned." : "Choose a reviewer role or let SC Companion create one.";
     await loadGuildBotConfiguration(section.dataset.guildId);
   } catch (error) { status.textContent = error.message; }

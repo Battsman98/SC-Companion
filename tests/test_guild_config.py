@@ -71,6 +71,7 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Save Channels" in javascript
     assert "Add SC Companion to Discord" in javascript
     assert "Create an award" in javascript
+    assert "Enable awards" not in javascript
     assert "Where should awards be announced?" in javascript
     assert "Create or Repair All Feature Channels" in javascript
     assert "updateAllFeatureChannels" in javascript
@@ -82,6 +83,9 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Private application queue configured." in javascript
     assert "reputation-reviewer-row" in javascript
     assert "Or choose an existing role" in javascript
+    assert 'data-enabled="${settings.enabled ? "true" : "false"}"' in javascript
+    assert "form.elements.enabled.checked" not in javascript.split("async function saveReputationSettings", 1)[1].split("async function editDashboardAward", 1)[0]
+    assert "form.elements.enabled.checked" not in javascript.split("async function saveAwardSettings", 1)[1].split("async function createDashboardAward", 1)[0]
     assert "/awards/channel" in javascript
     assert "data-award-feature-enabled" in javascript
     assert 'enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked' in javascript
