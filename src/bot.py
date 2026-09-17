@@ -1277,6 +1277,7 @@ class GameAssistBot(commands.Bot):
             # guild settings row used by the public install.
             await self.ensure_sc_companion_support_resources(guild)
             await self.sync_sc_companion_category_guides(guild)
+            return
         lock = self._shared_setup_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             holder = secrets.token_hex(16)
@@ -1291,11 +1292,25 @@ class GameAssistBot(commands.Bot):
         """Finish Peep's SC Companion command area without touching test guilds."""
         if guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
-        category = discord.utils.find(lambda item: item.name.casefold() in SC_COMPANION_CATEGORY_ALIASES, guild.categories)
+        matching_categories = [
+            item for item in guild.categories if item.name.casefold() in SC_COMPANION_CATEGORY_ALIASES
+        ]
+        category = next((item for item in matching_categories if item.name == SC_COMPANION_CATEGORY_NAME), None)
+        if category is None and matching_categories:
+            category = matching_categories[0]
         if category is None:
             category = await guild.create_category(SC_COMPANION_CATEGORY_NAME, reason="Repair Peep SC Companion area")
         elif category.name != SC_COMPANION_CATEGORY_NAME:
             await category.edit(name=SC_COMPANION_CATEGORY_NAME, reason="Add SC Companion category emblem")
+        for duplicate in matching_categories:
+            if duplicate.id == category.id:
+                continue
+            for channel in list(duplicate.channels):
+                await channel.edit(
+                    category=category, sync_permissions=False,
+                    reason="Merge duplicate SC Companion category without deleting content",
+                )
+            await duplicate.delete(reason="Remove empty duplicate SC Companion category")
 
         channels: dict[str, discord.TextChannel] = {}
         for module_key in ("trade_tools", "timers"):
