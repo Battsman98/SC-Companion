@@ -1667,46 +1667,59 @@ class GameAssistBot(commands.Bot):
             if not permissions.send_messages or not permissions.embed_links:
                 continue
             cache_key = f"guild:{guild.id}:command-guide:{channel_id}"
-            message_id = await self.cache.get(cache_key)
-            message = None
-            if message_id:
-                try:
-                    message = await channel.fetch_message(int(message_id))
-                except discord.NotFound:
-                    message = None
-                except (discord.Forbidden, discord.HTTPException):
-                    logging.warning(
-                        "Could not fetch the saved command guide in channel %s; will retry without posting a replacement",
-                        channel_id,
-                    )
-                    continue
-            embed = build_guild_command_guide_embed(module_keys)
-
-            existing = (
-                await self.find_recent_embed_messages(channel, {embed.title or ""}, limit=100)
-            ).get(embed.title or "", [])
-            if message is None and existing:
-                # Prefer the oldest surviving guide after a cache reset so a
-                # restart cannot move the permanent message down the channel.
-                message = min(existing, key=lambda candidate: candidate.id)
-
-            if message is None:
-                message = await channel.send(embed=embed)
-            else:
-                await message.edit(embed=embed)
-            await self.cache.set(cache_key, message.id, 315360000)
-
-            for duplicate in existing:
-                if duplicate.id == message.id:
-                    continue
-                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    await duplicate.delete()
-                    logging.info(
-                        "Deleted duplicate SC Companion command guide %s in channel %s",
-                        duplicate.id,
-                        channel_id,
-                    )
+            await self._sync_guild_command_guide(
+                channel,
+                cache_key,
+                build_guild_command_guide_embed(module_keys),
+            )
         await self.sync_guild_timer_dashboard(guild, modules)
+
+    async def _sync_guild_command_guide(
+        self,
+        channel: discord.TextChannel,
+        cache_key: str,
+        embed: discord.Embed,
+    ) -> None:
+        """Keep exactly one bot-owned command guide in a configured module channel."""
+        message_id = await self.cache.get(cache_key)
+        message = None
+        if message_id:
+            try:
+                message = await channel.fetch_message(int(message_id))
+            except discord.NotFound:
+                message = None
+            except (discord.Forbidden, discord.HTTPException):
+                logging.warning(
+                    "Could not fetch the saved command guide in channel %s; will retry without posting a replacement",
+                    channel.id,
+                )
+                return
+
+        title = embed.title or ""
+        existing = (
+            await self.find_recent_embed_messages(channel, {title}, limit=100)
+        ).get(title, [])
+        if message is None and existing:
+            # Prefer the oldest surviving guide after a cache reset so a
+            # restart cannot move the permanent message down the channel.
+            message = min(existing, key=lambda candidate: candidate.id)
+
+        if message is None:
+            message = await channel.send(embed=embed)
+        else:
+            await message.edit(embed=embed)
+        await self.cache.set(cache_key, message.id, 315360000)
+
+        for duplicate in existing:
+            if duplicate.id == message.id:
+                continue
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await duplicate.delete()
+                logging.info(
+                    "Deleted duplicate SC Companion command guide %s in channel %s",
+                    duplicate.id,
+                    channel.id,
+                )
 
     async def remove_sc_companion_category_examples(
         self, guild: discord.Guild, category: discord.CategoryChannel
