@@ -1205,7 +1205,7 @@ async function loadGuildBotConfiguration(guildId) {
           <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small>${module.detected_routes?.length ? `<small class="bot-detected-routes"><strong>Current Discord setup</strong>${module.detected_routes.map((route) => `<span><code>/${escapeHtml(route.command)}</code> → #${escapeHtml(route.channel_name)}</span>`).join("")}</small>` : ""}</span></label>
         </div>`).join("")}
         ${config.awards_available ? renderAwardChannelFeature(config) : ""}
-        </div><div class="bot-management-actions"><button type="submit">Save Features</button><span data-bot-management-status></span></div>
+        </div><div class="bot-management-actions"><button type="submit">Save Features</button><button type="button" data-update-feature-channels>Create or Repair All Feature Channels</button><span data-bot-management-status></span></div>
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
         <div class="section-heading"><h3>Channel Management</h3><p>Choose where commands run and where feature-specific content is posted. These choices are used when manual setup is selected.</p></div>
@@ -1227,7 +1227,7 @@ async function loadGuildBotConfiguration(guildId) {
     managementForm.querySelectorAll('[name="channel_setup_mode"]').forEach((radio) => radio.addEventListener("change", updateChannelMode));
     updateChannelMode();
     outputs.botManagement.querySelector("[data-award-settings-form]")?.addEventListener("submit", saveAwardSettings);
-    outputs.botManagement.querySelector("[data-award-channel-create]")?.addEventListener("click", createAwardChannel);
+    outputs.botManagement.querySelector("[data-update-feature-channels]")?.addEventListener("click", updateAllFeatureChannels);
     const awardCreateForm = outputs.botManagement.querySelector("[data-award-create-form]");
     awardCreateForm?.addEventListener("submit", createDashboardAward);
     const syncAwardAutoGrant = (form) => {
@@ -1256,37 +1256,11 @@ function renderAwardChannelFeature(config) {
   const channel = config.channels.find((item) => String(item.id) === channelId);
   return `<div class="bot-feature-row award-channel-feature" data-award-feature data-manager-role-id="${escapeAttribute(settings.manager_role_id || "")}" data-announcement-channel-id="${escapeAttribute(settings.announcement_channel_id || "")}">
     <label class="bot-module-copy"><input type="checkbox" data-award-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Awards & Progress Tracker</strong><small>Optional contract tracking, custom recognition, progress reports, and Discord announcements.</small><small>Create a dedicated category with guidelines, award criteria, progress tracking, and announcement channels.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No awards category is associated yet."}</small></span></label>
-    <div class="bot-management-actions"><button type="button" data-award-channel-create>${channel ? "Use or Repair Awards Category" : "Create Awards Category"}</button><span class="form-note" data-award-channel-status></span></div>
   </div>`;
 }
 
-async function createAwardChannel(event) {
-  const button = event.currentTarget;
-  const status = button.parentElement.querySelector("[data-award-channel-status]");
-  const form = button.closest("[data-bot-management-form]");
-  status.textContent = "Creating and associating the awards category...";
-  button.disabled = true;
-  try {
-    const result = await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/channel`, { method: "POST" });
-    status.textContent = result.status === "created" ? "Awards category and channels created." : "Awards category and channels are ready.";
-    await loadGuildBotConfiguration(form.dataset.guildId);
-  } catch (error) {
-    status.textContent = error.message;
-    button.disabled = false;
-  }
-}
-
-async function saveGuildBotConfiguration(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const status = event.submitter?.closest("[data-bot-management-panel]")?.querySelector("[data-bot-management-status]")
-    || form.querySelector("[data-bot-management-status]");
+function guildBotConfigurationPayload(form) {
   const modules = {};
-  const channelSetupMode = form.querySelector('[name="channel_setup_mode"]:checked')?.value;
-  if (!channelSetupMode) {
-    status.textContent = "Choose how you want to set up channels first.";
-    return;
-  }
   form.querySelectorAll("[data-module-feature-key]").forEach((row) => {
     const key = row.dataset.moduleFeatureKey;
     const channelRow = form.querySelector(`[data-module-channel-key="${CSS.escape(key)}"]`);
@@ -1296,9 +1270,60 @@ async function saveGuildBotConfiguration(event) {
       resource_channel_id: channelRow?.querySelector("[data-module-resource-channel]")?.value || null,
     };
   });
+  return { modules, channel_setup_mode: form.querySelector('[name="channel_setup_mode"]:checked')?.value };
+}
+
+async function updateAllFeatureChannels(event) {
+  const button = event.currentTarget;
+  const form = button.closest("[data-bot-management-form]");
+  const status = button.parentElement.querySelector("[data-bot-management-status]");
+  const payload = guildBotConfigurationPayload(form);
+  if (payload.channel_setup_mode !== "automatic") {
+    status.textContent = "Choose “Let the bot set up channels” on the Setup tab first.";
+    return;
+  }
+  status.textContent = "Saving features and repairing all enabled channels...";
+  button.disabled = true;
+  try {
+    await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: payload });
+    const awardFeature = form.querySelector("[data-award-feature]");
+    if (awardFeature) {
+      const awardsEnabled = awardFeature.querySelector("[data-award-feature-enabled]").checked;
+      await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/settings`, {
+        method: "PUT",
+        body: {
+          enabled: awardsEnabled,
+          manager_role_id: awardFeature.dataset.managerRoleId || null,
+          announcement_channel_id: awardFeature.dataset.announcementChannelId || null,
+        },
+      });
+      if (awardsEnabled) {
+        await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/channel`, { method: "POST" });
+      }
+    }
+    status.textContent = "All enabled feature channels are being created or repaired. Discord may take up to one minute to finish.";
+    await loadGuildBotConfiguration(form.dataset.guildId);
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveGuildBotConfiguration(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = event.submitter?.closest("[data-bot-management-panel]")?.querySelector("[data-bot-management-status]")
+    || form.querySelector("[data-bot-management-status]");
+  const payload = guildBotConfigurationPayload(form);
+  const channelSetupMode = payload.channel_setup_mode;
+  if (!channelSetupMode) {
+    status.textContent = "Choose how you want to set up channels first.";
+    return;
+  }
   status.textContent = "Saving...";
   try {
-    await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: { modules, channel_setup_mode: channelSetupMode } });
+    await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: payload });
     const awardFeature = form.querySelector("[data-award-feature]");
     if (awardFeature) {
       await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/settings`, {

@@ -71,7 +71,9 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Add SC Companion to Discord" in javascript
     assert "Create an award" in javascript
     assert "Where should awards be announced?" in javascript
-    assert "Create Awards Category" in javascript
+    assert "Create or Repair All Feature Channels" in javascript
+    assert "updateAllFeatureChannels" in javascript
+    assert "All enabled feature channels are being created or repaired" in javascript
     assert "guidelines, award criteria, progress tracking, and announcement channels" in javascript
     assert "/awards/channel" in javascript
     assert "data-award-feature-enabled" in javascript
