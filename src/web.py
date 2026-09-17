@@ -1509,6 +1509,41 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
         made[name] = channel
     settings["submission_channel_id"] = int(made["rep-submissions"]["id"])
     settings.pop("submission_forum_id", None)
+    guide_payload = {
+        "embeds": [{
+            "title": "How to submit reputation progress",
+            "description": (
+                "Use **`/rep submit`** anywhere in this server. Choose the reputation giver and your current "
+                "level, then attach a clear screenshot showing that level.\n\n"
+                "SC Companion sends the application to a private reviewer-only text queue. When approved, your "
+                "saved rank is updated and appears the next time **`/progress`** is used."
+            ),
+            "color": 15844367,
+            "fields": [{
+                "name": "What reviewers need",
+                "value": "The giver name, visible reputation level, and an uncropped-enough screenshot to verify it.",
+                "inline": False,
+            }],
+        }],
+    }
+    guide_key = f"guild:{guild_id}:reputation-guide-message"
+    guide_message_id = await state().cache.get(guide_key)
+    guide_message = None
+    if guide_message_id:
+        try:
+            guide_message = await _discord_api(
+                "PATCH", f"/channels/{made['rep-guidelines']['id']}/messages/{guide_message_id}",
+                bot_token=_public_bot_token(), json_payload=guide_payload,
+            )
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
+    if guide_message is None:
+        guide_message = await _discord_api(
+            "POST", f"/channels/{made['rep-guidelines']['id']}/messages",
+            bot_token=_public_bot_token(), json_payload=guide_payload,
+        )
+        await state().cache.set(guide_key, int(guide_message["id"]), 315360000)
     await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
     return {"status": "ready", "channel_id": _snowflake(made["rep-submissions"]["id"])}
 

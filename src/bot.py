@@ -943,6 +943,13 @@ class GameAssistBot(commands.Bot):
             await self._run_startup_step("restore pending loot reviews", self.restore_pending_loot_reviews)
         await self._run_startup_step("sync Executive Hangar status", self.sync_exec_status_message)
         await self._run_startup_step("sync contested-zone timers", self.sync_cz_timers_message)
+        if self.settings.award_test_guild_id:
+            reputation_guild = self.get_guild(self.settings.award_test_guild_id)
+            if reputation_guild is not None:
+                await self._run_startup_step(
+                    "repair reputation submission channels",
+                    lambda: self.ensure_reputation_submission_channels(reputation_guild),
+                )
         await self._run_startup_step("assign one-year member roles", self.sync_anniversary_roles)
         self._commands_reference_synced = True
 
@@ -3407,6 +3414,88 @@ class GameAssistBot(commands.Bot):
             embed.add_field(name="Saved progress", value=f"{giver} — {level}", inline=False)
         await message.edit(embed=embed, view=None)
         await interaction.followup.send(f"Application {status.lower()}.", ephemeral=True)
+
+    async def ensure_reputation_submission_channels(self, guild: discord.Guild) -> None:
+        settings_key = f"guild:{guild.id}:reputation-settings"
+        settings = await self.cache.get(settings_key) or {}
+        if not settings.get("enabled") or not settings.get("reviewer_role_id"):
+            return
+        reviewer_role = guild.get_role(int(settings["reviewer_role_id"]))
+        if reviewer_role is None:
+            raise RuntimeError("The configured Reputation Reviewer role no longer exists.")
+        category = discord.utils.find(
+            lambda item: item.name.casefold() == "📊 reputation progress".casefold(), guild.categories
+        )
+        if category is None:
+            category = await guild.create_category(
+                "📊 REPUTATION PROGRESS", reason="Set up reputation progress channels"
+            )
+        private_overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            reviewer_role: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True,
+                attach_files=True, embed_links=True,
+            ),
+        }
+        for forum in [channel for channel in guild.forums if channel.name == "rep-submissions"]:
+            await forum.edit(
+                name="rep-submissions-archive",
+                overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=False)},
+                reason="Replace reputation submission forum with a private text queue",
+            )
+        submission = discord.utils.find(
+            lambda item: item.name == "rep-submissions", guild.text_channels
+        )
+        if submission is None:
+            submission = await guild.create_text_channel(
+                "rep-submissions", category=category,
+                topic="Private reputation application queue for the configured reviewer role.",
+                overwrites=private_overwrites,
+                reason="Create private reputation submission review queue",
+            )
+        else:
+            await submission.edit(
+                category=category,
+                topic="Private reputation application queue for the configured reviewer role.",
+                overwrites=private_overwrites,
+                reason="Repair private reputation submission review queue",
+            )
+        guidelines = discord.utils.find(lambda item: item.name == "rep-guidelines", guild.text_channels)
+        if guidelines is None:
+            guidelines = await guild.create_text_channel(
+                "rep-guidelines", category=category,
+                topic="How to submit Star Citizen reputation progress.",
+                reason="Create reputation submission guide",
+            )
+        guide_embed = discord.Embed(
+            title="How to submit reputation progress",
+            description=(
+                "Use **`/rep submit`** anywhere in this server. Choose the reputation giver and your current "
+                "level, then attach a clear screenshot showing that level.\n\n"
+                "SC Companion sends the application to a private reviewer-only text queue. When approved, your "
+                "saved rank is updated and appears the next time **`/progress`** is used."
+            ),
+            color=discord.Color.gold(),
+        )
+        guide_embed.add_field(
+            name="What reviewers need",
+            value="The giver name, visible reputation level, and an uncropped-enough screenshot to verify it.",
+            inline=False,
+        )
+        guide_key = f"guild:{guild.id}:reputation-guide-message"
+        guide_message_id = await self.cache.get(guide_key)
+        guide_message = None
+        if guide_message_id:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                guide_message = await guidelines.fetch_message(int(guide_message_id))
+        if guide_message is None:
+            guide_message = await guidelines.send(embed=guide_embed)
+            await self.cache.set(guide_key, guide_message.id, 315360000)
+        else:
+            await guide_message.edit(embed=guide_embed)
+        settings["submission_channel_id"] = submission.id
+        settings.pop("submission_forum_id", None)
+        await self.cache.set(settings_key, settings, 315360000)
 
     async def ensure_bot_manager_role(self) -> None:
         guild = self.get_guild(self.settings.discord_guild_id or 0)

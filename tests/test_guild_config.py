@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from src.cache import SQLiteCache
+from src.bot import GameAssistBot
 from src.guild_config import BOT_MODULES, default_module_settings, module_for_command, normalize_module_settings
 from src import web
 from src.web import GuildBotSettingsRequest, GuildModuleRequest
@@ -116,6 +117,20 @@ def test_reputation_submissions_use_a_private_application_queue() -> None:
     assert 'settings["submission_channel_id"]' in provision_source
     assert 'settings.pop("submission_forum_id", None)' in provision_source
     assert '"rep-submissions-archive"' in provision_source
+    assert '"How to submit reputation progress"' in provision_source
+    assert "/rep submit" in provision_source
+
+
+def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
+    repair_source = inspect.getsource(GameAssistBot.ensure_reputation_submission_channels)
+    ready_source = inspect.getsource(GameAssistBot.on_ready)
+
+    assert 'guild.forums if channel.name == "rep-submissions"' in repair_source
+    assert 'name="rep-submissions-archive"' in repair_source
+    assert 'await guild.create_text_channel(' in repair_source
+    assert 'discord.PermissionOverwrite(view_channel=False)' in repair_source
+    assert 'title="How to submit reputation progress"' in repair_source
+    assert '"repair reputation submission channels"' in ready_source
 
 
 def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
