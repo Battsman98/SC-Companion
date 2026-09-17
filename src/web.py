@@ -1350,6 +1350,43 @@ async def save_award_dashboard_settings(guild_id: int, payload: AwardSettingsReq
     return {"status": "saved"}
 
 
+@app.post("/api/bot-management/guilds/{guild_id}/awards/channel")
+async def create_award_announcement_channel(guild_id: int, user=Depends(require_user)) -> dict[str, str]:
+    await _award_dashboard_manager(guild_id, user)
+    channels = await _discord_guild_channels(guild_id)
+    category = next(
+        (channel for channel in channels if channel["type"] == 4 and channel["name"] == "SC Companion"),
+        None,
+    )
+    award_channel = next(
+        (channel for channel in channels
+         if channel["type"] in {0, 5} and channel["name"] in {"awards", "award-announcements"}
+         and (category is None or channel.get("parent_id") == category["id"])),
+        None,
+    )
+    created = False
+    if award_channel is None:
+        if category is None:
+            category = await _discord_api(
+                "POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
+                json_payload={"name": "SC Companion", "type": 4},
+            )
+        award_channel = await _discord_api(
+            "POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
+            json_payload={
+                "name": "awards", "type": 0, "parent_id": str(category["id"]),
+                "topic": "SC Companion award announcements and recognition.",
+            },
+        )
+        created = True
+    channel_id = int(award_channel["id"])
+    settings = await state().cache.award_settings(guild_id)
+    await state().cache.save_award_settings(
+        guild_id, bool(settings.get("enabled")), settings.get("manager_role_id"), user.id, channel_id
+    )
+    return {"status": "created" if created else "associated", "channel_id": _snowflake(channel_id)}
+
+
 @app.post("/api/bot-management/guilds/{guild_id}/awards")
 async def create_award_from_dashboard(guild_id: int, payload: AwardDefinitionRequest,
                                       user=Depends(require_user)) -> dict[str, Any]:

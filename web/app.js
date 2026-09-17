@@ -1204,6 +1204,7 @@ async function loadGuildBotConfiguration(guildId) {
         ${config.modules.map((module) => `<div class="bot-feature-row" data-module-feature-key="${escapeAttribute(module.key)}">
           <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small>${module.detected_routes?.length ? `<small class="bot-detected-routes"><strong>Current Discord setup</strong>${module.detected_routes.map((route) => `<span><code>/${escapeHtml(route.command)}</code> → #${escapeHtml(route.channel_name)}</span>`).join("")}</small>` : ""}</span></label>
         </div>`).join("")}
+        ${config.awards_available ? renderAwardChannelFeature(config) : ""}
         </div><div class="bot-management-actions"><button type="submit">Save Features</button><span data-bot-management-status></span></div>
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
@@ -1226,12 +1227,38 @@ async function loadGuildBotConfiguration(guildId) {
     managementForm.querySelectorAll('[name="channel_setup_mode"]').forEach((radio) => radio.addEventListener("change", updateChannelMode));
     updateChannelMode();
     outputs.botManagement.querySelector("[data-award-settings-form]")?.addEventListener("submit", saveAwardSettings);
+    outputs.botManagement.querySelector("[data-award-channel-create]")?.addEventListener("click", createAwardChannel);
     outputs.botManagement.querySelector("[data-award-create-form]")?.addEventListener("submit", createDashboardAward);
     outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
     outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
     outputs.botManagement.querySelectorAll("[data-award-review]").forEach((button) => button.addEventListener("click", reviewDashboardAward));
   } catch (error) {
     outputs.botManagement.innerHTML = errorMessage(error.message);
+  }
+}
+
+function renderAwardChannelFeature(config) {
+  const channelId = String(config.awards?.settings?.announcement_channel_id || "");
+  const channel = config.channels.find((item) => String(item.id) === channelId);
+  return `<div class="bot-feature-row award-channel-feature">
+    <div class="bot-module-copy"><span><strong>Awards</strong><small>Create a dedicated Discord channel for award announcements. The channel is automatically selected in Award settings.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No award announcement channel is associated yet."}</small></span></div>
+    <div class="bot-management-actions"><button type="button" data-award-channel-create>${channel ? "Use or Repair Awards Channel" : "Create Awards Channel"}</button><span class="form-note" data-award-channel-status></span></div>
+  </div>`;
+}
+
+async function createAwardChannel(event) {
+  const button = event.currentTarget;
+  const status = button.parentElement.querySelector("[data-award-channel-status]");
+  const form = button.closest("[data-bot-management-form]");
+  status.textContent = "Creating and associating the channel...";
+  button.disabled = true;
+  try {
+    const result = await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/channel`, { method: "POST" });
+    status.textContent = result.status === "created" ? "Awards channel created and associated." : "Existing awards channel associated.";
+    await loadGuildBotConfiguration(form.dataset.guildId);
+  } catch (error) {
+    status.textContent = error.message;
+    button.disabled = false;
   }
 }
 

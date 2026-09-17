@@ -71,12 +71,48 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Add SC Companion to Discord" in javascript
     assert "Create an award" in javascript
     assert "Discord announcement channel" in javascript
+    assert "Create Awards Channel" in javascript
+    assert "/awards/channel" in javascript
     assert 'data-award-review' in javascript
     assert 'data-bot-management-tab="${key}"' in javascript
     assert '["setup", "Setup"]' in javascript
     assert '["features", "Features"]' in javascript
     assert '["channels", "Channel Management"]' in javascript
     assert '[["awards", "Awards"]]' in javascript
+
+
+def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
+    async def scenario() -> None:
+        cache = SimpleNamespace(
+            award_settings=AsyncMock(return_value={
+                "enabled": True, "manager_role_id": 456, "announcement_channel_id": None,
+            }),
+            save_award_settings=AsyncMock(),
+        )
+        monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
+        monkeypatch.setattr(web, "_award_dashboard_manager", AsyncMock(return_value={"id": 123}))
+        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=[
+            {"id": 800, "name": "SC Companion", "type": 4, "parent_id": None},
+        ]))
+        discord_api = AsyncMock(return_value={"id": "900", "name": "awards", "type": 0})
+        monkeypatch.setattr(web, "_discord_api", discord_api)
+        monkeypatch.setattr(web, "_public_bot_token", lambda: "public-token")
+
+        result = await web.create_award_announcement_channel(
+            123, SimpleNamespace(id=99, username="owner")
+        )
+
+        assert result == {"status": "created", "channel_id": "900"}
+        discord_api.assert_awaited_once_with(
+            "POST", "/guilds/123/channels", bot_token="public-token",
+            json_payload={
+                "name": "awards", "type": 0, "parent_id": "800",
+                "topic": "SC Companion award announcements and recognition.",
+            },
+        )
+        cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 900)
+
+    asyncio.run(scenario())
 
 
 def test_discord_ids_are_sent_to_browsers_without_number_rounding() -> None:
