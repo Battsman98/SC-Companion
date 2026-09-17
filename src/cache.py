@@ -394,73 +394,6 @@ class SQLiteCache:
         )
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS award_guild_settings (
-                guild_id INTEGER PRIMARY KEY,
-                enabled INTEGER NOT NULL DEFAULT 0,
-                manager_role_id INTEGER,
-                announcement_channel_id INTEGER,
-                configured_by INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS award_definitions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL,
-                award_type TEXT NOT NULL,
-                requirements_json TEXT NOT NULL DEFAULT '[]',
-                active INTEGER NOT NULL DEFAULT 1,
-                created_by INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                UNIQUE (guild_id, name)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS award_completion_reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id INTEGER NOT NULL,
-                award_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                user_name TEXT NOT NULL,
-                task_name TEXT NOT NULL,
-                citation TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                reviewed_by INTEGER,
-                reviewed_at INTEGER,
-                created_at INTEGER NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS award_grants (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id INTEGER NOT NULL,
-                award_id INTEGER NOT NULL,
-                recipient_id INTEGER NOT NULL,
-                recipient_name TEXT NOT NULL,
-                citation TEXT NOT NULL,
-                granted_by INTEGER NOT NULL,
-                granted_at INTEGER NOT NULL,
-                UNIQUE (guild_id, award_id, recipient_id)
-            )
-            """
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_award_reports_review ON award_completion_reports(guild_id, status, created_at)"
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_award_grants_recipient ON award_grants(guild_id, recipient_id, granted_at)"
-        )
-        connection.execute(
-            """
             CREATE TABLE IF NOT EXISTS guild_setup_leases (
                 guild_id INTEGER PRIMARY KEY,
                 holder TEXT NOT NULL,
@@ -495,7 +428,6 @@ class SQLiteCache:
         cls._ensure_column(connection, "loot_sighting_reports", "source_url", "TEXT")
         cls._ensure_column(connection, "audit_events", "action_type", "TEXT NOT NULL DEFAULT 'other'")
         cls._ensure_column(connection, "guild_bot_settings", "channel_setup_mode", "TEXT NOT NULL DEFAULT 'manual'")
-        cls._ensure_column(connection, "award_guild_settings", "announcement_channel_id", "INTEGER")
         cls._backfill_audit_action_types(connection)
         # Scanner diagnostics are transient. PostgreSQL TRUNCATE releases the
         # legacy image/TOAST allocation without needing the free space that a
@@ -527,160 +459,6 @@ class SQLiteCache:
             "updated_at": int(row[5]),
             "channel_setup_mode": str(row[6] or "manual"),
         }
-
-    async def award_settings(self, guild_id: int) -> dict[str, Any]:
-        row = self._connection.execute(
-            "SELECT enabled, manager_role_id, announcement_channel_id, configured_by, updated_at "
-            "FROM award_guild_settings WHERE guild_id = ?",
-            (guild_id,),
-        ).fetchone()
-        if row is None:
-            return {"enabled": False, "manager_role_id": None, "announcement_channel_id": None,
-                    "configured_by": None, "updated_at": None}
-        return {"enabled": bool(row[0]), "manager_role_id": int(row[1]) if row[1] else None,
-                "announcement_channel_id": int(row[2]) if row[2] else None,
-                "configured_by": int(row[3]), "updated_at": int(row[4])}
-
-    async def save_award_settings(self, guild_id: int, enabled: bool, manager_role_id: int | None,
-                                  configured_by: int, announcement_channel_id: int | None = None) -> None:
-        now = int(time.time())
-        self._connection.execute(
-            """INSERT INTO award_guild_settings
-               (guild_id, enabled, manager_role_id, announcement_channel_id, configured_by, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled,
-               manager_role_id=excluded.manager_role_id,
-               announcement_channel_id=excluded.announcement_channel_id,
-               configured_by=excluded.configured_by,
-               updated_at=excluded.updated_at""",
-            (guild_id, int(enabled), manager_role_id, announcement_channel_id, configured_by, now),
-        )
-        self._connection.commit()
-
-    async def create_award_definition(self, guild_id: int, name: str, description: str, award_type: str,
-                                      requirements: list[str], created_by: int) -> int:
-        if award_type not in {"tracker", "custom"}:
-            raise ValueError("Unknown award type")
-        now = int(time.time())
-        cursor = self._connection.execute(
-            """INSERT INTO award_definitions
-               (guild_id, name, description, award_type, requirements_json, created_by, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (guild_id, name, description, award_type, json.dumps(requirements), created_by, now, now),
-        )
-        self._connection.commit()
-        return int(cursor.lastrowid)
-
-    async def award_definition(self, guild_id: int, award_id: int) -> dict[str, Any] | None:
-        row = self._connection.execute(
-            """SELECT id, guild_id, name, description, award_type, requirements_json, active,
-                      created_by, created_at, updated_at
-               FROM award_definitions WHERE guild_id = ? AND id = ?""",
-            (guild_id, award_id),
-        ).fetchone()
-        return self._award_definition_row(row)
-
-    async def award_definitions(self, guild_id: int, *, active_only: bool = True) -> list[dict[str, Any]]:
-        suffix = " AND active = 1" if active_only else ""
-        rows = self._connection.execute(
-            """SELECT id, guild_id, name, description, award_type, requirements_json, active,
-                      created_by, created_at, updated_at
-               FROM award_definitions WHERE guild_id = ?""" + suffix + " ORDER BY LOWER(name), id",
-            (guild_id,),
-        ).fetchall()
-        return [self._award_definition_row(row) for row in rows]
-
-    @staticmethod
-    def _award_definition_row(row: Any) -> dict[str, Any] | None:
-        if row is None:
-            return None
-        return {"id": int(row[0]), "guild_id": int(row[1]), "name": str(row[2]),
-                "description": str(row[3]), "award_type": str(row[4]),
-                "requirements": json.loads(row[5]), "active": bool(row[6]),
-                "created_by": int(row[7]), "created_at": int(row[8]), "updated_at": int(row[9])}
-
-    async def update_award_definition(self, guild_id: int, award_id: int, *, name: str,
-                                      description: str, requirements: list[str], active: bool) -> bool:
-        cursor = self._connection.execute(
-            """UPDATE award_definitions SET name = ?, description = ?, requirements_json = ?, active = ?, updated_at = ?
-               WHERE guild_id = ? AND id = ?""",
-            (name, description, json.dumps(requirements), int(active), int(time.time()), guild_id, award_id),
-        )
-        self._connection.commit()
-        return bool(cursor.rowcount)
-
-    async def submit_award_report(self, guild_id: int, award_id: int, user_id: int, user_name: str,
-                                  task_name: str, citation: str) -> int:
-        cursor = self._connection.execute(
-            """INSERT INTO award_completion_reports
-               (guild_id, award_id, user_id, user_name, task_name, citation, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (guild_id, award_id, user_id, user_name, task_name, citation, int(time.time())),
-        )
-        self._connection.commit()
-        return int(cursor.lastrowid)
-
-    async def pending_award_reports(self, guild_id: int, limit: int = 20) -> list[dict[str, Any]]:
-        rows = self._connection.execute(
-            """SELECT r.id, r.award_id, d.name, r.user_id, r.user_name, r.task_name, r.citation, r.created_at
-               FROM award_completion_reports r JOIN award_definitions d ON d.id = r.award_id
-               WHERE r.guild_id = ? AND r.status = 'pending' ORDER BY r.created_at, r.id LIMIT ?""",
-            (guild_id, limit),
-        ).fetchall()
-        return [{"id": int(row[0]), "award_id": int(row[1]), "award_name": str(row[2]),
-                 "user_id": int(row[3]), "user_name": str(row[4]), "task_name": str(row[5]),
-                 "citation": str(row[6]), "created_at": int(row[7])} for row in rows]
-
-    async def review_award_report(self, guild_id: int, report_id: int, status: str,
-                                  reviewer_id: int) -> dict[str, Any] | None:
-        if status not in {"approved", "rejected"}:
-            raise ValueError("Unknown review status")
-        row = self._connection.execute(
-            "SELECT award_id, user_id, user_name, citation FROM award_completion_reports "
-            "WHERE guild_id = ? AND id = ? AND status = 'pending'",
-            (guild_id, report_id),
-        ).fetchone()
-        if row is None:
-            return None
-        self._connection.execute(
-            "UPDATE award_completion_reports SET status = ?, reviewed_by = ?, reviewed_at = ? "
-            "WHERE guild_id = ? AND id = ? AND status = 'pending'",
-            (status, reviewer_id, int(time.time()), guild_id, report_id),
-        )
-        self._connection.commit()
-        return {"award_id": int(row[0]), "user_id": int(row[1]), "user_name": str(row[2]),
-                "citation": str(row[3]), "status": status}
-
-    async def approved_award_tasks(self, guild_id: int, award_id: int, user_id: int) -> set[str]:
-        rows = self._connection.execute(
-            "SELECT task_name FROM award_completion_reports WHERE guild_id = ? AND award_id = ? "
-            "AND user_id = ? AND status = 'approved'",
-            (guild_id, award_id, user_id),
-        ).fetchall()
-        return {str(row[0]).casefold() for row in rows}
-
-    async def grant_award(self, guild_id: int, award_id: int, recipient_id: int, recipient_name: str,
-                          citation: str, granted_by: int) -> bool:
-        cursor = self._connection.execute(
-            """INSERT INTO award_grants
-               (guild_id, award_id, recipient_id, recipient_name, citation, granted_by, granted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(guild_id, award_id, recipient_id) DO NOTHING""",
-            (guild_id, award_id, recipient_id, recipient_name, citation, granted_by, int(time.time())),
-        )
-        self._connection.commit()
-        return bool(cursor.rowcount)
-
-    async def member_awards(self, guild_id: int, recipient_id: int) -> list[dict[str, Any]]:
-        rows = self._connection.execute(
-            """SELECT g.id, g.award_id, d.name, d.description, g.citation, g.granted_by, g.granted_at
-               FROM award_grants g JOIN award_definitions d ON d.id = g.award_id
-               WHERE g.guild_id = ? AND g.recipient_id = ? ORDER BY g.granted_at DESC, g.id DESC""",
-            (guild_id, recipient_id),
-        ).fetchall()
-        return [{"id": int(row[0]), "award_id": int(row[1]), "name": str(row[2]),
-                 "description": str(row[3]), "citation": str(row[4]),
-                 "granted_by": int(row[5]), "granted_at": int(row[6])} for row in rows]
 
     async def save_guild_bot_settings(
         self,
@@ -830,10 +608,6 @@ class SQLiteCache:
         guild_prefix = f"guild:{guild_id}:%"
         guild_suffix = f"%:guild:{guild_id}"
         statements = (
-            ("DELETE FROM award_grants WHERE guild_id = ?", (guild_id,)),
-            ("DELETE FROM award_completion_reports WHERE guild_id = ?", (guild_id,)),
-            ("DELETE FROM award_definitions WHERE guild_id = ?", (guild_id,)),
-            ("DELETE FROM award_guild_settings WHERE guild_id = ?", (guild_id,)),
             ("DELETE FROM guild_bot_settings WHERE guild_id = ?", (guild_id,)),
             ("DELETE FROM user_managed_guilds WHERE guild_id = ?", (guild_id,)),
             ("DELETE FROM feedback_ticket_mirrors WHERE origin_guild_id = ?", (guild_id,)),

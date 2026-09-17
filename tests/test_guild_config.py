@@ -67,9 +67,6 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert 'api("/api/bot-management/guilds")' in javascript
     assert "Save Bot Settings" in javascript
     assert "Add SC Companion to Discord" in javascript
-    assert "Create an award" in javascript
-    assert "Discord announcement channel" in javascript
-    assert 'data-award-review' in javascript
 
 
 def test_discord_ids_are_sent_to_browsers_without_number_rounding() -> None:

@@ -1187,7 +1187,7 @@ async function loadGuildBotConfiguration(guildId) {
         </div>`).join("")}
       </div>
       <div class="bot-management-actions"><button type="submit">Save Bot Settings</button><span data-bot-management-status>${config.setup_source === "detected" ? "Existing Discord setup found. Review it before saving changes." : config.configured ? "Saved settings loaded." : "Choose modules, then save to complete setup."}</span></div>
-    </form>${config.awards_available ? renderAwardManagement(config) : ""}`;
+    </form>`;
     outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
     const managementForm = outputs.botManagement.querySelector("[data-bot-management-form]");
     const updateChannelMode = () => {
@@ -1199,11 +1199,6 @@ async function loadGuildBotConfiguration(guildId) {
     };
     managementForm.querySelectorAll('[name="channel_setup_mode"]').forEach((radio) => radio.addEventListener("change", updateChannelMode));
     updateChannelMode();
-    outputs.botManagement.querySelector("[data-award-settings-form]")?.addEventListener("submit", saveAwardSettings);
-    outputs.botManagement.querySelector("[data-award-create-form]")?.addEventListener("submit", createDashboardAward);
-    outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
-    outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
-    outputs.botManagement.querySelectorAll("[data-award-review]").forEach((button) => button.addEventListener("click", reviewDashboardAward));
   } catch (error) {
     outputs.botManagement.innerHTML = errorMessage(error.message);
   }
@@ -1925,92 +1920,6 @@ function closeDiscordConsole() {
   if (ticketRefreshTimer) window.clearInterval(ticketRefreshTimer);
   ticketRefreshTimer = null;
   document.body.classList.remove("feedback-modal-open");
-}
-
-function renderAwardManagement(config) {
-  const awards = config.awards || { settings: {}, definitions: [], pending_reports: [], roles: [] };
-  const settings = awards.settings || {};
-  const roleOptions = ['<option value="">Server owner only</option>', ...(awards.roles || []).map((role) => `<option value="${role.id}" ${String(settings.manager_role_id || "") === String(role.id) ? "selected" : ""}>${escapeHtml(role.name)}</option>`)].join("");
-  const channelOptions = ['<option value="">No Discord announcements</option>', ...config.channels.filter((channel) => [0, 5].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(settings.announcement_channel_id || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`)].join("");
-  const definitions = awards.definitions || [];
-  const customAwards = definitions.filter((award) => award.award_type === "custom" && award.active);
-  return `<section class="bot-award-management" data-award-management data-guild-id="${config.guild.id}">
-    <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Awards</h3><p>Create contract trackers and custom awards, review reports, and announce recipients in Discord.</p></div>
-    <form data-award-settings-form class="tool-card"><h4>Award settings</h4>
-      <label><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}> Enable the optional award system</label>
-      <div class="field-row"><label>Manager role<select name="manager_role_id">${roleOptions}</select></label><label>Discord announcement channel<select name="announcement_channel_id">${channelOptions}</select></label></div>
-      <button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span>
-    </form>
-    <form data-award-create-form class="tool-card"><h4>Create an award</h4>
-      <div class="field-row"><label>Name<input name="name" maxlength="80" required></label><label>Type<select name="award_type"><option value="tracker">Tracked contracts/tasks</option><option value="custom">Custom award</option></select></label></div>
-      <label>Description<textarea name="description" maxlength="500" rows="3" required></textarea></label>
-      <label>Tracker tasks or contracts<textarea name="requirements" rows="3" placeholder="One per line; leave empty for custom awards"></textarea></label>
-      <button type="submit">Create Award</button><span class="form-note" data-award-status></span>
-    </form>
-    <div class="bot-module-list"><h4>Existing awards</h4>${definitions.length ? definitions.map((award) => `<form data-award-edit-form data-award-id="${award.id}" class="bot-module-row">
-      <div class="bot-module-copy"><strong>#${award.id} · ${escapeHtml(award.name)}</strong><small>${escapeHtml(award.award_type === "tracker" ? "Tracked award" : "Custom award")}</small></div>
-      <div><label>Name<input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required></label><label>Description<textarea name="description" maxlength="500" rows="2" required>${escapeHtml(award.description)}</textarea></label><label>Requirements<textarea name="requirements" rows="3" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea></label><label><input type="checkbox" name="active" ${award.active ? "checked" : ""}> Active</label><button type="submit">Save Award</button><span data-award-status></span></div>
-    </form>`).join("") : '<div class="state">No awards created yet.</div>'}</div>
-    <div class="tool-card"><h4>Completion reports</h4>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
-    <form data-award-grant-form class="tool-card"><h4>Grant a custom award</h4>
-      <div class="field-row"><label>Custom award<select name="award_id" required><option value="">Choose an award...</option>${customAwards.map((award) => `<option value="${award.id}">${escapeHtml(award.name)}</option>`).join("")}</select></label><label>Discord member ID<input name="member_id" inputmode="numeric" pattern="[0-9]+" required></label></div>
-      <label>Citation<textarea name="citation" maxlength="280" rows="3" required></textarea></label>
-      <button type="submit" ${customAwards.length ? "" : "disabled"}>Grant and Announce</button><span class="form-note" data-award-status></span>
-    </form>
-  </section>`;
-}
-
-function awardRequirements(value) {
-  return [...new Set(String(value || "").split(/[;|\n]+/).map((item) => item.trim()).filter(Boolean))];
-}
-
-async function awardDashboardRequest(form, path, method, body) {
-  const section = form.closest("[data-award-management]");
-  const status = form.querySelector("[data-award-status]");
-  if (status) status.textContent = "Saving...";
-  try {
-    await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/awards${path}`, { method, body });
-    await loadGuildBotConfiguration(section.dataset.guildId);
-  } catch (error) {
-    if (status) status.textContent = error.message;
-  }
-}
-
-async function saveAwardSettings(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  await awardDashboardRequest(form, "/settings", "PUT", { enabled: form.elements.enabled.checked, manager_role_id: form.elements.manager_role_id.value || null, announcement_channel_id: form.elements.announcement_channel_id.value || null });
-}
-
-async function createDashboardAward(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  await awardDashboardRequest(form, "", "POST", { name: form.elements.name.value, description: form.elements.description.value, award_type: form.elements.award_type.value, requirements: awardRequirements(form.elements.requirements.value) });
-}
-
-async function editDashboardAward(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements: awardRequirements(form.elements.requirements.value), active: form.elements.active.checked });
-}
-
-async function reviewDashboardAward(event) {
-  const button = event.currentTarget;
-  const section = button.closest("[data-award-management]");
-  button.disabled = true;
-  try {
-    await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/awards/reports/${button.dataset.reportId}`, { method: "POST", body: { decision: button.dataset.decision } });
-    await loadGuildBotConfiguration(section.dataset.guildId);
-  } catch (error) {
-    button.disabled = false;
-    window.alert(error.message);
-  }
-}
-
-async function grantDashboardAward(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  await awardDashboardRequest(form, "/grants", "POST", { award_id: Number(form.elements.award_id.value), member_id: form.elements.member_id.value, citation: form.elements.citation.value });
 }
 
 async function refreshDiscordConsole() {
