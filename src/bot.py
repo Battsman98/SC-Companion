@@ -76,6 +76,8 @@ LOOT_CHANNEL_ID = 1533075933441822830
 FEEDBACK_TEMPLATE_CACHE_PREFIX = "discord:feedback-template-thread"
 VISITOR_ROLE_NAME = "Visitor"
 BOT_MANAGER_ROLE_NAME = "Bot Manager"
+SC_COMPANION_CATEGORY_NAME = "🚀 SC COMPANION"
+LEGACY_SC_COMPANION_CATEGORY_NAME = "SC Companion"
 VISITOR_CATEGORY_NAME = "SC Companion Hub"
 LEGACY_VISITOR_CATEGORY_NAMES = {"Visitor Bot Hub", "Discord Bot Hub"}
 REMOVED_VISITOR_ARCHIVE_CATEGORY_NAME = "Bot Hub Archive"
@@ -97,6 +99,22 @@ WEBSITE_HEALTH_URL = os.getenv(
     "WEBSITE_HEALTH_URL",
     "https://star-citizen-game-assist.onrender.com/api/health",
 ).strip()
+
+
+def sc_companion_category(guild: discord.Guild) -> discord.CategoryChannel | None:
+    """Prefer the branded category while still accepting older installations."""
+    preferred = discord.utils.find(
+        lambda item: item.name.casefold() == SC_COMPANION_CATEGORY_NAME.casefold(),
+        guild.categories,
+    )
+    if preferred is not None:
+        return preferred
+    return discord.utils.find(
+        lambda item: item.name.casefold() == LEGACY_SC_COMPANION_CATEGORY_NAME.casefold(),
+        guild.categories,
+    )
+
+
 VISITOR_CHANNEL_SPECS = {
     "member-applications": "text",
     "ship-search": "text",
@@ -1255,6 +1273,7 @@ class GameAssistBot(commands.Bot):
             await asyncio.sleep(60)
 
     async def ensure_about_panel(self, guild: discord.Guild) -> None:
+        await self._remove_legacy_sc_companion_category(guild)
         if (
             self.settings.runtime_profile == "public"
             and guild.id == self.settings.discord_support_guild_id
@@ -1274,13 +1293,39 @@ class GameAssistBot(commands.Bot):
             finally:
                 await self.cache.release_guild_setup_lease(guild.id, holder)
 
+    async def _remove_legacy_sc_companion_category(self, guild: discord.Guild) -> None:
+        """Remove the obsolete duplicate after the rocket category is available."""
+        if (
+            self.settings.runtime_profile != "peep"
+            or guild.me is None
+            or not guild.me.guild_permissions.manage_channels
+        ):
+            return
+        preferred = discord.utils.find(
+            lambda item: item.name.casefold() == SC_COMPANION_CATEGORY_NAME.casefold(),
+            guild.categories,
+        )
+        if preferred is None:
+            return
+        legacy_categories = [
+            item for item in guild.categories
+            if item.id != preferred.id
+            and item.name.casefold() == LEGACY_SC_COMPANION_CATEGORY_NAME.casefold()
+        ]
+        for category in legacy_categories:
+            for channel in list(category.channels):
+                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await channel.delete(reason="Remove obsolete duplicate SC Companion category")
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await category.delete(reason="Remove obsolete duplicate SC Companion category")
+
     async def ensure_sc_companion_support_resources(self, guild: discord.Guild) -> None:
         """Finish Peep's SC Companion command area without touching test guilds."""
         if guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
-        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+        category = sc_companion_category(guild)
         if category is None:
-            category = await guild.create_category("SC Companion", reason="Repair Peep SC Companion area")
+            category = await guild.create_category(SC_COMPANION_CATEGORY_NAME, reason="Repair Peep SC Companion area")
 
         channels: dict[str, discord.TextChannel] = {}
         for module_key in ("trade_tools", "timers"):
@@ -1333,9 +1378,9 @@ class GameAssistBot(commands.Bot):
         if guild.me is None or not guild.me.guild_permissions.manage_channels:
             logging.warning("Manage Channels is required to create the About page in guild %s", guild.id)
             return
-        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+        category = sc_companion_category(guild)
         if category is None:
-            category = await guild.create_category("SC Companion", reason="Set up SC Companion channels")
+            category = await guild.create_category(SC_COMPANION_CATEGORY_NAME, reason="Set up SC Companion channels")
         tracked_channel_id = await self.cache.get(f"guild:{guild.id}:about-channel")
         channel = guild.get_channel(tracked_channel_id) if isinstance(tracked_channel_id, int) else None
         if not isinstance(channel, discord.TextChannel):
@@ -1455,7 +1500,7 @@ class GameAssistBot(commands.Bot):
         configured = await self.cache.guild_bot_settings(guild.id)
         if configured is None or guild.me is None:
             return
-        category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+        category = sc_companion_category(guild)
         standard_channel_names = {key.replace("_", "-") for key in BOT_MODULES}
         existing_standard_channels = {
             channel.name for channel in guild.text_channels
@@ -1475,7 +1520,7 @@ class GameAssistBot(commands.Bot):
             return
         modules = normalize_module_settings(configured.get("modules"))
         if category is None:
-            category = await guild.create_category("SC Companion", reason="Set up SC Companion feature channels")
+            category = await guild.create_category(SC_COMPANION_CATEGORY_NAME, reason="Set up SC Companion feature channels")
         changed = False
         for key, item in modules.items():
             if not item["enabled"]:
@@ -1560,9 +1605,9 @@ class GameAssistBot(commands.Bot):
         ) or guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
         if category is None:
-            category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+            category = sc_companion_category(guild)
             if category is None:
-                category = await guild.create_category("SC Companion", reason="Set up SC Companion channels")
+                category = await guild.create_category(SC_COMPANION_CATEGORY_NAME, reason="Set up SC Companion channels")
         forum_cache_key = f"guild:{guild.id}:sc-companion-feedback-forum"
         tracked_forum_id = await self.cache.get(forum_cache_key)
         forum = guild.get_channel(tracked_forum_id) if isinstance(tracked_forum_id, int) else None
@@ -1779,7 +1824,11 @@ class GameAssistBot(commands.Bot):
         """Publish normal command guides in Peep's SC Companion feature channels."""
         if guild.me is None:
             return
-        peep_category_names = {"SC Companion", VISITOR_CATEGORY_NAME}
+        peep_category_names = {
+            SC_COMPANION_CATEGORY_NAME,
+            LEGACY_SC_COMPANION_CATEGORY_NAME,
+            VISITOR_CATEGORY_NAME,
+        }
         channels = [
             channel for channel in guild.text_channels
             if channel.category is not None and channel.category.name in peep_category_names
@@ -2278,7 +2327,7 @@ class GameAssistBot(commands.Bot):
         automatic_names = {
             key.replace("_", "-") for key, item in modules.items() if item["enabled"]
         }
-        automatic_names.update({"SC Companion", "marketplace"})
+        automatic_names.update({SC_COMPANION_CATEGORY_NAME, LEGACY_SC_COMPANION_CATEGORY_NAME, "marketplace"})
         return channel.id in automatic_ids or channel.name in automatic_names
 
     def _schedule_shared_channel_recovery(
@@ -4187,7 +4236,7 @@ def _automatic_module_channel_id(guild: discord.Guild | None, module_key: str) -
     if guild is None:
         return None
     expected_name = module_key.replace("_", "-")
-    category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+    category = sc_companion_category(guild)
     channel = discord.utils.find(
         lambda item: item.name == expected_name
         and (category is None or item.category_id == category.id),
@@ -6584,7 +6633,7 @@ class ConfirmBotUninstallView(discord.ui.View):
         await bot.cache.record_guild_installation(guild.id, guild.name, guild.member_count, active=False)
         await bot.cache.purge_guild_data(guild.id)
         if automatic:
-            category = discord.utils.find(lambda item: item.name == "SC Companion", guild.categories)
+            category = sc_companion_category(guild)
             cleanup_ids = automatic_cleanup_channel_ids(modules)
             cleanup_names = automatic_cleanup_channel_names(modules)
             if category is not None:

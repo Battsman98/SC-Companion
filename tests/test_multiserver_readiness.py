@@ -19,6 +19,7 @@ from src.bot import (
     timer_dashboard_channel_id,
     automatic_cleanup_channel_ids,
     automatic_cleanup_channel_names,
+    sc_companion_category,
 )
 from src.cache import SQLiteCache
 from src.guild_config import BOT_MODULES, module_for_command
@@ -41,6 +42,14 @@ def test_automatic_setup_resolves_each_feature_to_its_own_channel() -> None:
     assert _automatic_module_channel_id(guild, "ship_search") == 101
     assert _automatic_module_channel_id(guild, "mining_tools") == 102
     assert _automatic_module_channel_id(guild, "timers") is None
+
+
+def test_sc_companion_category_prefers_rocket_category_over_legacy_duplicate() -> None:
+    legacy = SimpleNamespace(id=49, name="SC Companion")
+    rocket = SimpleNamespace(id=50, name="🚀 SC COMPANION")
+    guild = SimpleNamespace(categories=[legacy, rocket])
+
+    assert sc_companion_category(guild) is rocket
 
 
 def test_mining_tools_are_visible_and_complete() -> None:
@@ -82,7 +91,7 @@ def test_shared_channels_wait_for_setup_and_use_sc_companion_category() -> None:
     feedback_source = inspect.getsource(GameAssistBot.ensure_guild_feedback_forum)
 
     assert "if configured is None" in about_source
-    assert 'item.name == "SC Companion"' in about_source
+    assert "sc_companion_category(guild)" in about_source
     assert '"about-the-bot", category=category' in about_source
     assert '"feedback-and-issues"' in feedback_source
     assert "category=category" in feedback_source
