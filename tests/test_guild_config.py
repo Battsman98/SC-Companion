@@ -78,6 +78,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "All enabled feature channels are being created or repaired" in javascript
     assert "Screenshot-backed applications for Star Citizen reputation givers and levels." in javascript
     assert "Create reviewer role" in javascript
+    assert "Create manager role" in javascript
+    assert "SC Companion creates or reuses the Award Manager role." in javascript
     assert "rep giver, current level, and screenshot" in javascript
     assert "Only this role, server administrators, and SC Companion can see applications." in javascript
     assert "Private application queue configured." in javascript
@@ -157,6 +159,37 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
             "name": "🏆 AWARDS", "type": 4,
         }
         cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 904)
+
+    asyncio.run(scenario())
+
+
+def test_award_settings_can_create_and_assign_a_manager_role(monkeypatch) -> None:
+    async def scenario() -> None:
+        cache = SimpleNamespace(save_award_settings=AsyncMock())
+        monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
+        monkeypatch.setattr(web, "_award_dashboard_manager", AsyncMock(return_value={"id": 123}))
+        monkeypatch.setattr(web, "_discord_guild_roles", AsyncMock(return_value=[]))
+        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=[]))
+        discord_api = AsyncMock(return_value={"id": "456", "name": "Award Manager", "managed": False})
+        monkeypatch.setattr(web, "_discord_api", discord_api)
+        monkeypatch.setattr(web, "_public_bot_token", lambda: "public-token")
+
+        result = await web.save_award_dashboard_settings(
+            123,
+            web.AwardSettingsRequest(
+                enabled=True,
+                announcement_channel_id=None,
+                auto_create_role=True,
+            ),
+            SimpleNamespace(id=99, username="owner"),
+        )
+
+        assert result["manager_role_id"] == "456"
+        discord_api.assert_awaited_once_with(
+            "POST", "/guilds/123/roles", bot_token="public-token",
+            json_payload={"name": "Award Manager", "mentionable": True},
+        )
+        cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, None)
 
     asyncio.run(scenario())
 

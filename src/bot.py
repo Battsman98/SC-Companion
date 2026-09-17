@@ -6666,6 +6666,35 @@ class AwardAdminView(discord.ui.View):
             f"Award system {'enabled' if not settings['enabled'] else 'disabled'}.", ephemeral=True
         )
 
+    @discord.ui.button(label="Create Manager Role", style=discord.ButtonStyle.secondary, emoji="👥", row=0)
+    async def create_manager_role(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None or not _award_test_guild(interaction, bot):
+            await interaction.response.send_message("Awards are limited to the testing Discord.", ephemeral=True)
+            return
+        if interaction.guild.owner_id != interaction.user.id:
+            await interaction.response.send_message("Only the server owner can create the award manager role.", ephemeral=True)
+            return
+        if interaction.guild.me is None or not interaction.guild.me.guild_permissions.manage_roles:
+            await interaction.response.send_message("SC Companion needs Manage Roles permission first.", ephemeral=True)
+            return
+        role = discord.utils.find(lambda item: item.name.casefold() == "award manager" and not item.managed,
+                                  interaction.guild.roles)
+        if role is None:
+            role = await interaction.guild.create_role(
+                name="Award Manager", mentionable=True, reason="SC Companion award manager setup"
+            )
+        settings = await bot.cache.award_settings(interaction.guild.id)
+        await bot.cache.save_award_settings(
+            interaction.guild.id, settings["enabled"], role.id, interaction.user.id,
+            settings.get("announcement_channel_id"),
+        )
+        await interaction.response.send_message(
+            f"Award managers set to {role.mention}. Assign that role to the members who should manage awards.",
+            ephemeral=True,
+        )
+
     @discord.ui.button(label="Create Awards Category", style=discord.ButtonStyle.secondary, row=0)
     async def create_channel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button

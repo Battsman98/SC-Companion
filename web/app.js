@@ -2106,7 +2106,11 @@ function renderAwardManagement(config) {
   return `<section class="bot-award-management" data-award-management data-guild-id="${config.guild.id}" data-enabled="${settings.enabled ? "true" : "false"}">
     <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Awards</h3><p>Create contract trackers and custom awards, review reports, and announce recipients in Discord.</p></div>
     <form data-award-settings-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Award settings</h4><p>Control who manages awards and where earned awards are announced.</p></div></div>
-      <div class="award-field-grid"><label><span>Who can manage awards?</span><select name="manager_role_id">${roleOptions}</select><small>The server owner always has access.</small></label><label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create or repair the Awards & Progress category from the Features tab if needed.</small></label></div>
+      <div class="reputation-reviewer-row">
+        <label class="award-toggle reputation-role-toggle"><input type="checkbox" name="auto_create_role"><span><strong>Create manager role</strong><small>SC Companion creates or reuses the Award Manager role.</small></span></label>
+        <label class="reputation-role-field"><span>Or choose an existing role</span><select name="manager_role_id">${roleOptions}</select><small>The server owner always has access.</small></label>
+      </div>
+      <label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create or repair the Awards category from the Features tab if needed.</small></label>
       <div class="award-form-actions"><button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span></div>
     </form>
     <form data-award-create-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Create an award</h4><p>Add requirements for a tracked award, or leave them blank for a custom recognition such as Good Conduct or Bro Award.</p></div></div>
@@ -2149,7 +2153,7 @@ async function saveAwardSettings(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const section = form.closest("[data-award-management]");
-  await awardDashboardRequest(form, "/settings", "PUT", { enabled: section.dataset.enabled === "true", manager_role_id: form.elements.manager_role_id.value || null, announcement_channel_id: form.elements.announcement_channel_id.value || null });
+  await awardDashboardRequest(form, "/settings", "PUT", { enabled: section.dataset.enabled === "true", manager_role_id: form.elements.manager_role_id.value || null, announcement_channel_id: form.elements.announcement_channel_id.value || null, auto_create_role: form.elements.auto_create_role.checked });
 }
 
 async function createDashboardAward(event) {

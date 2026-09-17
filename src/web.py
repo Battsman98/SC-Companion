@@ -376,6 +376,7 @@ class AwardSettingsRequest(BaseModel):
     enabled: bool
     manager_role_id: int | None = None
     announcement_channel_id: int | None = None
+    auto_create_role: bool = False
 
 
 class ReputationSettingsRequest(BaseModel):
@@ -1344,20 +1345,30 @@ def _clean_award_requirements(requirements: list[str], award_type: str) -> list[
 
 @app.put("/api/bot-management/guilds/{guild_id}/awards/settings")
 async def save_award_dashboard_settings(guild_id: int, payload: AwardSettingsRequest,
-                                        user=Depends(require_user)) -> dict[str, str]:
+                                        user=Depends(require_user)) -> dict[str, Any]:
     await _award_dashboard_manager(guild_id, user)
     roles = await _discord_guild_roles(guild_id)
     valid_roles = {role["id"] for role in roles if not role["managed"]}
+    manager_role_id = payload.manager_role_id
+    if payload.auto_create_role:
+        role = next((item for item in roles
+                     if item["name"].casefold() == "award manager" and not item["managed"]), None)
+        if role is None:
+            role = await _discord_api(
+                "POST", f"/guilds/{guild_id}/roles", bot_token=_public_bot_token(),
+                json_payload={"name": "Award Manager", "mentionable": True},
+            )
+        manager_role_id = int(role["id"])
     channels = await _discord_guild_channels(guild_id)
     valid_channels = {channel["id"] for channel in channels if channel["type"] in {0, 5}}
-    if payload.manager_role_id is not None and payload.manager_role_id not in valid_roles:
+    if manager_role_id is not None and manager_role_id not in valid_roles and not payload.auto_create_role:
         raise HTTPException(status_code=422, detail="The selected award-manager role is unavailable.")
     if payload.announcement_channel_id is not None and payload.announcement_channel_id not in valid_channels:
         raise HTTPException(status_code=422, detail="The selected announcement channel is unavailable.")
     await state().cache.save_award_settings(
-        guild_id, payload.enabled, payload.manager_role_id, user.id, payload.announcement_channel_id
+        guild_id, payload.enabled, manager_role_id, user.id, payload.announcement_channel_id
     )
-    return {"status": "saved"}
+    return {"status": "saved", "manager_role_id": _snowflake(manager_role_id)}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards/channel")
