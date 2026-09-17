@@ -1289,70 +1289,17 @@ class GameAssistBot(commands.Bot):
                 await self.cache.release_guild_setup_lease(guild.id, holder)
 
     async def ensure_sc_companion_support_resources(self, guild: discord.Guild) -> None:
-        """Finish Peep's SC Companion command area without touching test guilds."""
+        """Remove the retired public-bot category from Peep without provisioning replacements."""
         if guild.me is None or not guild.me.guild_permissions.manage_channels:
             return
-        matching_categories = [
-            item for item in guild.categories if item.name.casefold() in SC_COMPANION_CATEGORY_ALIASES
-        ]
-        category = next((item for item in matching_categories if item.name == SC_COMPANION_CATEGORY_NAME), None)
-        if category is None and matching_categories:
-            category = matching_categories[0]
-        if category is None:
-            category = await guild.create_category(SC_COMPANION_CATEGORY_NAME, reason="Repair Peep SC Companion area")
-        elif category.name != SC_COMPANION_CATEGORY_NAME:
-            await category.edit(name=SC_COMPANION_CATEGORY_NAME, reason="Add SC Companion category emblem")
-        for duplicate in matching_categories:
-            if duplicate.id == category.id:
-                continue
-            for channel in list(duplicate.channels):
-                await channel.edit(
-                    category=category, sync_permissions=False,
-                    reason="Merge duplicate SC Companion category without deleting content",
-                )
-            await duplicate.delete(reason="Remove empty duplicate SC Companion category")
-
-        channels: dict[str, discord.TextChannel] = {}
-        for module_key in ("trade_tools", "timers"):
-            channel_name = module_key.replace("_", "-")
-            channel = discord.utils.find(
-                lambda item, name=channel_name: item.name == name and item.category_id == category.id,
-                guild.text_channels,
-            )
-            if channel is None:
-                channel = await guild.create_text_channel(
-                    channel_name,
-                    category=category,
-                    topic=f"SC Companion {BOT_MODULES[module_key]['label']} commands and examples.",
-                    reason="Finish Peep SC Companion command area",
-                )
-            channels[module_key] = channel
-
-        forum = discord.utils.find(
-            lambda item: item.name == "marketplace" and item.category_id == category.id,
-            guild.forums,
-        )
-        if forum is None:
-            forum = await guild.create_forum(
-                "marketplace",
-                category=category,
-                topic=TRADING_FORUM_TOPIC,
-                reason="Finish Peep SC Companion marketplace",
-            )
-        try:
-            await self.configure_marketplace_forum(
-                forum,
-                channels["trade_tools"].id,
-                cache_namespace="sc-companion",
-            )
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException, RuntimeError):
-            # Do not let a transient forum failure prevent the Timers and Trade
-            # Tools command guides from being repaired during this pass.
-            logging.exception("Could not finish Peep SC Companion marketplace in guild %s", guild.id)
-        try:
-            await self.ensure_guild_feedback_forum(guild, category)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException, RuntimeError):
-            logging.exception("Could not repair SC Companion feedback forum in guild %s", guild.id)
+        retired_categories = [item for item in guild.categories if item.name == "SC Companion"]
+        for retired in retired_categories:
+            for channel in list(retired.channels):
+                await channel.delete(reason="Remove retired SC Companion public-bot channel from Peep")
+            await retired.delete(reason="Remove retired SC Companion public-bot category from Peep")
+        # Peep owns all home-server resources. The public worker must never
+        # recreate channels or categories in this Discord after cleanup.
+        return
 
     async def _ensure_about_panel(self, guild: discord.Guild) -> None:
         configured = await self.cache.guild_bot_settings(guild.id)
@@ -7193,7 +7140,7 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
         await interaction.response.send_message("Reputation tracking is limited to the SC Companion testing Discord.", ephemeral=True)
         return
     settings = await bot.cache.get(_reputation_settings_key(interaction.guild.id)) or {}
-    if not settings.get("enabled") or not settings.get("submission_forum_id"):
+    if not settings.get("enabled") or not settings.get("submission_channel_id"):
         await interaction.response.send_message("The Reputation Progress Tracker is not configured yet.", ephemeral=True)
         return
     if not (screenshot.content_type or "").startswith("image/"):
@@ -7203,23 +7150,35 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
     if not giver or len(giver) > 80 or not rep_level or len(rep_level) > 80:
         await interaction.response.send_message("Rep giver and level must each be 1-80 characters.", ephemeral=True)
         return
-    forum = interaction.guild.get_channel(int(settings["submission_forum_id"]))
-    if not isinstance(forum, discord.ForumChannel):
-        await interaction.response.send_message("The configured reputation submission forum is unavailable.", ephemeral=True)
+    channel = interaction.guild.get_channel(int(settings["submission_channel_id"]))
+    if not isinstance(channel, discord.TextChannel):
+        await interaction.response.send_message("The private reputation application queue is unavailable.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     reviewer_role_id = settings.get("reviewer_role_id")
-    mention = f"<@&{reviewer_role_id}>\n" if reviewer_role_id else ""
+    if not reviewer_role_id:
+        await interaction.followup.send("No reputation reviewer role is configured.", ephemeral=True)
+        return
     file = await screenshot.to_file()
-    thread = await forum.create_thread(
-        name=f"{giver} - {rep_level} - {interaction.user.display_name}"[:100],
-        content=(f"{mention}**Rep giver:** {giver}\n**Level:** {rep_level}\n"
-                 f"**Submitted by:** <@{interaction.user.id}>\n**Screenshot:** attached"),
+    embed = discord.Embed(
+        title="Reputation progress application",
+        description="A member submitted reputation progress for reviewer approval.",
+        color=discord.Color.blurple(),
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.add_field(name="Applicant", value=f"<@{interaction.user.id}>", inline=False)
+    embed.add_field(name="Reputation giver", value=giver, inline=True)
+    embed.add_field(name="Current level", value=rep_level, inline=True)
+    embed.set_image(url=f"attachment://{file.filename}")
+    await channel.send(
+        content=f"<@&{reviewer_role_id}>",
+        embed=embed,
         file=file,
         allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
-        reason="SC Companion reputation progress submission",
     )
-    await interaction.followup.send(f"Reputation submission created: {thread.thread.mention}", ephemeral=True)
+    await interaction.followup.send(
+        "Your reputation application was submitted privately for reviewer approval.", ephemeral=True
+    )
 
 
 @award_group.command(name="configure", description="Enable awards and choose the role that can manage them.")
