@@ -3965,19 +3965,38 @@ class GameAssistBot(commands.Bot):
             if not isinstance(channel, discord.TextChannel):
                 continue
             cache_key = f"discord:visitor-example:{channel.id}"
-            message_id = await self.cache.get(cache_key)
-            message = None
-            if isinstance(message_id, int):
-                with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    message = await channel.fetch_message(message_id)
-            if message is None:
-                message = await self.find_recent_embed_message(channel, embed.title or "")
-            if message:
-                await message.edit(content=None, embed=embed)
+            if channel_name == "timers":
+                await self._sync_timer_command_example(channel, cache_key, embed)
+                await self._ensure_timer_dashboard_below_example(channel_name, channel)
             else:
-                message = await channel.send(embed=embed, silent=True)
-            await self.cache.set(cache_key, message.id, 315360000)
-            await self._ensure_timer_dashboard_below_example(channel_name, channel)
+                await self._sync_singleton_embed(
+                    channel,
+                    cache_key,
+                    embed,
+                    silent=True,
+                    clear_content=True,
+                    history_limit=50,
+                )
+
+    async def _sync_timer_command_example(
+        self,
+        channel: discord.TextChannel,
+        cache_key: str,
+        embed: discord.Embed,
+    ) -> None:
+        """Preserve the ordering-aware timer example workflow until dashboards migrate."""
+        message_id = await self.cache.get(cache_key)
+        message = None
+        if isinstance(message_id, int):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                message = await channel.fetch_message(message_id)
+        if message is None:
+            message = await self.find_recent_embed_message(channel, embed.title or "")
+        if message:
+            await message.edit(content=None, embed=embed)
+        else:
+            message = await channel.send(embed=embed, silent=True)
+        await self.cache.set(cache_key, message.id, 315360000)
 
     async def sync_loot_command_example(self) -> None:
         channel = self.get_channel(LOOT_CHANNEL_ID)

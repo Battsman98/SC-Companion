@@ -144,3 +144,16 @@ def test_visitor_welcome_uses_singleton_embed_helper() -> None:
     assert "history_limit=250" in source
     assert "silent=True" not in source
     assert "delete_recent_duplicate_embed_messages" not in source
+
+
+def test_ordinary_visitor_examples_use_singleton_helper_but_timers_stay_separate() -> None:
+    source = inspect.getsource(GameAssistBot.sync_visitor_command_examples)
+    timer_source = inspect.getsource(GameAssistBot._sync_timer_command_example)
+
+    assert 'if channel_name == "timers"' in source
+    assert "_sync_timer_command_example" in source
+    assert "_sync_singleton_embed" in source
+    assert "silent=True" in source
+    assert "clear_content=True" in source
+    assert "_ensure_timer_dashboard_below_example" in source
+    assert "_sync_singleton_embed" not in timer_source
