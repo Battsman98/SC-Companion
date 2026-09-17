@@ -1230,6 +1230,18 @@ async function loadGuildBotConfiguration(guildId) {
     outputs.botManagement.querySelector("[data-award-channel-create]")?.addEventListener("click", createAwardChannel);
     const awardCreateForm = outputs.botManagement.querySelector("[data-award-create-form]");
     awardCreateForm?.addEventListener("submit", createDashboardAward);
+    const syncAwardAutoGrant = (form) => {
+      const requirements = awardRequirements(form.elements.requirements?.value);
+      const control = form.querySelector("[data-award-auto-grant]");
+      if (!control) return;
+      control.classList.toggle("control-disabled", !requirements.length);
+      form.elements.auto_grant.disabled = !requirements.length;
+      if (!requirements.length) form.elements.auto_grant.checked = false;
+    };
+    if (awardCreateForm) {
+      awardCreateForm.elements.requirements.addEventListener("input", () => syncAwardAutoGrant(awardCreateForm));
+      syncAwardAutoGrant(awardCreateForm);
+    }
     outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
     outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
     outputs.botManagement.querySelectorAll("[data-award-review]").forEach((button) => button.addEventListener("click", reviewDashboardAward));
@@ -2036,14 +2048,15 @@ function renderAwardManagement(config) {
       <label><span>Title</span><input name="title" maxlength="80" placeholder="Example: Contract Ace" required><small>The name members will see. Up to 80 characters.</small></label>
       <label><span>Description</span><textarea name="description" maxlength="500" rows="3" placeholder="Explain what this award recognizes and why it matters." required></textarea><small>Shown to managers and recipients. Up to 500 characters.</small></label>
       <label><span>Requirements</span><textarea name="requirements" rows="4" placeholder="Enter one contract or task per line, or leave blank for a custom award"></textarea><small>Optional. When provided, members must complete every listed item.</small></label>
+      <label class="award-toggle" data-award-auto-grant><input type="checkbox" name="auto_grant"><span><strong>Automatically grant when complete</strong><small>A manager must still approve every submitted requirement. After the final approval, the bot grants and announces the award.</small></span></label>
       <div class="award-form-actions"><button type="submit">Create Award</button><span class="form-note" data-award-status></span></div>
     </form>
     <div class="bot-module-list"><h4>Existing awards</h4>${definitions.length ? definitions.map((award) => `<form data-award-edit-form data-award-id="${award.id}" class="bot-module-row">
       <div class="bot-module-copy"><strong>#${award.id} · ${escapeHtml(award.name)}</strong><small>${escapeHtml(award.award_type === "tracker" ? "Tracked award" : "Custom award")}</small></div>
-      <div><label>Name<input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required></label><label>Description<textarea name="description" maxlength="500" rows="2" required>${escapeHtml(award.description)}</textarea></label><label>Requirements<textarea name="requirements" rows="3" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea></label><label><input type="checkbox" name="active" ${award.active ? "checked" : ""}> Active</label><button type="submit">Save Award</button><span data-award-status></span></div>
+      <div><label>Name<input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required></label><label>Description<textarea name="description" maxlength="500" rows="2" required>${escapeHtml(award.description)}</textarea></label><label>Requirements<textarea name="requirements" rows="3" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea></label><label class="award-toggle ${award.requirements?.length ? "" : "control-disabled"}" data-award-auto-grant><input type="checkbox" name="auto_grant" ${award.auto_grant ? "checked" : ""} ${award.requirements?.length ? "" : "disabled"}><span><strong>Automatically grant when complete</strong><small>Requires manager approval of every report.</small></span></label><label><input type="checkbox" name="active" ${award.active ? "checked" : ""}> Active</label><button type="submit">Save Award</button><span data-award-status></span></div>
     </form>`).join("") : '<div class="state">No awards created yet.</div>'}</div>
-    <div class="tool-card award-card"><div class="award-card-heading"><div><h4>Completion reports</h4><p>Approve valid member reports or reject submissions that do not meet the requirement.</p></div></div>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
-    <form data-award-grant-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Grant an award</h4><p>Requirements establish eligibility, but a manager must explicitly grant every award.</p></div></div>
+    <div class="tool-card award-card"><div class="award-card-heading"><div><h4>Completion reports</h4><p>Members submit progress in Discord with <code>/award report</code>. Approve valid reports or reject submissions that do not meet the requirement.</p></div></div>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
+    <form data-award-grant-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Grant an award</h4><p>Manually grant custom awards or eligible tracked awards whose automatic grant option is off.</p></div></div>
       <div class="award-field-grid"><label><span>Award</span><select name="award_id" required><option value="">Choose an award...</option>${activeAwards.map((award) => `<option value="${award.id}">${escapeHtml(award.name)}${award.requirements?.length ? " (requirements tracked)" : ""}</option>`).join("")}</select></label><label><span>Discord member ID</span><input name="member_id" inputmode="numeric" pattern="[0-9]+" placeholder="Example: 123456789012345678" required><small>Enable Developer Mode in Discord to copy an ID.</small></label></div>
       <label><span>Citation</span><textarea name="citation" maxlength="280" rows="3" placeholder="Briefly explain why this member earned the award." required></textarea><small>Up to 280 characters. This appears in the Discord announcement.</small></label>
       <div class="award-form-actions"><button type="submit" ${activeAwards.length ? "" : "disabled"}>Grant and Announce</button><span class="form-note" data-award-status>${activeAwards.length ? "" : "Create an active award first."}</span></div>
@@ -2077,13 +2090,14 @@ async function createDashboardAward(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const requirements = awardRequirements(form.elements.requirements.value);
-  await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements });
+  await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements, auto_grant: Boolean(requirements.length && form.elements.auto_grant.checked) });
 }
 
 async function editDashboardAward(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements: awardRequirements(form.elements.requirements.value), active: form.elements.active.checked });
+  const requirements = awardRequirements(form.elements.requirements.value);
+  await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements, active: form.elements.active.checked, auto_grant: Boolean(requirements.length && form.elements.auto_grant.checked) });
 }
 
 async function reviewDashboardAward(event) {

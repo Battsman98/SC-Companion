@@ -78,7 +78,9 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Create an active award first." in javascript
     assert '<span>Title</span><input name="title"' in javascript
     assert 'award_type: requirements.length ? "tracker" : "custom"' in javascript
-    assert "Requirements establish eligibility, but a manager must explicitly grant every award." in javascript
+    assert "Automatically grant when complete" in javascript
+    assert "Members submit progress in Discord with <code>/award report</code>." in javascript
+    assert "auto_grant: Boolean(requirements.length && form.elements.auto_grant.checked)" in javascript
     assert 'data-award-review' in javascript
     assert 'data-bot-management-tab="${key}"' in javascript
     assert '["setup", "Setup"]' in javascript

@@ -52,7 +52,7 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
 
         tracker_id = await cache.create_award_definition(
             guild_id, "Contract Ace", "Complete the contract set.", "tracker",
-            ["Bounty contract", "Cargo contract"], 1,
+            ["Bounty contract", "Cargo contract"], 1, auto_grant=True,
         )
         custom_id = await cache.create_award_definition(
             guild_id, "Bro Award", "Recognizes a great crewmate.", "custom", [], 1,
@@ -83,12 +83,14 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
 
         tracker = await cache.award_definition(guild_id, tracker_id)
         assert tracker is not None
+        assert tracker["auto_grant"] is True
         assert await cache.update_award_definition(
             guild_id, tracker_id, name="Contract Master", description="Updated description.",
-            requirements=tracker["requirements"], active=False,
+            requirements=tracker["requirements"], active=False, auto_grant=False,
         )
         assert [item["name"] for item in await cache.award_definitions(guild_id)] == ["Bro Award"]
         assert (await cache.award_definition(guild_id, tracker_id))["active"] is False
+        assert (await cache.award_definition(guild_id, tracker_id))["auto_grant"] is False
 
         await cache.purge_guild_data(guild_id)
         assert await cache.award_definitions(guild_id, active_only=False) == []

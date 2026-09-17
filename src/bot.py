@@ -7158,11 +7158,13 @@ async def award_configure_command(interaction: discord.Interaction, enabled: boo
 @award_group.command(name="create", description="Create a tracked or custom award.")
 @app_commands.describe(name="Award name", description="What this award recognizes",
                        award_type="Tracked awards require reported tasks; custom awards are granted directly",
-                       requirements="Tracked task/contract names separated by semicolons")
+                       requirements="Tracked task/contract names separated by semicolons",
+                       auto_grant="Grant after a manager approves the final requirement")
 @app_commands.choices(award_type=[app_commands.Choice(name="Tracked contracts/tasks", value="tracker"),
                                   app_commands.Choice(name="Custom award", value="custom")])
 async def award_create_command(interaction: discord.Interaction, name: str, description: str,
-                               award_type: app_commands.Choice[str], requirements: str | None = None) -> None:
+                               award_type: app_commands.Choice[str], requirements: str | None = None,
+                               auto_grant: bool = False) -> None:
     bot = interaction.client
     if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
         return
@@ -7185,17 +7187,19 @@ async def award_create_command(interaction: discord.Interaction, name: str, desc
         await interaction.response.send_message("An award with that name already exists.", ephemeral=True)
         return
     award_id = await bot.cache.create_award_definition(
-        interaction.guild_id or 0, name.strip(), description.strip(), award_type.value, tasks, interaction.user.id
+        interaction.guild_id or 0, name.strip(), description.strip(), award_type.value, tasks, interaction.user.id,
+        auto_grant=auto_grant and award_type.value == "tracker",
     )
     await interaction.response.send_message(f"Created **{name.strip()}** as award `#{award_id}`.", ephemeral=True)
 
 
 @award_group.command(name="edit", description="Edit an award's name, description, requirements, or availability.")
 @app_commands.describe(award_id="Award number from /award list", name="New name", description="New description",
-                       requirements="Replacement semicolon-separated tasks", active="Whether members can use this award")
+                       requirements="Replacement semicolon-separated tasks", active="Whether members can use this award",
+                       auto_grant="Grant after a manager approves the final requirement")
 async def award_edit_command(interaction: discord.Interaction, award_id: int, name: str | None = None,
                              description: str | None = None, requirements: str | None = None,
-                             active: bool | None = None) -> None:
+                             active: bool | None = None, auto_grant: bool | None = None) -> None:
     bot = interaction.client
     if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
         return
@@ -7223,6 +7227,7 @@ async def award_edit_command(interaction: discord.Interaction, award_id: int, na
     await bot.cache.update_award_definition(
         interaction.guild_id or 0, award_id, name=next_name, description=next_description,
         requirements=tasks, active=award["active"] if active is None else active,
+        auto_grant=(award["auto_grant"] if auto_grant is None else auto_grant) and bool(tasks),
     )
     await interaction.response.send_message(f"Updated award `#{award_id}` — **{next_name}**.", ephemeral=True)
 
@@ -7296,8 +7301,21 @@ async def award_review_command(interaction: discord.Interaction, report_id: int,
         award = await bot.cache.award_definition(interaction.guild_id or 0, result["award_id"])
         approved = await bot.cache.approved_award_tasks(interaction.guild_id or 0, result["award_id"], result["user_id"])
         if award and all(task.casefold() in approved for task in award["requirements"]):
-            completion = (f" All requirements are approved for <@{result['user_id']}>; "
-                          f"a manager can now grant **{award['name']}**.")
+            if award["auto_grant"]:
+                granted = await bot.cache.grant_award(
+                    interaction.guild_id or 0, award["id"], result["user_id"], result["user_name"],
+                    result["citation"], interaction.user.id,
+                )
+                if granted:
+                    await _announce_award(
+                        bot, interaction.guild_id or 0, result["user_id"], award["name"], result["citation"]
+                    )
+                    completion = f" <@{result['user_id']}> automatically earned **{award['name']}**."
+                else:
+                    completion = f" <@{result['user_id']}> already has **{award['name']}**."
+            else:
+                completion = (f" All requirements are approved for <@{result['user_id']}>; "
+                              f"a manager can now grant **{award['name']}**.")
     await interaction.response.send_message(f"Report `#{report_id}` {decision.value}.{completion}", ephemeral=True)
 
 
@@ -7349,7 +7367,10 @@ async def award_list_command(interaction: discord.Interaction) -> None:
         value = f"{award['description']}\n**Type:** {kind}"
         if requirements:
             value += f"\n**Requirements:**\n{requirements}"
+            value += f"\n**Automatic grant:** {'On' if award['auto_grant'] else 'Off'}"
         embed.add_field(name=f"#{award['id']} · {award['name']}", value=value[:1024], inline=False)
+    if awards:
+        embed.set_footer(text="Submit one completed requirement at a time with /award report.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
