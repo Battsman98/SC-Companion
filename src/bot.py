@@ -7296,34 +7296,34 @@ async def award_review_command(interaction: discord.Interaction, report_id: int,
         award = await bot.cache.award_definition(interaction.guild_id or 0, result["award_id"])
         approved = await bot.cache.approved_award_tasks(interaction.guild_id or 0, result["award_id"], result["user_id"])
         if award and all(task.casefold() in approved for task in award["requirements"]):
-            granted = await bot.cache.grant_award(
-                interaction.guild_id or 0, award["id"], result["user_id"], result["user_name"],
-                result["citation"], interaction.user.id,
-            )
-            if granted:
-                completion = f" All requirements are complete; <@{result['user_id']}> earned **{award['name']}**."
-                await _announce_award(
-                    bot, interaction.guild_id or 0, result["user_id"], award["name"], result["citation"]
-                )
+            completion = (f" All requirements are approved for <@{result['user_id']}>; "
+                          f"a manager can now grant **{award['name']}**.")
     await interaction.response.send_message(f"Report `#{report_id}` {decision.value}.{completion}", ephemeral=True)
 
 
-@award_group.command(name="grant", description="Grant a custom award with a short citation.")
+@award_group.command(name="grant", description="Grant an eligible award with a short citation.")
 async def award_grant_command(interaction: discord.Interaction, member: discord.Member,
                               award_id: int, citation: str) -> None:
     bot = interaction.client
     if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
         return
     if not await _can_manage_awards(interaction, bot):
-        await interaction.response.send_message("Only configured award managers can grant custom awards.", ephemeral=True)
+        await interaction.response.send_message("Only configured award managers can grant awards.", ephemeral=True)
         return
     award = await bot.cache.award_definition(interaction.guild_id or 0, award_id)
-    if award is None or not award["active"] or award["award_type"] != "custom":
-        await interaction.response.send_message("That active custom award was not found.", ephemeral=True)
+    if award is None or not award["active"]:
+        await interaction.response.send_message("That active award was not found.", ephemeral=True)
         return
     if not citation.strip() or len(citation.strip()) > AWARD_CITATION_LIMIT:
         await interaction.response.send_message(f"Citations must be 1-{AWARD_CITATION_LIMIT} characters.", ephemeral=True)
         return
+    if award["requirements"]:
+        approved = await bot.cache.approved_award_tasks(interaction.guild_id or 0, award_id, member.id)
+        if not all(task.casefold() in approved for task in award["requirements"]):
+            await interaction.response.send_message(
+                "That member has not completed every award requirement.", ephemeral=True
+            )
+            return
     granted = await bot.cache.grant_award(
         interaction.guild_id or 0, award_id, member.id, str(member), citation.strip(), interaction.user.id
     )

@@ -1427,21 +1427,7 @@ async def review_award_from_dashboard(guild_id: int, report_id: int, payload: Aw
     result = await state().cache.review_award_report(guild_id, report_id, payload.decision, user.id)
     if result is None:
         raise HTTPException(status_code=409, detail="That pending report was not found or was already reviewed.")
-    awarded = False
-    if payload.decision == "approved":
-        award = await state().cache.award_definition(guild_id, result["award_id"])
-        approved = await state().cache.approved_award_tasks(guild_id, result["award_id"], result["user_id"])
-        if award and all(task.casefold() in approved for task in award["requirements"]):
-            awarded = await state().cache.grant_award(
-                guild_id, award["id"], result["user_id"], result["user_name"], result["citation"], user.id
-            )
-            if awarded:
-                settings = await state().cache.award_settings(guild_id)
-                await _send_award_announcement(
-                    settings.get("announcement_channel_id"),
-                    f"🏆 <@{result['user_id']}> earned **{award['name']}** — {result['citation']}",
-                )
-    return {"status": payload.decision, "award_granted": awarded}
+    return {"status": payload.decision, "award_granted": False}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards/grants")
@@ -1449,9 +1435,13 @@ async def grant_award_from_dashboard(guild_id: int, payload: AwardGrantRequest,
                                      user=Depends(require_user)) -> dict[str, Any]:
     await _award_dashboard_manager(guild_id, user)
     award = await state().cache.award_definition(guild_id, payload.award_id)
-    if award is None or not award["active"] or award["award_type"] != "custom":
-        raise HTTPException(status_code=422, detail="Choose an active custom award.")
+    if award is None or not award["active"]:
+        raise HTTPException(status_code=422, detail="Choose an active award.")
     member = await _discord_guild_member(guild_id, payload.member_id)
+    if award["requirements"]:
+        approved = await state().cache.approved_award_tasks(guild_id, award["id"], member["id"])
+        if not all(task.casefold() in approved for task in award["requirements"]):
+            raise HTTPException(status_code=422, detail="This member has not completed every award requirement.")
     granted = await state().cache.grant_award(
         guild_id, award["id"], member["id"], member["name"], payload.citation.strip(), user.id
     )

@@ -75,9 +75,10 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "/awards/channel" in javascript
     assert "data-award-feature-enabled" in javascript
     assert 'enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked' in javascript
-    assert "Create an active custom award first." in javascript
+    assert "Create an active award first." in javascript
     assert '<span>Title</span><input name="title"' in javascript
     assert 'award_type: requirements.length ? "tracker" : "custom"' in javascript
+    assert "Requirements establish eligibility, but a manager must explicitly grant every award." in javascript
     assert 'data-award-review' in javascript
     assert 'data-bot-management-tab="${key}"' in javascript
     assert '["setup", "Setup"]' in javascript
