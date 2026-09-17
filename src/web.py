@@ -378,6 +378,12 @@ class AwardSettingsRequest(BaseModel):
     announcement_channel_id: int | None = None
 
 
+class ReputationSettingsRequest(BaseModel):
+    enabled: bool
+    reviewer_role_id: int | None = None
+    auto_create_role: bool = False
+
+
 class AwardDefinitionRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=500)
@@ -1209,6 +1215,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     award_settings = await state().cache.award_settings(guild_id) if awards_available else None
     award_definitions = await state().cache.award_definitions(guild_id, active_only=False) if awards_available else []
     award_reports = await state().cache.pending_award_reports(guild_id, 50) if awards_available else []
+    reputation_settings = (await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}) if awards_available else None
     roles = await _discord_guild_roles(guild_id) if bot_guild is not None and awards_available else []
     detected_routes = _discover_existing_routes(channels)
     if stored is None:
@@ -1260,6 +1267,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             "pending_reports": award_reports,
             "roles": [{**role, "id": _snowflake(role["id"])} for role in roles if not role["managed"]],
         } if awards_available else None,
+        "reputation": reputation_settings if awards_available else None,
         "updated_at": stored.get("updated_at") if stored else None,
     }
 
@@ -1357,20 +1365,22 @@ async def create_award_announcement_channel(guild_id: int, user=Depends(require_
     await _award_dashboard_manager(guild_id, user)
     channels = await _discord_guild_channels(guild_id)
     category = next(
-        (channel for channel in channels
-         if channel["type"] == 4 and channel["name"].casefold() == "🏆 awards & progress".casefold()),
+        (channel for channel in channels if channel["type"] == 4 and channel["name"].casefold()
+         in {"🏆 awards".casefold(), "🏆 awards & progress".casefold()}),
         None,
     )
     created = category is None
     if category is None:
         category = await _discord_api(
             "POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
-            json_payload={"name": "🏆 AWARDS & PROGRESS", "type": 4},
+            json_payload={"name": "🏆 AWARDS", "type": 4},
         )
+    elif category["name"] != "🏆 AWARDS":
+        category = await _discord_api("PATCH", f"/channels/{category['id']}", bot_token=_public_bot_token(),
+                                      json_payload={"name": "🏆 AWARDS"})
     channel_specs = (
         ("award-guidelines", "How SC Companion awards, reports, reviews, and citations work."),
         ("award-list-criteria", "Current awards and the requirements for earning them."),
-        ("award-progress-tracker", "Use /award report here to submit completed award requirements."),
         ("award-announcements", "SC Companion award recipient announcements and recognition."),
     )
     award_channels: dict[str, Any] = {}
@@ -1405,6 +1415,53 @@ async def create_award_announcement_channel(guild_id: int, user=Depends(require_
         "channel_id": _snowflake(channel_id),
         "channels": {name: _snowflake(channel["id"]) for name, channel in award_channels.items()},
     }
+
+
+@app.put("/api/bot-management/guilds/{guild_id}/reputation/settings")
+async def save_reputation_settings(guild_id: int, payload: ReputationSettingsRequest,
+                                   user=Depends(require_user)) -> dict[str, Any]:
+    await _award_dashboard_manager(guild_id, user)
+    roles = await _discord_guild_roles(guild_id)
+    role_id = payload.reviewer_role_id
+    if payload.auto_create_role:
+        role = next((item for item in roles if item["name"] == "Reputation Reviewer" and not item["managed"]), None)
+        if role is None:
+            role = await _discord_api(
+                "POST", f"/guilds/{guild_id}/roles", bot_token=_public_bot_token(),
+                json_payload={"name": "Reputation Reviewer", "mentionable": True},
+            )
+        role_id = int(role["id"])
+    elif role_id is not None and role_id not in {item["id"] for item in roles if not item["managed"]}:
+        raise HTTPException(status_code=422, detail="The selected reputation reviewer role is unavailable.")
+    current = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
+    settings = {**current, "enabled": payload.enabled, "reviewer_role_id": role_id}
+    await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
+    return {"status": "saved", **settings}
+
+
+@app.post("/api/bot-management/guilds/{guild_id}/reputation/channels")
+async def create_reputation_channels(guild_id: int, user=Depends(require_user)) -> dict[str, Any]:
+    await _award_dashboard_manager(guild_id, user)
+    channels = await _discord_guild_channels(guild_id)
+    category = next((item for item in channels if item["type"] == 4 and item["name"].casefold() == "📊 reputation progress".casefold()), None)
+    if category is None:
+        category = await _discord_api("POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
+                                      json_payload={"name": "📊 REPUTATION PROGRESS", "type": 4})
+    specs = (("rep-guidelines", 0, "How to submit Star Citizen reputation progress."),
+             ("rep-progress", 0, "Reviewed Star Citizen reputation progress."),
+             ("rep-submissions", 15, "Screenshot-backed reputation applications for reviewer approval."))
+    made = {}
+    for name, channel_type, topic in specs:
+        channel = next((item for item in channels if item["name"] == name and item["type"] == channel_type), None)
+        if channel is None:
+            channel = await _discord_api("POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
+                                         json_payload={"name": name, "type": channel_type,
+                                                       "parent_id": str(category["id"]), "topic": topic})
+        made[name] = channel
+    current = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
+    current["submission_forum_id"] = int(made["rep-submissions"]["id"])
+    await state().cache.set(f"guild:{guild_id}:reputation-settings", current, 315360000)
+    return {"status": "ready", "forum_id": _snowflake(made["rep-submissions"]["id"])}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards")

@@ -851,6 +851,7 @@ class GameAssistBot(commands.Bot):
             self.tree.add_command(audit_group, guild=guild)
             if self.settings.award_test_guild_id == self.settings.discord_guild_id:
                 self.tree.add_command(award_group, guild=guild)
+                self.tree.add_command(reputation_group, guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
         if (self.settings.award_test_guild_id
@@ -858,6 +859,7 @@ class GameAssistBot(commands.Bot):
             award_guild = discord.Object(id=self.settings.award_test_guild_id)
             self.tree.copy_global_to(guild=award_guild)
             self.tree.add_command(award_group, guild=award_guild)
+            self.tree.add_command(reputation_group, guild=award_guild)
             await self.tree.sync(guild=award_guild)
             logging.info("Synced testing-only award commands to guild %s", self.settings.award_test_guild_id)
 
@@ -6707,16 +6709,18 @@ class AwardAdminView(discord.ui.View):
             await interaction.response.send_message("SC Companion needs Manage Channels permission first.", ephemeral=True)
             return
         category = discord.utils.find(
-            lambda item: item.name.casefold() == "🏆 awards & progress".casefold(), interaction.guild.categories
+            lambda item: item.name.casefold() in {"🏆 awards".casefold(), "🏆 awards & progress".casefold()},
+            interaction.guild.categories,
         )
         if category is None:
             category = await interaction.guild.create_category(
-                "🏆 AWARDS & PROGRESS", reason="SC Companion award system setup"
+                "🏆 AWARDS", reason="SC Companion award system setup"
             )
+        elif category.name != "🏆 AWARDS":
+            await category.edit(name="🏆 AWARDS", reason="Separate awards from reputation progress")
         channel_specs = (
             ("award-guidelines", "How SC Companion awards, reports, reviews, and citations work."),
             ("award-list-criteria", "Current awards and the requirements for earning them."),
-            ("award-progress-tracker", "Use /award report here to submit completed award requirements."),
             ("award-announcements", "SC Companion award recipient announcements and recognition."),
         )
         award_channels: dict[str, discord.TextChannel] = {}
@@ -7151,6 +7155,50 @@ async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
 
 
 award_group = app_commands.Group(name="award", description="Testing-server awards and contract tracking.")
+reputation_group = app_commands.Group(name="rep", description="Star Citizen reputation progress submissions.")
+
+
+def _reputation_settings_key(guild_id: int) -> str:
+    return f"guild:{guild_id}:reputation-settings"
+
+
+@reputation_group.command(name="submit", description="Submit a Star Citizen reputation level for review.")
+@app_commands.describe(rep_giver="Reputation giver, such as Head Hunters or Covalex",
+                       level="Your current reputation level", screenshot="Screenshot showing the reputation status")
+async def reputation_submit_command(interaction: discord.Interaction, rep_giver: str, level: str,
+                                    screenshot: discord.Attachment) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or not _award_test_guild(interaction, bot) or interaction.guild is None:
+        await interaction.response.send_message("Reputation tracking is limited to the SC Companion testing Discord.", ephemeral=True)
+        return
+    settings = await bot.cache.get(_reputation_settings_key(interaction.guild.id)) or {}
+    if not settings.get("enabled") or not settings.get("submission_forum_id"):
+        await interaction.response.send_message("The Reputation Progress Tracker is not configured yet.", ephemeral=True)
+        return
+    if not (screenshot.content_type or "").startswith("image/"):
+        await interaction.response.send_message("Attach an image screenshot of your reputation status.", ephemeral=True)
+        return
+    giver, rep_level = rep_giver.strip(), level.strip()
+    if not giver or len(giver) > 80 or not rep_level or len(rep_level) > 80:
+        await interaction.response.send_message("Rep giver and level must each be 1-80 characters.", ephemeral=True)
+        return
+    forum = interaction.guild.get_channel(int(settings["submission_forum_id"]))
+    if not isinstance(forum, discord.ForumChannel):
+        await interaction.response.send_message("The configured reputation submission forum is unavailable.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    reviewer_role_id = settings.get("reviewer_role_id")
+    mention = f"<@&{reviewer_role_id}>\n" if reviewer_role_id else ""
+    file = await screenshot.to_file()
+    thread = await forum.create_thread(
+        name=f"{giver} - {rep_level} - {interaction.user.display_name}"[:100],
+        content=(f"{mention}**Rep giver:** {giver}\n**Level:** {rep_level}\n"
+                 f"**Submitted by:** <@{interaction.user.id}>\n**Screenshot:** attached"),
+        file=file,
+        allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+        reason="SC Companion reputation progress submission",
+    )
+    await interaction.followup.send(f"Reputation submission created: {thread.thread.mention}", ephemeral=True)
 
 
 @award_group.command(name="configure", description="Enable awards and choose the role that can manage them.")

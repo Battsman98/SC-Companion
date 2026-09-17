@@ -74,7 +74,9 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Create or Repair All Feature Channels" in javascript
     assert "updateAllFeatureChannels" in javascript
     assert "All enabled feature channels are being created or repaired" in javascript
-    assert "guidelines, award criteria, progress tracking, and announcement channels" in javascript
+    assert "Screenshot-backed applications for Star Citizen reputation givers and levels." in javascript
+    assert "Let SC Companion create the role" in javascript
+    assert "rep giver, current level, and screenshot" in javascript
     assert "/awards/channel" in javascript
     assert "data-award-feature-enabled" in javascript
     assert 'enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked' in javascript
@@ -128,11 +130,11 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
         assert result["channel_id"] == "904"
         assert result["channels"] == {
             "award-guidelines": "901", "award-list-criteria": "902",
-            "award-progress-tracker": "903", "award-announcements": "904",
+            "award-announcements": "904",
         }
-        assert discord_api.await_count == 5
+        assert discord_api.await_count == 4
         assert discord_api.await_args_list[0].kwargs["json_payload"] == {
-            "name": "🏆 AWARDS & PROGRESS", "type": 4,
+            "name": "🏆 AWARDS", "type": 4,
         }
         cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 904)
 

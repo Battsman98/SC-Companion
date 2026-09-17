@@ -1180,6 +1180,7 @@ async function loadGuildBotConfiguration(guildId) {
       ["features", "Features"],
       ["channels", "Channel Management"],
       ...(config.awards_available ? [["awards", "Awards"]] : []),
+      ...(config.awards_available ? [["progress", "Progress Tracker"]] : []),
     ];
     outputs.botManagement.innerHTML = `<nav class="bot-management-tabs" role="tablist" aria-label="Bot management sections">
       ${managementSections.map(([key, label]) => `<button type="button" role="tab" data-bot-management-tab="${key}" aria-controls="bot-management-${key}">${label}</button>`).join("")}
@@ -1205,6 +1206,7 @@ async function loadGuildBotConfiguration(guildId) {
           <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small>${module.detected_routes?.length ? `<small class="bot-detected-routes"><strong>Current Discord setup</strong>${module.detected_routes.map((route) => `<span><code>/${escapeHtml(route.command)}</code> → #${escapeHtml(route.channel_name)}</span>`).join("")}</small>` : ""}</span></label>
         </div>`).join("")}
         ${config.awards_available ? renderAwardChannelFeature(config) : ""}
+        ${config.awards_available ? renderReputationFeature(config) : ""}
         </div><div class="bot-management-actions"><button type="submit">Save Features</button><button type="button" data-update-feature-channels>Create or Repair All Feature Channels</button><span data-bot-management-status></span></div>
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
@@ -1214,6 +1216,7 @@ async function loadGuildBotConfiguration(guildId) {
       </section>
     </form>
     ${config.awards_available ? `<section id="bot-management-awards" class="bot-management-panel" data-bot-management-panel="awards" role="tabpanel" hidden>${renderAwardManagement(config)}</section>` : ""}`;
+    if (config.awards_available) outputs.botManagement.insertAdjacentHTML("beforeend", `<section id="bot-management-progress" class="bot-management-panel" data-bot-management-panel="progress" role="tabpanel" hidden>${renderReputationManagement(config)}</section>`);
     initializeBotManagementTabs();
     outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
     const managementForm = outputs.botManagement.querySelector("[data-bot-management-form]");
@@ -1227,6 +1230,7 @@ async function loadGuildBotConfiguration(guildId) {
     managementForm.querySelectorAll('[name="channel_setup_mode"]').forEach((radio) => radio.addEventListener("change", updateChannelMode));
     updateChannelMode();
     outputs.botManagement.querySelector("[data-award-settings-form]")?.addEventListener("submit", saveAwardSettings);
+    outputs.botManagement.querySelector("[data-reputation-settings-form]")?.addEventListener("submit", saveReputationSettings);
     outputs.botManagement.querySelector("[data-update-feature-channels]")?.addEventListener("click", updateAllFeatureChannels);
     const awardCreateForm = outputs.botManagement.querySelector("[data-award-create-form]");
     awardCreateForm?.addEventListener("submit", createDashboardAward);
@@ -1255,8 +1259,30 @@ function renderAwardChannelFeature(config) {
   const channelId = String(config.awards?.settings?.announcement_channel_id || "");
   const channel = config.channels.find((item) => String(item.id) === channelId);
   return `<div class="bot-feature-row award-channel-feature" data-award-feature data-manager-role-id="${escapeAttribute(settings.manager_role_id || "")}" data-announcement-channel-id="${escapeAttribute(settings.announcement_channel_id || "")}">
-    <label class="bot-module-copy"><input type="checkbox" data-award-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Awards & Progress Tracker</strong><small>Optional contract tracking, custom recognition, progress reports, and Discord announcements.</small><small>Create a dedicated category with guidelines, award criteria, progress tracking, and announcement channels.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No awards category is associated yet."}</small></span></label>
+    <label class="bot-module-copy"><input type="checkbox" data-award-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Awards</strong><small>Contract-based and custom recognition with manager review and Discord announcements.</small><small data-award-channel-current>${channel ? `Current announcement channel: #${escapeHtml(channel.name)}` : "No awards category is associated yet."}</small></span></label>
   </div>`;
+}
+
+function renderReputationFeature(config) {
+  const settings = config.reputation || {};
+  return `<div class="bot-feature-row" data-reputation-feature data-reviewer-role-id="${escapeAttribute(settings.reviewer_role_id || "")}">
+    <label class="bot-module-copy"><input type="checkbox" data-reputation-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Reputation Progress Tracker</strong><small>Screenshot-backed applications for Star Citizen reputation givers and levels.</small><small>${settings.submission_forum_id ? "Submission forum configured." : "No reputation submission forum is associated yet."}</small></span></label>
+  </div>`;
+}
+
+function renderReputationManagement(config) {
+  const settings = config.reputation || {};
+  const roles = config.awards?.roles || [];
+  const options = ['<option value="">Choose a reviewer role...</option>', ...roles.map((role) => `<option value="${role.id}" ${String(settings.reviewer_role_id || "") === String(role.id) ? "selected" : ""}>${escapeHtml(role.name)}</option>`)].join("");
+  return `<section class="bot-award-management" data-reputation-management data-guild-id="${config.guild.id}">
+    <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Reputation Progress Tracker</h3><p>Members submit a rep giver, current level, and screenshot through <code>/rep submit</code>. The bot opens a review ticket in Discord.</p></div>
+    <form data-reputation-settings-form class="tool-card award-form">
+      <label class="award-toggle"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}><span><strong>Enable Progress Tracker</strong><small>Allow screenshot-backed reputation applications.</small></span></label>
+      <label><span>Submission reviewer role</span><select name="reviewer_role_id">${options}</select><small>This role is mentioned on every new submission ticket.</small></label>
+      <label class="award-toggle"><input type="checkbox" name="auto_create_role"><span><strong>Let SC Companion create the role</strong><small>Creates or reuses a mentionable Reputation Reviewer role.</small></span></label>
+      <div class="award-form-actions"><button type="submit">Save Progress Tracker</button><span class="form-note" data-reputation-status></span></div>
+    </form>
+  </section>`;
 }
 
 function guildBotConfigurationPayload(form) {
@@ -1301,6 +1327,12 @@ async function updateAllFeatureChannels(event) {
         await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/channel`, { method: "POST" });
       }
     }
+    const reputationFeature = form.querySelector("[data-reputation-feature]");
+    if (reputationFeature) {
+      const enabled = reputationFeature.querySelector("[data-reputation-feature-enabled]").checked;
+      await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled, reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null, auto_create_role: false } });
+      if (enabled) await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/reputation/channels`, { method: "POST" });
+    }
     status.textContent = "All enabled feature channels are being created or repaired. Discord may take up to one minute to finish.";
     await loadGuildBotConfiguration(form.dataset.guildId);
   } catch (error) {
@@ -1333,6 +1365,14 @@ async function saveGuildBotConfiguration(event) {
           manager_role_id: awardFeature.dataset.managerRoleId || null,
           announcement_channel_id: awardFeature.dataset.announcementChannelId || null,
         },
+      });
+    }
+    const reputationFeature = form.querySelector("[data-reputation-feature]");
+    if (reputationFeature) {
+      await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/reputation/settings`, {
+        method: "PUT",
+        body: { enabled: reputationFeature.querySelector("[data-reputation-feature-enabled]").checked,
+          reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null, auto_create_role: false },
       });
     }
     status.textContent = channelSetupMode === "automatic" ? "Settings saved. The bot will make the channels shortly." : "Bot settings saved.";
@@ -2116,6 +2156,20 @@ async function createDashboardAward(event) {
   const form = event.currentTarget;
   const requirements = awardRequirements(form.elements.requirements.value);
   await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements, auto_grant: Boolean(requirements.length && form.elements.auto_grant.checked) });
+}
+
+async function saveReputationSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const section = form.closest("[data-reputation-management]");
+  const status = form.querySelector("[data-reputation-status]");
+  status.textContent = "Saving...";
+  try {
+    const result = await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled: form.elements.enabled.checked, reviewer_role_id: form.elements.reviewer_role_id.value || null, auto_create_role: form.elements.auto_create_role.checked } });
+    if (form.elements.enabled.checked) await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/channels`, { method: "POST" });
+    status.textContent = result.reviewer_role_id ? "Progress Tracker saved and reviewer role assigned." : "Choose a reviewer role or let SC Companion create one.";
+    await loadGuildBotConfiguration(section.dataset.guildId);
+  } catch (error) { status.textContent = error.message; }
 }
 
 async function editDashboardAward(event) {
