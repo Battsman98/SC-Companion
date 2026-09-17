@@ -2246,7 +2246,12 @@ class GameAssistBot(commands.Bot):
             )
             return
         if await self._is_shared_setup_channel(channel):
-            self._schedule_shared_channel_recovery(channel.guild.id, f"deleted #{channel.name}")
+            self._schedule_shared_channel_recovery(
+                channel.guild.id,
+                f"deleted #{channel.name}",
+                deleted_channel_id=channel.id,
+                deleted_channel_name=channel.name,
+            )
 
     async def _is_shared_setup_channel(self, channel: discord.abc.GuildChannel) -> bool:
         guild = channel.guild
@@ -2276,20 +2281,54 @@ class GameAssistBot(commands.Bot):
         automatic_names.update({"SC Companion", "marketplace"})
         return channel.id in automatic_ids or channel.name in automatic_names
 
-    def _schedule_shared_channel_recovery(self, guild_id: int, reason: str) -> None:
+    def _schedule_shared_channel_recovery(
+        self,
+        guild_id: int,
+        reason: str,
+        *,
+        deleted_channel_id: int | None = None,
+        deleted_channel_name: str | None = None,
+    ) -> None:
         running = self._shared_recovery_tasks.get(guild_id)
         if running is not None and not running.done():
             return
         self._shared_recovery_tasks[guild_id] = asyncio.create_task(
-            self._recover_shared_channels(guild_id, reason)
+            self._recover_shared_channels(
+                guild_id,
+                reason,
+                deleted_channel_id=deleted_channel_id,
+                deleted_channel_name=deleted_channel_name,
+            )
         )
 
-    async def _recover_shared_channels(self, guild_id: int, reason: str) -> None:
+    async def _recover_shared_channels(
+        self,
+        guild_id: int,
+        reason: str,
+        *,
+        deleted_channel_id: int | None = None,
+        deleted_channel_name: str | None = None,
+    ) -> None:
         await asyncio.sleep(2)
         guild = self.get_guild(guild_id)
         if guild is None:
             return
         logging.warning("Recovering SC Companion channels in guild %s after %s", guild_id, reason)
+        configured = await self.cache.guild_bot_settings(guild_id)
+        if configured is not None and configured.get("channel_setup_mode") == "automatic":
+            modules = normalize_module_settings(configured.get("modules"))
+            automatic_ids = automatic_cleanup_channel_ids(modules)
+            automatic_names = {
+                key.replace("_", "-") for key, item in modules.items() if item["enabled"]
+            }
+            automatic_names.add("marketplace")
+            if deleted_channel_id in automatic_ids or deleted_channel_name in automatic_names:
+                # Restore the missing feature channel before the slower full setup
+                # reconciliation. The minute safety scan will still repair any
+                # unrelated configuration that changes during this pass.
+                await self.ensure_automatic_module_channels(guild)
+                await self.sync_guild_command_examples(guild)
+                return
         await self.ensure_about_panel(guild)
 
     def _is_discord_bot_hub_channel(self, channel: discord.abc.GuildChannel) -> bool:

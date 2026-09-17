@@ -152,6 +152,67 @@ def test_shared_recovery_only_protects_bot_owned_or_automatic_channels() -> None
     asyncio.run(scenario())
 
 
+def test_deleted_automatic_channel_uses_fast_recovery_path() -> None:
+    async def scenario() -> None:
+        modules = {
+            key: {"enabled": key == "trade_tools", "channel_id": 101 if key == "trade_tools" else None,
+                  "resource_channel_id": 102 if key == "trade_tools" else None}
+            for key in BOT_MODULES
+        }
+        bot = GameAssistBot.__new__(GameAssistBot)
+        bot.cache = SimpleNamespace(guild_bot_settings=AsyncMock(return_value={
+            "channel_setup_mode": "automatic", "modules": modules
+        }))
+        guild = SimpleNamespace(id=2)
+        bot.get_guild = lambda guild_id: guild
+        bot.ensure_automatic_module_channels = AsyncMock()
+        bot.sync_guild_command_examples = AsyncMock()
+        bot.ensure_about_panel = AsyncMock()
+
+        original_sleep = asyncio.sleep
+        try:
+            asyncio.sleep = AsyncMock()
+            await bot._recover_shared_channels(
+                2, "deleted #trade-tools", deleted_channel_id=101, deleted_channel_name="trade-tools"
+            )
+        finally:
+            asyncio.sleep = original_sleep
+
+        bot.ensure_automatic_module_channels.assert_awaited_once_with(guild)
+        bot.sync_guild_command_examples.assert_awaited_once_with(guild)
+        bot.ensure_about_panel.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_deleted_shared_support_channel_keeps_full_recovery_path() -> None:
+    async def scenario() -> None:
+        bot = GameAssistBot.__new__(GameAssistBot)
+        bot.cache = SimpleNamespace(guild_bot_settings=AsyncMock(return_value={
+            "channel_setup_mode": "automatic", "modules": {}
+        }))
+        guild = SimpleNamespace(id=2)
+        bot.get_guild = lambda guild_id: guild
+        bot.ensure_automatic_module_channels = AsyncMock()
+        bot.sync_guild_command_examples = AsyncMock()
+        bot.ensure_about_panel = AsyncMock()
+
+        original_sleep = asyncio.sleep
+        try:
+            asyncio.sleep = AsyncMock()
+            await bot._recover_shared_channels(
+                2, "deleted #feedback-and-issues", deleted_channel_id=201,
+                deleted_channel_name="feedback-and-issues"
+            )
+        finally:
+            asyncio.sleep = original_sleep
+
+        bot.ensure_about_panel.assert_awaited_once_with(guild)
+        bot.ensure_automatic_module_channels.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
 def test_uninstall_only_targets_channels_recorded_in_automatic_settings() -> None:
     modules = {
         key: {"enabled": True, "channel_id": index + 100, "resource_channel_id": None}
