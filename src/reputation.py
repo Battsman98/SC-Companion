@@ -1,6 +1,6 @@
-"""Primary Star Citizen 4.10 reputation ladders used by the Discord tracker."""
+"""Star Citizen 4.10 reputation ladders and progress-card colors."""
 
-REPUTATION_PRIMARY_LADDERS: dict[str, tuple[str, ...]] = {
+REPUTATION_LADDERS: dict[str, tuple[str, ...]] = {
     "Covalex": ("Trainee", "Rookie", "Junior", "Member", "Experienced", "Senior", "Master"),
     "Headhunters": ("Applicant", "Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor", "Elite Contractor"),
     "Red Wind Linehaul": ("Trainee", "Rookie", "Junior", "Member", "Experienced", "Senior", "Master"),
@@ -29,5 +29,26 @@ REPUTATION_PRIMARY_LADDERS: dict[str, tuple[str, ...]] = {
     "Ruto": ("Applicant", "Security Trainee", "Jr. Security Contractor", "Security Contractor"),
     "Wildstar Racing": ("Racing Enthusiast", "Rookie Racer", "Racer", "Practiced Racer", "Experienced Racer", "Skilled Racer", "Dedicated Racer"),
     "Civilian Defense Force": ("Not Eligible", "Neutral"),
+    "Covalex Independent Contractors": ("Neutral",),
     "Wikelo Emporium": ("Very Good Customer", "Very Best Customer"),
+    "Highpoint Wilderness Specialists": ("Neutral",),
+    'Tecia "Twitch" Pacheco': ("Neutral",),
 }
+
+# Pairing colors instead of assigning Discord roles keeps the visual identity
+# scalable. With eight colors there are 56 ordered combinations, enough for
+# every current ladder while keeping each giver's ribbon unique and stable.
+_RIBBON_COLORS = (
+    "#22d3ee", "#3b82f6", "#8b5cf6", "#ec4899",
+    "#ef4444", "#f59e0b", "#84cc16", "#14b8a6",
+)
+
+
+def reputation_colors(giver: str) -> tuple[str, str]:
+    try:
+        index = tuple(REPUTATION_LADDERS).index(giver)
+    except ValueError:
+        index = sum(ord(character) for character in giver)
+    primary = index % len(_RIBBON_COLORS)
+    secondary = (index // len(_RIBBON_COLORS) + primary + 1) % len(_RIBBON_COLORS)
+    return _RIBBON_COLORS[primary], _RIBBON_COLORS[secondary]

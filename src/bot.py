@@ -18,7 +18,7 @@ from src.cache import SQLiteCache
 from src.config import Settings
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
-from src.reputation import REPUTATION_PRIMARY_LADDERS
+from src.reputation import REPUTATION_LADDERS, reputation_colors
 from src.sources.base import (
     BlueprintIngredient,
     BlueprintMission,
@@ -7282,13 +7282,17 @@ def _progress_card_image(member: discord.Member, avatar_bytes: bytes, activity: 
         draw.text((left + 18, 240), label, font=font(16, True), fill="#d5a94e")
         draw.text((left + 18, 275), value, font=font(28, True), fill="#f8fafc")
 
-    draw.text((60, 370), "APPROVED PRIMARY REPUTATION", font=font(20, True), fill="#d5a94e")
+    draw.text((60, 370), "APPROVED REPUTATION LADDERS", font=font(20, True), fill="#d5a94e")
     rows = progress or [{"giver": "No approved reputation yet", "level": "Use /rep submit to apply"}]
     for index, item in enumerate(rows):
         top = 410 + index * 54
-        if index % 2 == 0:
-            draw.rounded_rectangle((50, top - 8, width - 50, top + 40), radius=10, fill="#172033")
-        draw.text((72, top), str(item["giver"])[:42], font=font(19, True), fill="#e2e8f0")
+        giver = str(item["giver"])
+        first, second = reputation_colors(giver)
+        draw.rounded_rectangle((50, top - 8, width - 50, top + 40), radius=10, fill="#172033", outline=first, width=2)
+        draw.rectangle((50, top - 8, 62, top + 16), fill=first)
+        draw.rectangle((50, top + 16, 62, top + 40), fill=second)
+        draw.polygon(((62, top - 8), (78, top + 16), (62, top + 40)), fill=second)
+        draw.text((88, top), giver[:40], font=font(19, True), fill="#e2e8f0")
         draw.text((600, top), str(item["level"])[:32], font=font(19), fill="#f4cf70")
     output = io.BytesIO()
     image.save(output, "PNG", optimize=True)
@@ -7336,18 +7340,18 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
         await interaction.response.send_message("Rep giver and level must each be 1-80 characters.", ephemeral=True)
         return
     canonical_giver = next(
-        (name for name in REPUTATION_PRIMARY_LADDERS if name.casefold() == giver.casefold()), None
+        (name for name in REPUTATION_LADDERS if name.casefold() == giver.casefold()), None
     )
     canonical_level = next(
         (
-            name for name in REPUTATION_PRIMARY_LADDERS.get(canonical_giver, ())
+            name for name in REPUTATION_LADDERS.get(canonical_giver, ())
             if name.casefold() == rep_level.casefold()
         ),
         None,
     )
     if canonical_giver is None or canonical_level is None:
         await interaction.response.send_message(
-            "Choose a reputation giver and level from the supported primary ladders.", ephemeral=True
+            "Choose a reputation giver and level from the supported reputation ladders.", ephemeral=True
         )
         return
     giver, rep_level = canonical_giver, canonical_level
@@ -7389,7 +7393,7 @@ async def reputation_giver_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     del interaction
     query = current.casefold().strip()
-    values = [name for name in REPUTATION_PRIMARY_LADDERS if query in name.casefold()][:25]
+    values = [name for name in REPUTATION_LADDERS if query in name.casefold()][:25]
     return [app_commands.Choice(name=value[:100], value=value[:100]) for value in values]
 
 
@@ -7399,11 +7403,11 @@ async def reputation_level_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     giver = str(getattr(interaction.namespace, "rep_giver", "") or "")
     canonical_giver = next(
-        (name for name in REPUTATION_PRIMARY_LADDERS if name.casefold() == giver.casefold()), None
+        (name for name in REPUTATION_LADDERS if name.casefold() == giver.casefold()), None
     )
     query = current.casefold().strip()
     values = [
-        level for level in REPUTATION_PRIMARY_LADDERS.get(canonical_giver, ())
+        level for level in REPUTATION_LADDERS.get(canonical_giver, ())
         if query in level.casefold()
     ][:25]
     return [app_commands.Choice(name=value[:100], value=value[:100]) for value in values]

@@ -77,7 +77,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "updateAllFeatureChannels" in javascript
     assert "All enabled feature channels are being created or repaired" in javascript
     assert "without consuming Discord role slots" in javascript
-    assert "Secondary and affinity ladders are excluded." in javascript
+    assert "all 32 current reputation ladders" in javascript
+    assert "unique two-color ribbon" in javascript
     assert "Create reviewer role" in javascript
     assert "Create manager role" in javascript
     assert "SC Companion creates or reuses the Award Manager role." in javascript
