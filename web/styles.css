@@ -637,6 +637,92 @@ button:hover, .button-link:hover, .tabs button.active {
   background: color-mix(in srgb, var(--surface) 78%, transparent);
 }
 
+.bot-award-management {
+  display: grid;
+  gap: 18px;
+}
+
+.bot-award-management .tool-card {
+  margin: 0;
+}
+
+.award-form {
+  display: grid;
+  gap: 16px;
+}
+
+.award-card-heading h4 {
+  margin: 0 0 4px;
+}
+
+.award-card-heading p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.award-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.award-form label:not(.award-toggle) {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.award-form label > span {
+  font-weight: 700;
+}
+
+.award-form label > small,
+.award-toggle small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.award-form input:not([type="checkbox"]),
+.award-form select,
+.award-form textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.award-toggle {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.award-toggle input {
+  width: 20px;
+  min-height: 20px;
+  margin-top: 2px;
+}
+
+.award-toggle span,
+.award-toggle strong,
+.award-toggle small {
+  display: block;
+}
+
+.award-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .award-field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .bot-module-copy {
   display: grid;
   grid-template-columns: auto 1fr;

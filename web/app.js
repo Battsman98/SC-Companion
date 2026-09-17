@@ -1228,7 +1228,10 @@ async function loadGuildBotConfiguration(guildId) {
     updateChannelMode();
     outputs.botManagement.querySelector("[data-award-settings-form]")?.addEventListener("submit", saveAwardSettings);
     outputs.botManagement.querySelector("[data-award-channel-create]")?.addEventListener("click", createAwardChannel);
-    outputs.botManagement.querySelector("[data-award-create-form]")?.addEventListener("submit", createDashboardAward);
+    const awardCreateForm = outputs.botManagement.querySelector("[data-award-create-form]");
+    awardCreateForm?.addEventListener("submit", createDashboardAward);
+    awardCreateForm?.elements.award_type?.addEventListener("change", () => updateAwardRequirementField(awardCreateForm));
+    if (awardCreateForm) updateAwardRequirementField(awardCreateForm);
     outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
     outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
     outputs.botManagement.querySelectorAll("[data-award-review]").forEach((button) => button.addEventListener("click", reviewDashboardAward));
@@ -2026,28 +2029,37 @@ function renderAwardManagement(config) {
   const customAwards = definitions.filter((award) => award.award_type === "custom" && award.active);
   return `<section class="bot-award-management" data-award-management data-guild-id="${config.guild.id}">
     <div class="section-heading"><p class="guide-kicker">TESTING DISCORD</p><h3>Awards</h3><p>Create contract trackers and custom awards, review reports, and announce recipients in Discord.</p></div>
-    <form data-award-settings-form class="tool-card"><h4>Award settings</h4>
-      <label><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}> Enable the optional award system</label>
-      <div class="field-row"><label>Manager role<select name="manager_role_id">${roleOptions}</select></label><label>Discord announcement channel<select name="announcement_channel_id">${channelOptions}</select></label></div>
-      <button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span>
+    <form data-award-settings-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Award settings</h4><p>Control who manages awards and where earned awards are announced.</p></div></div>
+      <label class="award-toggle"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}><span><strong>Enable awards</strong><small>Members can report completed requirements while enabled.</small></span></label>
+      <div class="award-field-grid"><label><span>Who can manage awards?</span><select name="manager_role_id">${roleOptions}</select><small>The server owner always has access.</small></label><label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create an awards channel from the Features tab if needed.</small></label></div>
+      <div class="award-form-actions"><button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span></div>
     </form>
-    <form data-award-create-form class="tool-card"><h4>Create an award</h4>
-      <div class="field-row"><label>Name<input name="name" maxlength="80" required></label><label>Type<select name="award_type"><option value="tracker">Tracked contracts/tasks</option><option value="custom">Custom award</option></select></label></div>
-      <label>Description<textarea name="description" maxlength="500" rows="3" required></textarea></label>
-      <label>Tracker tasks or contracts<textarea name="requirements" rows="3" placeholder="One per line; leave empty for custom awards"></textarea></label>
-      <button type="submit">Create Award</button><span class="form-note" data-award-status></span>
+    <form data-award-create-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Create an award</h4><p>Build a progress-based award or a custom recognition such as Good Conduct or Bro Award.</p></div></div>
+      <div class="award-field-grid"><label><span>Award name</span><input name="name" maxlength="80" placeholder="Example: Contract Ace" required><small>Up to 80 characters.</small></label><label><span>Award type</span><select name="award_type"><option value="tracker">Tracked contracts or tasks</option><option value="custom">Custom recognition</option></select><small>Tracked awards require every listed item.</small></label></div>
+      <label><span>Description</span><textarea name="description" maxlength="500" rows="3" placeholder="Explain what this award recognizes and why it matters." required></textarea><small>Shown to managers and recipients. Up to 500 characters.</small></label>
+      <label data-award-requirements-field><span>Required contracts or tasks</span><textarea name="requirements" rows="4" placeholder="Enter one requirement per line"></textarea><small>One item per line. Reports are reviewed before progress counts.</small></label>
+      <div class="award-form-actions"><button type="submit">Create Award</button><span class="form-note" data-award-status></span></div>
     </form>
     <div class="bot-module-list"><h4>Existing awards</h4>${definitions.length ? definitions.map((award) => `<form data-award-edit-form data-award-id="${award.id}" class="bot-module-row">
       <div class="bot-module-copy"><strong>#${award.id} · ${escapeHtml(award.name)}</strong><small>${escapeHtml(award.award_type === "tracker" ? "Tracked award" : "Custom award")}</small></div>
       <div><label>Name<input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required></label><label>Description<textarea name="description" maxlength="500" rows="2" required>${escapeHtml(award.description)}</textarea></label><label>Requirements<textarea name="requirements" rows="3" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea></label><label><input type="checkbox" name="active" ${award.active ? "checked" : ""}> Active</label><button type="submit">Save Award</button><span data-award-status></span></div>
     </form>`).join("") : '<div class="state">No awards created yet.</div>'}</div>
-    <div class="tool-card"><h4>Completion reports</h4>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
-    <form data-award-grant-form class="tool-card"><h4>Grant a custom award</h4>
-      <div class="field-row"><label>Custom award<select name="award_id" required><option value="">Choose an award...</option>${customAwards.map((award) => `<option value="${award.id}">${escapeHtml(award.name)}</option>`).join("")}</select></label><label>Discord member ID<input name="member_id" inputmode="numeric" pattern="[0-9]+" required></label></div>
-      <label>Citation<textarea name="citation" maxlength="280" rows="3" required></textarea></label>
-      <button type="submit" ${customAwards.length ? "" : "disabled"}>Grant and Announce</button><span class="form-note" data-award-status></span>
+    <div class="tool-card award-card"><div class="award-card-heading"><div><h4>Completion reports</h4><p>Approve valid member reports or reject submissions that do not meet the requirement.</p></div></div>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
+    <form data-award-grant-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Grant a custom award</h4><p>Recognize a member directly and publish a short citation in Discord.</p></div></div>
+      <div class="award-field-grid"><label><span>Custom award</span><select name="award_id" required><option value="">Choose an award...</option>${customAwards.map((award) => `<option value="${award.id}">${escapeHtml(award.name)}</option>`).join("")}</select></label><label><span>Discord member ID</span><input name="member_id" inputmode="numeric" pattern="[0-9]+" placeholder="Example: 123456789012345678" required><small>Enable Developer Mode in Discord to copy an ID.</small></label></div>
+      <label><span>Citation</span><textarea name="citation" maxlength="280" rows="3" placeholder="Briefly explain why this member earned the award." required></textarea><small>Up to 280 characters. This appears in the Discord announcement.</small></label>
+      <div class="award-form-actions"><button type="submit" ${customAwards.length ? "" : "disabled"}>Grant and Announce</button><span class="form-note" data-award-status>${customAwards.length ? "" : "Create an active custom award first."}</span></div>
     </form>
   </section>`;
+}
+
+function updateAwardRequirementField(form) {
+  const custom = form.elements.award_type.value === "custom";
+  const field = form.querySelector("[data-award-requirements-field]");
+  const input = form.elements.requirements;
+  input.disabled = custom;
+  field.classList.toggle("control-disabled", custom);
+  if (custom) input.value = "";
 }
 
 function awardRequirements(value) {
