@@ -1667,20 +1667,27 @@ class GameAssistBot(commands.Bot):
             if not permissions.send_messages or not permissions.embed_links:
                 continue
             cache_key = f"guild:{guild.id}:command-guide:{channel_id}"
-            await self._sync_guild_command_guide(
+            await self._sync_singleton_embed(
                 channel,
                 cache_key,
                 build_guild_command_guide_embed(module_keys),
             )
         await self.sync_guild_timer_dashboard(guild, modules)
 
-    async def _sync_guild_command_guide(
+    async def _sync_singleton_embed(
         self,
         channel: discord.TextChannel,
         cache_key: str,
         embed: discord.Embed,
+        *,
+        silent: bool = False,
+        clear_content: bool = False,
+        history_limit: int = 100,
     ) -> None:
-        """Keep exactly one bot-owned command guide in a configured module channel."""
+        """Keep exactly one bot-owned embed with a stable title in a channel."""
+        title = embed.title or ""
+        if not title:
+            raise ValueError("A singleton embed requires a stable title")
         message_id = await self.cache.get(cache_key)
         message = None
         if message_id:
@@ -1695,19 +1702,39 @@ class GameAssistBot(commands.Bot):
                 )
                 return
 
-        title = embed.title or ""
-        existing = (
-            await self.find_recent_embed_messages(channel, {title}, limit=100)
-        ).get(title, [])
+        if message is not None and (
+            (self.user is not None and message.author.id != self.user.id)
+            or not any(candidate.title == title for candidate in message.embeds)
+        ):
+            message = None
+
+        try:
+            existing = (
+                await self.find_recent_embed_messages(
+                    channel,
+                    {title},
+                    limit=history_limit,
+                    raise_on_error=True,
+                )
+            ).get(title, [])
+        except (discord.Forbidden, discord.HTTPException):
+            logging.warning(
+                "Could not scan for the singleton embed in channel %s; will retry without posting a replacement",
+                channel.id,
+            )
+            return
         if message is None and existing:
             # Prefer the oldest surviving guide after a cache reset so a
             # restart cannot move the permanent message down the channel.
             message = min(existing, key=lambda candidate: candidate.id)
 
         if message is None:
-            message = await channel.send(embed=embed)
+            message = await channel.send(embed=embed, silent=silent)
         else:
-            await message.edit(embed=embed)
+            if clear_content:
+                await message.edit(content=None, embed=embed)
+            else:
+                await message.edit(embed=embed)
         await self.cache.set(cache_key, message.id, 315360000)
 
         for duplicate in existing:
@@ -3832,6 +3859,8 @@ class GameAssistBot(commands.Bot):
         channel: discord.abc.Messageable,
         titles: set[str],
         limit: int = 50,
+        *,
+        raise_on_error: bool = False,
     ) -> dict[str, list[discord.Message]]:
         messages_by_title = {title: [] for title in titles}
         if not titles or not hasattr(channel, "history"):
@@ -3846,6 +3875,8 @@ class GameAssistBot(commands.Bot):
                         messages_by_title[embed.title].append(message)
                         break
         except (discord.Forbidden, discord.HTTPException):
+            if raise_on_error:
+                raise
             logging.info("Could not scan for existing embed messages")
 
         return messages_by_title
@@ -3965,19 +3996,14 @@ class GameAssistBot(commands.Bot):
             return
         embed = build_loot_command_example_embed()
         cache_key = f"discord:loot-example:{channel.id}"
-        message_id = await self.cache.get(cache_key)
-        message = None
-        if isinstance(message_id, int):
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                message = await channel.fetch_message(message_id)
-        if message is None:
-            message = await self.find_recent_embed_message(channel, embed.title or "")
-        if message:
-            await message.edit(content=None, embed=embed)
-        else:
-            message = await channel.send(embed=embed, silent=True)
-        await self.cache.set(cache_key, message.id, 315360000)
-        await self.delete_recent_duplicate_embed_messages(channel, embed.title or "", message.id)
+        await self._sync_singleton_embed(
+            channel,
+            cache_key,
+            embed,
+            silent=True,
+            clear_content=True,
+            history_limit=50,
+        )
 
     async def _ensure_timer_dashboard_below_example(
         self,
