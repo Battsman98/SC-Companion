@@ -377,6 +377,7 @@ class AwardSettingsRequest(BaseModel):
     manager_role_id: int | None = None
     announcement_channel_id: int | None = None
     auto_create_role: bool = False
+    panel_channel_id: int | None = None
 
 
 class ReputationSettingsRequest(BaseModel):
@@ -385,6 +386,8 @@ class ReputationSettingsRequest(BaseModel):
     auto_create_role: bool = False
     application_channel_id: int | None = None
     activity_channel_id: int | None = None
+    guidelines_channel_id: int | None = None
+    submission_channel_id: int | None = None
 
 
 class AwardDefinitionRequest(BaseModel):
@@ -1247,9 +1250,17 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     channels = await _discord_guild_channels(guild_id) if bot_guild is not None else []
     awards_available = guild_id == state().settings.award_test_guild_id
     award_settings = await state().cache.award_settings(guild_id) if awards_available else None
+    award_channel_settings = (await state().cache.get(f"guild:{guild_id}:award-channel-settings") or {}) if awards_available else {}
     award_definitions = await state().cache.award_definitions(guild_id, active_only=False) if awards_available else []
     award_reports = await state().cache.pending_award_reports(guild_id, 50) if awards_available else []
     reputation_settings = (await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}) if awards_available else None
+    if awards_available:
+        channel_by_name = {item["name"]: int(item["id"]) for item in channels}
+        award_channel_settings.setdefault("panel_channel_id", channel_by_name.get("award-panel"))
+        reputation_settings.setdefault("guidelines_channel_id", channel_by_name.get("rep-guidelines"))
+        reputation_settings.setdefault("submission_channel_id", channel_by_name.get("rep-review-queue"))
+        reputation_settings.setdefault("application_channel_id", channel_by_name.get("rep-submissions"))
+        reputation_settings.setdefault("activity_channel_id", channel_by_name.get("activity"))
     if bot_guild is not None and awards_available:
         for award in award_definitions:
             try:
@@ -1307,6 +1318,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
                 **award_settings,
                 "manager_role_id": _snowflake(award_settings.get("manager_role_id")),
                 "announcement_channel_id": _snowflake(award_settings.get("announcement_channel_id")),
+                "panel_channel_id": _snowflake(award_channel_settings.get("panel_channel_id")),
             } if award_settings else None,
             "definitions": award_definitions,
             "pending_reports": award_reports,
@@ -1318,6 +1330,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             "submission_channel_id": _snowflake(reputation_settings.get("submission_channel_id")),
             "application_channel_id": _snowflake(reputation_settings.get("application_channel_id")),
             "activity_channel_id": _snowflake(reputation_settings.get("activity_channel_id")),
+            "guidelines_channel_id": _snowflake(reputation_settings.get("guidelines_channel_id")),
         } if reputation_settings is not None else None,
         "updated_at": stored.get("updated_at") if stored else None,
     }
@@ -1418,6 +1431,13 @@ async def save_award_dashboard_settings(guild_id: int, payload: AwardSettingsReq
     await state().cache.save_award_settings(
         guild_id, payload.enabled, manager_role_id, user.id, payload.announcement_channel_id
     )
+    if "panel_channel_id" in payload.model_fields_set:
+        if payload.panel_channel_id is not None and payload.panel_channel_id not in valid_channels:
+            raise HTTPException(status_code=422, detail="The selected award panel channel is unavailable.")
+        await state().cache.set(
+            f"guild:{guild_id}:award-channel-settings",
+            {"panel_channel_id": payload.panel_channel_id}, 315360000,
+        )
     return {"status": "saved", "manager_role_id": _snowflake(manager_role_id)}
 
 
@@ -1490,7 +1510,7 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
     roles = await _discord_guild_roles(guild_id)
     channels = await _discord_guild_channels(guild_id)
     valid_channel_ids = {int(item["id"]) for item in channels if item["type"] in {0, 5}}
-    for field_name in ("application_channel_id", "activity_channel_id"):
+    for field_name in ("application_channel_id", "activity_channel_id", "guidelines_channel_id", "submission_channel_id"):
         channel_id = getattr(payload, field_name)
         if channel_id is not None and channel_id not in valid_channel_ids:
             raise HTTPException(status_code=422, detail="The selected reputation channel is unavailable.")
@@ -1507,7 +1527,7 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
         raise HTTPException(status_code=422, detail="The selected reputation reviewer role is unavailable.")
     current = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
     settings = {**current, "enabled": payload.enabled, "reviewer_role_id": role_id}
-    for field_name in ("application_channel_id", "activity_channel_id"):
+    for field_name in ("application_channel_id", "activity_channel_id", "guidelines_channel_id", "submission_channel_id"):
         if field_name in payload.model_fields_set:
             settings[field_name] = getattr(payload, field_name)
     await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
