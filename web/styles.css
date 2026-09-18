@@ -717,6 +717,121 @@ button:hover, .button-link:hover, .tabs button.active {
   align-items: center;
 }
 
+.award-create-section {
+  display: grid;
+  gap: 16px;
+}
+
+.award-create-heading {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.award-create-heading h4 {
+  margin: 2px 0 3px;
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+}
+
+.award-create-heading p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.award-create-emblem {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  font-size: 1.35rem;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.award-create-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 300px);
+  gap: 18px;
+  align-items: start;
+}
+
+.award-create-card {
+  padding: clamp(18px, 3vw, 28px);
+  background: color-mix(in srgb, var(--surface) 94%, black);
+}
+
+.award-create-card label > span:first-child {
+  color: var(--text);
+}
+
+.award-create-card label > span b {
+  color: var(--accent);
+}
+
+.award-create-card input:not([type="checkbox"]),
+.award-create-card textarea {
+  border-color: color-mix(in srgb, var(--line) 82%, var(--muted));
+  background: color-mix(in srgb, var(--control) 88%, black);
+}
+
+.award-create-card textarea {
+  resize: vertical;
+}
+
+.award-create-divider {
+  height: 1px;
+  background: var(--line);
+}
+
+.award-auto-grant-toggle {
+  background: color-mix(in srgb, var(--control) 72%, transparent);
+}
+
+.award-create-actions {
+  justify-content: flex-start;
+}
+
+.award-create-primary {
+  min-width: 150px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.award-create-cancel {
+  background: transparent;
+  color: var(--muted);
+}
+
+.award-create-info {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 18px;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+
+.award-create-info h4,
+.award-create-info p {
+  margin: 0;
+}
+
+.award-create-info h4 {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.award-create-info p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.award-create-info strong {
+  color: var(--text);
+}
+
 .reputation-settings-form {
   max-width: 780px;
   gap: 12px;
@@ -756,6 +871,14 @@ button:hover, .button-link:hover, .tabs button.active {
 
   .reputation-reviewer-row {
     grid-template-columns: 1fr;
+  }
+
+  .award-create-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .award-create-info {
+    order: -1;
   }
 }
 

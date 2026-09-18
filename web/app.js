@@ -1244,7 +1244,24 @@ async function loadGuildBotConfiguration(guildId) {
     };
     if (awardCreateForm) {
       awardCreateForm.elements.requirements.addEventListener("input", () => syncAwardAutoGrant(awardCreateForm));
+      const titleCount = awardCreateForm.querySelector("[data-award-title-count]");
+      const descriptionCount = awardCreateForm.querySelector("[data-award-description-count]");
+      const requirementCount = awardCreateForm.querySelector("[data-award-requirement-count]");
+      const updateAwardCounts = () => {
+        titleCount.textContent = `${awardCreateForm.elements.title.value.length}/80 characters`;
+        descriptionCount.textContent = `${awardCreateForm.elements.description.value.length}/500 characters`;
+        const total = awardRequirements(awardCreateForm.elements.requirements.value).length;
+        requirementCount.textContent = `${total}/20 requirements`;
+      };
+      awardCreateForm.addEventListener("input", updateAwardCounts);
+      awardCreateForm.querySelector("[data-award-create-cancel]")?.addEventListener("click", () => {
+        awardCreateForm.reset();
+        syncAwardAutoGrant(awardCreateForm);
+        updateAwardCounts();
+        awardCreateForm.elements.title.focus();
+      });
       syncAwardAutoGrant(awardCreateForm);
+      updateAwardCounts();
     }
     outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
     outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
@@ -2113,13 +2130,21 @@ function renderAwardManagement(config) {
       <label><span>Where should awards be announced?</span><select name="announcement_channel_id">${channelOptions}</select><small>Create or repair the Awards category from the Features tab if needed.</small></label>
       <div class="award-form-actions"><button type="submit">Save Award Settings</button><span class="form-note" data-award-status></span></div>
     </form>
-    <form data-award-create-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Create an award</h4><p>Add requirements for a tracked award, or leave them blank for a custom recognition such as Good Conduct or Bro Award.</p></div></div>
-      <label><span>Title</span><input name="title" maxlength="80" placeholder="Example: Contract Ace" required><small>The name members will see. Up to 80 characters.</small></label>
-      <label><span>Description</span><textarea name="description" maxlength="500" rows="3" placeholder="Explain what this award recognizes and why it matters." required></textarea><small>Shown to managers and recipients. Up to 500 characters.</small></label>
-      <label><span>Requirements</span><textarea name="requirements" rows="4" placeholder="Enter one contract or task per line, or leave blank for a custom award"></textarea><small>Optional. When provided, members must complete every listed item.</small></label>
-      <label class="award-toggle" data-award-auto-grant><input type="checkbox" name="auto_grant"><span><strong>Automatically grant when complete</strong><small>A manager must still approve every submitted requirement. After the final approval, the bot grants and announces the award.</small></span></label>
-      <div class="award-form-actions"><button type="submit">Create Award</button><span class="form-note" data-award-status></span></div>
-    </form>
+    <section class="award-create-section">
+      <div class="award-create-heading"><span class="award-create-emblem" aria-hidden="true">🏅</span><div><p class="guide-kicker">AWARDS / NEW</p><h4>Create New Award</h4><p>Create an award as a custom recognition or a requirement-based achievement for your Discord.</p></div></div>
+      <div class="award-create-layout">
+        <form data-award-create-form class="tool-card award-form award-create-card">
+          <label><span>Award title <b aria-hidden="true">*</b></span><input name="title" maxlength="80" placeholder="Example: Contract Ace" required><small data-award-title-count>0/80 characters</small></label>
+          <div class="award-create-divider"></div>
+          <label><span>Description <b aria-hidden="true">*</b></span><textarea name="description" maxlength="500" rows="5" placeholder="What this award represents and why it matters..." required></textarea><small data-award-description-count>0/500 characters</small></label>
+          <label><span>Requirements</span><textarea name="requirements" rows="6" placeholder="Enter one contract or task per line\nExample: Complete three bounty contracts"></textarea><small><span data-award-requirement-count>0/20 requirements</span> · Leave blank to create a custom recognition such as Good Conduct or Bro Award.</small></label>
+          <label class="award-toggle award-auto-grant-toggle" data-award-auto-grant><input type="checkbox" name="auto_grant"><span><strong>Automatically grant when complete</strong><small>After a manager approves every submitted requirement, SC Companion grants and announces the award.</small></span></label>
+          <div class="award-create-divider"></div>
+          <div class="award-form-actions award-create-actions"><button type="submit" class="award-create-primary"><span aria-hidden="true">✓</span> Create Award</button><button type="button" class="award-create-cancel" data-award-create-cancel>Cancel</button><span class="form-note" data-award-status></span></div>
+        </form>
+        <aside class="tool-card award-create-info"><h4><span aria-hidden="true">ⓘ</span> Award creation</h4><p><strong>Custom award</strong><br>Leave requirements blank and grant it manually with a short citation.</p><p><strong>Tracked award</strong><br>Add one task or contract per line. Members report each item through Discord for manager review.</p><p><strong>Automatic granting</strong><br>This remains optional and never bypasses manager approval.</p></aside>
+      </div>
+    </section>
     <div class="bot-module-list"><h4>Existing awards</h4>${definitions.length ? definitions.map((award) => `<form data-award-edit-form data-award-id="${award.id}" class="bot-module-row">
       <div class="bot-module-copy"><strong>#${award.id} · ${escapeHtml(award.name)}</strong><small>${escapeHtml(award.award_type === "tracker" ? "Tracked award" : "Custom award")}</small></div>
       <div><label>Name<input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required></label><label>Description<textarea name="description" maxlength="500" rows="2" required>${escapeHtml(award.description)}</textarea></label><label>Requirements<textarea name="requirements" rows="3" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea></label><label class="award-toggle ${award.requirements?.length ? "" : "control-disabled"}" data-award-auto-grant><input type="checkbox" name="auto_grant" ${award.auto_grant ? "checked" : ""} ${award.requirements?.length ? "" : "disabled"}><span><strong>Automatically grant when complete</strong><small>Requires manager approval of every report.</small></span></label><label><input type="checkbox" name="active" ${award.active ? "checked" : ""}> Active</label><button type="submit">Save Award</button><span data-award-status></span></div>

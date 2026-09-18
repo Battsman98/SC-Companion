@@ -95,7 +95,10 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "data-award-feature-enabled" in javascript
     assert 'enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked' in javascript
     assert "Create an active award first." in javascript
-    assert '<span>Title</span><input name="title"' in javascript
+    assert '<span>Award title <b aria-hidden="true">*</b></span><input name="title"' in javascript
+    assert 'class="award-create-layout"' in javascript
+    assert "data-award-description-count" in javascript
+    assert "data-award-create-cancel" in javascript
     assert 'award_type: requirements.length ? "tracker" : "custom"' in javascript
     assert "Automatically grant when complete" in javascript
     assert "Members submit progress in Discord with <code>/award report</code>." in javascript
