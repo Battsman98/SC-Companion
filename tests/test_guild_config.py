@@ -118,7 +118,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert 'class="tool-card award-edit-disclosure"' in javascript
     assert "data-award-delete" in javascript
     assert 'method: "DELETE"' in javascript
-    assert '<summary><span>${escapeHtml(award.name)}</span>' in javascript
+    assert 'class="award-summary-title"' in javascript
+    assert "award-summary-medal" in javascript
     assert "award-status-badge" in javascript
     assert "form.elements.auto_grant" not in javascript
     assert 'data-award-review' in javascript
