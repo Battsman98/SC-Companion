@@ -743,6 +743,42 @@ button:hover, .button-link:hover, .tabs button.active {
 .discord-server-channel > strong { font-weight: 550; }
 .bot-channel-assignments-heading { margin-top: 4px; }
 
+.feature-assignment-directory {
+  width: min(100%, 980px);
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 88%, black);
+}
+
+.feature-assignment-directory .discord-server-category:first-child { border-top: 0; }
+.feature-assignment-directory .discord-server-category:last-child { border-bottom: 0; }
+
+.feature-assignment-category-items {
+  display: grid;
+  gap: 10px;
+  max-height: min(560px, 62vh);
+  padding: 12px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  scrollbar-width: thin;
+}
+
+.feature-assignment-category-items .bot-module-row {
+  grid-template-columns: minmax(200px, 0.85fr) minmax(250px, 1.15fr);
+  padding: 12px;
+}
+
+.feature-assignment-category-items > .discord-channel-empty {
+  padding: 14px 10px;
+  margin: 0;
+}
+
+@media (max-width: 680px) {
+  .feature-assignment-category-items .bot-module-row { grid-template-columns: 1fr; }
+}
+
 .bot-module-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr);
