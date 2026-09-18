@@ -1876,7 +1876,8 @@ async def review_award_from_dashboard(guild_id: int, report_id: int, payload: Aw
                     announcement_channel_id = announcement["id"] if announcement else None
                 await _send_award_announcement(
                     announcement_channel_id,
-                    f"🏆 <@{result['user_id']}> earned **{award['name']}**\n**Reason:** {result['citation']}",
+                    f"🏆 <@{result['user_id']}> earned **{award['name']}**\n"
+                    f"**Award description:** {award['description']}",
                 )
     return {"status": payload.decision, "award_granted": granted, "role_id": _snowflake(role_id)}
 
@@ -1911,7 +1912,8 @@ async def grant_award_from_dashboard(guild_id: int, payload: AwardGrantRequest,
         announcement_channel_id = announcement["id"] if announcement else None
     await _send_award_announcement(
         announcement_channel_id,
-        f"🏆 <@{member['id']}> earned **{award['name']}**\n**Reason:** {payload.citation.strip()}",
+        f"🏆 <@{member['id']}> earned **{award['name']}**\n"
+        f"**Award description:** {award['description']}",
     )
     return {"status": "granted", "member": member, "award": award["name"], "role_id": _snowflake(role_id)}
 

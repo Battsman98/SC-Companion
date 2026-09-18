@@ -8192,13 +8192,13 @@ async def _grant_approved_award_nomination(bot: "GameAssistBot", guild: discord.
     announced = False
     if granted:
         announced = await _announce_award(
-            bot, guild.id, int(result["user_id"]), str(award["name"]), str(result["citation"]),
+            bot, guild.id, int(result["user_id"]), str(award["name"]), str(award["description"]),
         )
     return granted, role_assigned, announced
 
 
 async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
-                          award_name: str, citation: str) -> bool:
+                          award_name: str, award_description: str) -> bool:
     settings = await bot.cache.award_settings(guild_id)
     channel_id = settings.get("announcement_channel_id")
     channel = bot.get_channel(int(channel_id)) if channel_id else None
@@ -8214,7 +8214,7 @@ async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
         description=f"<@{user_id}> has earned this award.",
         color=discord.Color.gold(),
     )
-    embed.add_field(name="Reason", value=citation[:AWARD_CITATION_LIMIT], inline=False)
+    embed.add_field(name="Award description", value=award_description[:AWARD_DESCRIPTION_LIMIT], inline=False)
     try:
         await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
         return True
@@ -8671,7 +8671,9 @@ async def award_grant_command(interaction: discord.Interaction, member: discord.
         except (discord.Forbidden, discord.HTTPException):
             logging.warning("Could not assign award role %s to member %s", role.id, member.id)
     if granted:
-        await _announce_award(bot, interaction.guild_id or 0, member.id, award["name"], citation.strip())
+        await _announce_award(
+            bot, interaction.guild_id or 0, member.id, award["name"], award["description"],
+        )
     await interaction.response.send_message(message)
 
 

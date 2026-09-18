@@ -92,7 +92,7 @@ def test_award_nomination_uses_member_search_award_descriptions_and_pages() -> N
     assert creation.role_color.default == "#D5A94E"
 
 
-def test_award_review_notifications_are_role_private_and_announcements_use_reason() -> None:
+def test_award_review_notifications_are_role_private_and_announcements_use_description() -> None:
     from src.bot import _announce_award, _ensure_award_review_channel
 
     private_source = inspect.getsource(_ensure_award_review_channel)
@@ -100,7 +100,7 @@ def test_award_review_notifications_are_role_private_and_announcements_use_reaso
     assert 'item.name == "award-review"' in private_source
     assert "view_channel=False" in private_source
     assert "manager_role: discord.PermissionOverwrite(view_channel=True" in private_source
-    assert 'name="Reason"' in announcement_source
+    assert 'name="Award description"' in announcement_source
 
 
 def test_award_review_panel_lists_pending_recommendations_in_pages() -> None:
