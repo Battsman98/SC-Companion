@@ -12,6 +12,8 @@ from src.bot import (
     AwardNominationView,
     AwardPanelView,
     AwardRecommendationModal,
+    AwardReportSelect,
+    AwardReviewView,
     GameAssistBot,
     _award_list_embed,
     _award_requirements,
@@ -48,6 +50,7 @@ def test_award_panel_is_persistent_and_lists_awards_in_pages() -> None:
         "sc-companion:awards:browse",
         "sc-companion:awards:submit",
         "sc-companion:awards:create",
+        "sc-companion:awards:review",
     }
     awards = [
         {"id": index, "name": f"Award {index}", "description": "Recognition",
@@ -82,6 +85,26 @@ def test_award_nomination_uses_member_search_award_descriptions_and_pages() -> N
 
     modal = AwardRecommendationModal(awards[0], [object()])
     assert modal.reason.label == "Why do you recommend this award?"
+
+
+def test_award_review_panel_lists_pending_recommendations_in_pages() -> None:
+    reports = [
+        {
+            "id": index, "award_name": "Service Award", "user_id": 1000 + index,
+            "user_name": f"Pilot {index}", "citation": f"Recommendation {index}",
+        }
+        for index in range(1, 27)
+    ]
+    view = AwardReviewView(reports, manager_id=99)
+    report_select = next(item for item in view.children if isinstance(item, AwardReportSelect))
+
+    assert report_select.max_values == 1
+    assert len(report_select.options) == 25
+    assert report_select.options[0].label == "#1 · Service Award"
+    assert report_select.options[0].description == "Pilot 1: Recommendation 1"
+    assert view.next.disabled is False
+    assert view.approve.disabled is True
+    assert view.reject.disabled is True
 
 
 def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> None:

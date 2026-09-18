@@ -7866,6 +7866,133 @@ class AwardNominationView(discord.ui.View):
         await interaction.response.send_modal(AwardRecommendationModal(award, self.nominees))
 
 
+class AwardReportSelect(discord.ui.Select):
+    def __init__(self, reports: list[dict], page: int) -> None:
+        start = page * 25
+        options = [
+            discord.SelectOption(
+                label=f"#{report['id']} · {report['award_name']}"[:100],
+                value=str(report["id"]),
+                description=f"{report['user_name']}: {report['citation']}"[:100],
+            )
+            for report in reports[start:start + 25]
+        ]
+        super().__init__(
+            placeholder="Choose an award recommendation to review", options=options,
+            min_values=1, max_values=1, row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if not isinstance(view, AwardReviewView):
+            return
+        view.report_id = int(self.values[0])
+        view.approve.disabled = False
+        view.reject.disabled = False
+        await interaction.response.edit_message(content=view.summary(), view=view)
+
+
+class AwardReviewView(discord.ui.View):
+    def __init__(self, reports: list[dict], manager_id: int, page: int = 0) -> None:
+        super().__init__(timeout=600)
+        self.reports = reports
+        self.manager_id = manager_id
+        self.page = page
+        self.report_id: int | None = None
+        if reports:
+            self.add_item(AwardReportSelect(reports, page))
+        self.previous.disabled = page <= 0
+        self.next.disabled = (page + 1) * 25 >= len(reports)
+        self.approve.disabled = True
+        self.reject.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        bot = interaction.client
+        if interaction.user.id == self.manager_id and isinstance(bot, GameAssistBot):
+            if await _has_award_manager_role(interaction, bot):
+                return True
+        await interaction.response.send_message(
+            "Only the configured Award Manager role can use this review session.", ephemeral=True,
+        )
+        return False
+
+    def selected_report(self) -> dict | None:
+        return next((report for report in self.reports if report["id"] == self.report_id), None)
+
+    def summary(self, notice: str = "") -> str:
+        if not self.reports:
+            body = "No award recommendations are awaiting review."
+        else:
+            report = self.selected_report()
+            if report is None:
+                body = "Choose a recommendation to see its details, then approve or reject it."
+            else:
+                body = (
+                    f"**Award:** {report['award_name']}\n"
+                    f"**Recipient:** <@{report['user_id']}>\n"
+                    f"**Recommendation reason:** {report['citation']}"
+                )
+            pages = max(1, (len(self.reports) + 24) // 25)
+            body += f"\n\nQueue: {len(self.reports)} pending · Page {self.page + 1} of {pages}"
+        return (f"{notice}\n\n{body}" if notice else body)[:1900]
+
+    def rebuild_report_select(self) -> None:
+        for item in list(self.children):
+            if isinstance(item, AwardReportSelect):
+                self.remove_item(item)
+        if self.reports:
+            self.page = min(self.page, (len(self.reports) - 1) // 25)
+            self.add_item(AwardReportSelect(self.reports, self.page))
+        else:
+            self.page = 0
+        self.report_id = None
+        self.previous.disabled = self.page <= 0
+        self.next.disabled = (self.page + 1) * 25 >= len(self.reports)
+        self.approve.disabled = True
+        self.reject.disabled = True
+
+    async def review(self, interaction: discord.Interaction, decision: str) -> None:
+        report = self.selected_report()
+        bot = interaction.client
+        if report is None or not isinstance(bot, GameAssistBot) or interaction.guild_id is None:
+            await interaction.response.send_message("Choose a pending recommendation first.", ephemeral=True)
+            return
+        result = await bot.cache.review_award_report(
+            interaction.guild_id, report["id"], decision, interaction.user.id,
+        )
+        if result is None:
+            notice = "That recommendation was already reviewed."
+        else:
+            notice = f"Recommendation `#{report['id']}` was **{decision}**."
+        self.reports = await bot.cache.pending_award_reports(interaction.guild_id, 500)
+        self.rebuild_report_select()
+        await interaction.response.edit_message(content=self.summary(notice), view=self)
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=1)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        self.page = max(0, self.page - 1)
+        self.rebuild_report_select()
+        await interaction.response.edit_message(content=self.summary(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=1)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        self.page = min((len(self.reports) - 1) // 25, self.page + 1)
+        self.rebuild_report_select()
+        await interaction.response.edit_message(content=self.summary(), view=self)
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, row=2)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self.review(interaction, "approved")
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, row=2)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self.review(interaction, "rejected")
+
+
 class AwardPanelView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
@@ -7909,6 +8036,25 @@ class AwardPanelView(discord.ui.View):
             await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
             return
         await interaction.response.send_modal(AwardCreationModal())
+
+    @discord.ui.button(label="Review Awards", style=discord.ButtonStyle.secondary,
+                       emoji="🔎", custom_id="sc-companion:awards:review")
+    async def review_awards(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None:
+            await interaction.response.send_message("Award review is unavailable here.", ephemeral=True)
+            return
+        if await _enabled_award_settings(interaction, bot) is None:
+            return
+        if not await _has_award_manager_role(interaction, bot):
+            await interaction.response.send_message(
+                "Only the configured Award Manager role can review awards.", ephemeral=True,
+            )
+            return
+        reports = await bot.cache.pending_award_reports(interaction.guild.id, 500)
+        view = AwardReviewView(reports, interaction.user.id)
+        await interaction.response.send_message(content=view.summary(), view=view, ephemeral=True)
 
 
 async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
