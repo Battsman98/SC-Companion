@@ -3613,15 +3613,11 @@ class GameAssistBot(commands.Bot):
             )
         review_queue = discord.utils.find(lambda item: item.name == "rep-review-queue", guild.text_channels)
         legacy_submission = discord.utils.find(lambda item: item.name == "rep-submissions", guild.text_channels)
-        if review_queue is None and legacy_submission is not None:
-            review_queue = await legacy_submission.edit(
-                name="rep-review-queue", category=category,
-                topic="Private reputation application queue for the configured reviewer role.",
-                overwrites=private_overwrites,
-                reason="Separate the private reputation queue from the public application panel",
-            )
-            legacy_submission = None
-        elif review_queue is None:
+        legacy_submission_is_private = bool(
+            legacy_submission
+            and legacy_submission.overwrites_for(guild.default_role).view_channel is False
+        )
+        if review_queue is None:
             review_queue = await guild.create_text_channel(
                 "rep-review-queue", category=category,
                 topic="Private reputation application queue for the configured reviewer role.",
@@ -3635,8 +3631,10 @@ class GameAssistBot(commands.Bot):
                 overwrites=private_overwrites,
                 reason="Repair private reputation submission review queue",
             )
-        submission = legacy_submission or discord.utils.find(
-            lambda item: item.name == "rep-submissions", guild.text_channels
+        submission = (None if legacy_submission_is_private else legacy_submission) or discord.utils.find(
+            lambda item: item.name == "rep-submissions"
+            and item.overwrites_for(guild.default_role).view_channel is not False,
+            guild.text_channels,
         )
         if submission is None:
             submission = await guild.create_text_channel(
@@ -3752,6 +3750,7 @@ class GameAssistBot(commands.Bot):
         else:
             await activity_message.edit(embed=activity_embed)
         settings["submission_channel_id"] = review_queue.id
+        settings["application_channel_id"] = submission.id
         settings["activity_channel_id"] = activity_channel.id
         settings.pop("submission_forum_id", None)
         await self.cache.set(settings_key, settings, 315360000)

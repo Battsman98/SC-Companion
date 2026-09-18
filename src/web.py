@@ -1511,23 +1511,14 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
                 }],
             },
         )
-    legacy_submission = next(
-        (item for item in channels if item["name"] == "rep-submissions" and item["type"] == 0), None
+    application_channel_id = int(settings.get("application_channel_id") or 0)
+    application_channel = next(
+        (item for item in channels if int(item["id"]) == application_channel_id and item["type"] == 0), None
     )
     review_queue = next(
         (item for item in channels if item["name"] == "rep-review-queue" and item["type"] == 0), None
     )
-    if review_queue is None and legacy_submission is not None:
-        review_queue = await _discord_api(
-            "PATCH", f"/channels/{legacy_submission['id']}", bot_token=_public_bot_token(),
-            json_payload={
-                "name": "rep-review-queue", "parent_id": str(category["id"]),
-                "topic": "Private reputation application queue for the configured reviewer role.",
-                "permission_overwrites": private_overwrites,
-            },
-        )
-        legacy_submission = None
-    elif review_queue is None:
+    if review_queue is None:
         review_queue = await _discord_api(
             "POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
             json_payload={
@@ -1550,7 +1541,7 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
     made = {}
     for name, channel_type, topic in specs:
         channel = (
-            legacy_submission if name == "rep-submissions"
+            application_channel if name == "rep-submissions"
             else next((item for item in channels if item["name"] == name and item["type"] == channel_type), None)
         )
         if channel is None:
@@ -1587,6 +1578,7 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
             json_payload=activity_payload,
         )
     settings["submission_channel_id"] = int(review_queue["id"])
+    settings["application_channel_id"] = int(made["rep-submissions"]["id"])
     settings["activity_channel_id"] = int(activity["id"])
     settings.pop("submission_forum_id", None)
     guide_payload = {
