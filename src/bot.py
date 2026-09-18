@@ -77,6 +77,7 @@ LOOT_CHANNEL_ID = 1533075933441822830
 FEEDBACK_TEMPLATE_CACHE_PREFIX = "discord:feedback-template-thread"
 VISITOR_ROLE_NAME = "Visitor"
 BOT_MANAGER_ROLE_NAME = "Bot Manager"
+DEFAULT_AWARD_ROLE_COLOR = 0xD5A94E
 SC_COMPANION_CATEGORY_NAME = "🚀 SC COMPANION"
 SC_COMPANION_CATEGORY_ALIASES = {SC_COMPANION_CATEGORY_NAME.casefold(), "sc companion"}
 VISITOR_CATEGORY_NAME = "SC Companion Hub"
@@ -3522,7 +3523,7 @@ class GameAssistBot(commands.Bot):
             return
         if self._is_public_instance() and guild.me.guild_permissions.manage_roles:
             for award in await self.cache.award_definitions(guild.id, active_only=False):
-                await _ensure_award_role(guild, award["name"])
+                await _ensure_award_role(guild, award["name"], int(award["role_color"]))
         category = discord.utils.find(
             lambda item: item.name.casefold() in {
                 "🏆 awards".casefold(), "🏆 awards & progress".casefold(),
@@ -7697,6 +7698,10 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
         label="Requirements (optional, one per line)", style=discord.TextStyle.paragraph,
         required=False, max_length=2000,
     )
+    role_color = discord.ui.TextInput(
+        label="Discord role color (hex)", placeholder="#D5A94E", default="#D5A94E",
+        min_length=7, max_length=7,
+    )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         bot = interaction.client
@@ -7709,6 +7714,13 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
             await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
             return
         tasks = _award_requirements(str(self.requirements.value))
+        color_text = str(self.role_color.value).strip()
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color_text):
+            await interaction.response.send_message(
+                "Role color must be a hex value such as #D5A94E.", ephemeral=True,
+            )
+            return
+        role_color = int(color_text[1:], 16)
         error = _award_text_error(str(self.award_name.value), str(self.award_description.value), tasks)
         if error:
             await interaction.response.send_message(error, ephemeral=True)
@@ -7720,9 +7732,9 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
         award_id = await bot.cache.create_award_definition(
             interaction.guild.id, str(self.award_name.value).strip(),
             str(self.award_description.value).strip(), "tracker" if tasks else "custom",
-            tasks, interaction.user.id, auto_grant=False,
+            tasks, interaction.user.id, auto_grant=False, role_color=role_color,
         )
-        role = await _ensure_award_role(interaction.guild, str(self.award_name.value).strip())
+        role = await _ensure_award_role(interaction.guild, str(self.award_name.value).strip(), role_color)
         role_note = f" Discord role: {role.mention}." if role is not None else (
             " SC Companion needs Manage Roles permission to create the matching award role."
         )
@@ -7765,18 +7777,20 @@ class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
         mentions = ", ".join(nominee.mention for nominee in self.nominees)
         settings = await bot.cache.award_settings(interaction.guild.id)
         manager_role_id = settings.get("manager_role_id")
-        if manager_role_id and interaction.channel is not None:
+        if manager_role_id:
             try:
                 manager_role = interaction.guild.get_role(int(manager_role_id))
                 if (manager_role is not None and not manager_role.mentionable
                         and interaction.guild.me is not None
                         and interaction.guild.me.guild_permissions.manage_roles):
                     await manager_role.edit(mentionable=True, reason="SC Companion award review notifications")
-                await interaction.channel.send(
-                    f"<@&{manager_role_id}> **{len(report_ids)} award recommendation(s) ready for review**\n"
-                    f"Award: **{self.award['name']}**\nRecipients: {mentions}"[:1900],
-                    allowed_mentions=discord.AllowedMentions(roles=True, users=False),
-                )
+                review_channel = await _ensure_award_review_channel(interaction.guild, int(manager_role_id))
+                if review_channel is not None:
+                    await review_channel.send(
+                        f"<@&{manager_role_id}> **{len(report_ids)} award recommendation(s) ready for review**\n"
+                        f"Award: **{self.award['name']}**\nRecipients: {mentions}"[:1900],
+                        allowed_mentions=discord.AllowedMentions(roles=True, users=False),
+                    )
             except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                 logging.warning("Could not notify award manager role %s in guild %s",
                                 manager_role_id, interaction.guild.id)
@@ -8093,22 +8107,62 @@ class AwardPanelView(discord.ui.View):
         await interaction.response.send_message(content=view.summary(), view=view, ephemeral=True)
 
 
-async def _ensure_award_role(guild: discord.Guild, award_name: str) -> discord.Role | None:
+async def _ensure_award_role(guild: discord.Guild, award_name: str,
+                             role_color: int | None = None) -> discord.Role | None:
     role = discord.utils.find(
         lambda item: item.name.casefold() == award_name.casefold() and not item.managed,
         guild.roles,
     )
     if role is not None:
+        if role_color is not None and role.color.value != role_color:
+            with suppress(discord.Forbidden, discord.HTTPException):
+                await role.edit(color=discord.Color(role_color), mentionable=True,
+                                reason="Synchronize SC Companion award role color")
         return role
     if guild.me is None or not guild.me.guild_permissions.manage_roles:
         return None
     try:
         return await guild.create_role(
-            name=award_name[:100], mentionable=True, reason="SC Companion award role",
+            name=award_name[:100],
+            color=discord.Color(DEFAULT_AWARD_ROLE_COLOR if role_color is None else role_color),
+            mentionable=True, reason="SC Companion award role",
         )
     except (discord.Forbidden, discord.HTTPException):
         logging.warning("Could not create award role %s in guild %s", award_name, guild.id)
         return None
+
+
+async def _ensure_award_review_channel(guild: discord.Guild, manager_role_id: int) -> discord.TextChannel | None:
+    """Create or repair a reviewer-only notification channel for award managers."""
+    manager_role = guild.get_role(manager_role_id)
+    if manager_role is None or guild.me is None or not guild.me.guild_permissions.manage_channels:
+        return None
+    category = discord.utils.find(
+        lambda item: item.name.casefold() in {"🏆 awards".casefold(), "🏆 awards & progress".casefold()},
+        guild.categories,
+    )
+    if category is None:
+        return None
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        manager_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+    }
+    channel = discord.utils.find(
+        lambda item: item.name == "award-review" and item.category_id == category.id,
+        guild.text_channels,
+    )
+    if channel is None:
+        return await guild.create_text_channel(
+            "award-review", category=category,
+            topic="Private SC Companion award recommendations awaiting manager review.",
+            overwrites=overwrites, reason="Private award manager review notifications",
+        )
+    await channel.edit(
+        topic="Private SC Companion award recommendations awaiting manager review.",
+        overwrites=overwrites, reason="Repair private award manager review access",
+    )
+    return channel
 
 
 async def _grant_approved_award_nomination(bot: "GameAssistBot", guild: discord.Guild, result: dict,
@@ -8121,7 +8175,7 @@ async def _grant_approved_award_nomination(bot: "GameAssistBot", guild: discord.
         guild.id, int(award["id"]), int(result["user_id"]), str(result["user_name"]),
         str(result["citation"]), reviewer_id,
     )
-    role = await _ensure_award_role(guild, str(award["name"]))
+    role = await _ensure_award_role(guild, str(award["name"]), int(award["role_color"]))
     member = guild.get_member(int(result["user_id"]))
     if member is None:
         with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -8160,7 +8214,7 @@ async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
         description=f"<@{user_id}> has earned this award.",
         color=discord.Color.gold(),
     )
-    embed.add_field(name="Citation", value=citation[:AWARD_CITATION_LIMIT], inline=False)
+    embed.add_field(name="Reason", value=citation[:AWARD_CITATION_LIMIT], inline=False)
     try:
         await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
         return True
@@ -8409,11 +8463,13 @@ async def award_configure_command(interaction: discord.Interaction, enabled: boo
 @award_group.command(name="create", description="Create a tracked or custom award.")
 @app_commands.describe(name="Award name", description="What this award recognizes",
                        award_type="Tracked awards require reported tasks; custom awards are granted directly",
-                       requirements="Tracked task/contract names separated by semicolons")
+                       requirements="Tracked task/contract names separated by semicolons",
+                       role_color="Discord role color as a hex value, such as #D5A94E")
 @app_commands.choices(award_type=[app_commands.Choice(name="Tracked contracts/tasks", value="tracker"),
                                   app_commands.Choice(name="Custom award", value="custom")])
 async def award_create_command(interaction: discord.Interaction, name: str, description: str,
-                               award_type: app_commands.Choice[str], requirements: str | None = None) -> None:
+                               award_type: app_commands.Choice[str], requirements: str | None = None,
+                               role_color: str = "#D5A94E") -> None:
     bot = interaction.client
     if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
         return
@@ -8421,6 +8477,10 @@ async def award_create_command(interaction: discord.Interaction, name: str, desc
         await interaction.response.send_message("Only the server owner or configured award role can create awards.", ephemeral=True)
         return
     tasks = _award_requirements(requirements)
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", role_color.strip()):
+        await interaction.response.send_message("Role color must be a hex value such as #D5A94E.", ephemeral=True)
+        return
+    color_value = int(role_color.strip()[1:], 16)
     error = _award_text_error(name, description, tasks)
     if error:
         await interaction.response.send_message(error, ephemeral=True)
@@ -8437,9 +8497,9 @@ async def award_create_command(interaction: discord.Interaction, name: str, desc
         return
     award_id = await bot.cache.create_award_definition(
         interaction.guild_id or 0, name.strip(), description.strip(), award_type.value, tasks, interaction.user.id,
-        auto_grant=False,
+        auto_grant=False, role_color=color_value,
     )
-    role = await _ensure_award_role(interaction.guild, name.strip()) if interaction.guild else None
+    role = await _ensure_award_role(interaction.guild, name.strip(), color_value) if interaction.guild else None
     role_note = f" Discord role: {role.mention}." if role is not None else ""
     await interaction.response.send_message(
         f"Created **{name.strip()}** as award `#{award_id}`.{role_note}", ephemeral=True,
@@ -8602,7 +8662,9 @@ async def award_grant_command(interaction: discord.Interaction, member: discord.
     message = f"<@{member.id}> earned **{award['name']}** — {citation.strip()}" if granted else (
         f"<@{member.id}> already has **{award['name']}**."
     )
-    role = await _ensure_award_role(interaction.guild, award["name"]) if interaction.guild else None
+    role = await _ensure_award_role(
+        interaction.guild, award["name"], int(award["role_color"]),
+    ) if interaction.guild else None
     if role is not None and role not in member.roles:
         try:
             await member.add_roles(role, reason=f"Granted SC Companion award: {award['name']}")

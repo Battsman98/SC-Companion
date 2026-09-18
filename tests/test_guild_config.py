@@ -289,13 +289,13 @@ def test_award_role_is_created_reused_and_assigned(monkeypatch) -> None:
         assert role_id == 777
         assert discord_api.await_args_list[0].args[:2] == ("POST", "/guilds/123/roles")
         assert discord_api.await_args_list[0].kwargs["json_payload"] == {
-            "name": "Service Award", "mentionable": True,
+            "name": "Service Award", "color": 14002510, "mentionable": True,
         }
         assert discord_api.await_args_list[1].args[:2] == (
             "PUT", "/guilds/123/members/456/roles/777",
         )
 
-        roles.return_value = [{"id": 777, "name": "Service Award", "managed": False}]
+        roles.return_value = [{"id": 777, "name": "Service Award", "managed": False, "color": 14002510}]
         discord_api.reset_mock()
         assert (await web._ensure_discord_award_role(123, "service award"))["id"] == 777
         discord_api.assert_not_awaited()

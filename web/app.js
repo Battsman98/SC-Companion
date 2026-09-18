@@ -2187,6 +2187,7 @@ function renderAwardManagement(config) {
       <div class="award-create-layout">
         <form data-award-create-form class="tool-card award-form award-create-card">
           <label><span>Award title <b aria-hidden="true">*</b></span><input name="title" maxlength="80" placeholder="Example: Outstanding Service" required><small data-award-title-count>0/80 characters</small></label>
+          <label><span>Discord role color</span><input name="role_color" type="color" value="#d5a94e"><small>This color is used for the award's Discord role.</small></label>
           <div class="award-create-divider"></div>
           <label><span>Description <b aria-hidden="true">*</b></span><textarea name="description" maxlength="500" rows="5" placeholder="What this award represents and why it matters..." required></textarea><small data-award-description-count>0/500 characters</small></label>
           <label><span>Requirements</span><textarea name="requirements" rows="6" placeholder="Enter one task or achievement per line\nExample: Complete a community event\nExample: Assist another member"></textarea><small><span data-award-requirement-count>0/20 requirements</span> · Leave blank when the award does not require tracked progress.</small></label>
@@ -2200,6 +2201,7 @@ function renderAwardManagement(config) {
       <div class="award-existing-list">${definitions.length ? definitions.map((award) => `<details class="tool-card award-edit-disclosure"><summary><span>${escapeHtml(award.name)}</span><span class="award-disclosure-chevron" aria-hidden="true">⌄</span></summary><form data-award-edit-form data-award-id="${award.id}" class="award-form award-create-card award-edit-card">
         <div class="award-edit-heading"><div><span class="award-type-badge">${escapeHtml(award.award_type === "tracker" ? "Tracked award" : "Custom award")}</span><h5>#${award.id} · ${escapeHtml(award.name)}</h5></div><span class="award-status-badge ${award.active ? "is-active" : "is-inactive"}">${award.active ? "Active" : "Inactive"}</span></div>
         <label><span>Award title <b aria-hidden="true">*</b></span><input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required><small>${award.name.length}/80 characters</small></label>
+        <label><span>Discord role color</span><input name="role_color" type="color" value="#${Number(award.role_color ?? 14002510).toString(16).padStart(6, "0")}"><small>Saving updates the matching Discord role color.</small></label>
         <div class="award-create-divider"></div>
         <label><span>Description <b aria-hidden="true">*</b></span><textarea name="description" maxlength="500" rows="5" required>${escapeHtml(award.description)}</textarea><small>${award.description.length}/500 characters</small></label>
         <label><span>Requirements</span><textarea name="requirements" rows="6" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea><small>${award.requirements?.length || 0}/20 requirements${award.award_type === "custom" ? " · Custom awards do not track requirements." : ""}</small></label>
@@ -2244,7 +2246,7 @@ async function createDashboardAward(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const requirements = awardRequirements(form.elements.requirements.value);
-  await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements });
+  await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements, role_color: form.elements.role_color.value });
 }
 
 async function saveReputationSettings(event) {
@@ -2270,7 +2272,7 @@ async function editDashboardAward(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const requirements = awardRequirements(form.elements.requirements.value);
-  await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements, active: form.elements.active.checked });
+  await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements, active: form.elements.active.checked, role_color: form.elements.role_color.value });
 }
 
 async function deleteDashboardAward(event) {
