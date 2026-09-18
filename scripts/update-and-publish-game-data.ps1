@@ -2,11 +2,12 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $snapshotRelative = "data/blueprints_snapshot.json"
-$snapshotPath = Join-Path $projectRoot $snapshotRelative
 $pythonPath = Join-Path $projectRoot ".venv\Scripts\python.exe"
-$importerPath = Join-Path $projectRoot "scripts\update_game_data_from_p4k.py"
+$importerRelative = "scripts/update_game_data_from_p4k.py"
+$toolsPath = Join-Path $projectRoot "tools\sc-game-data"
 $gameArchive = "C:\StarCitizen\LIVE\Data.p4k"
 $productionStatusUrl = "https://sccompanion.org/api/game-data/status"
+$deploymentBranch = "codex/sc-companion-public"
 
 function Invoke-Checked {
     param(
@@ -23,33 +24,37 @@ Write-Host ""
 Write-Host "STAR CITIZEN MISSION + BLUEPRINT UPDATE" -ForegroundColor Cyan
 Write-Host "This publishes data from your installed LIVE game files." -ForegroundColor DarkGray
 
-foreach ($requiredPath in @($gameArchive, $pythonPath, $importerPath)) {
+foreach ($requiredPath in @(
+    $gameArchive,
+    $pythonPath,
+    (Join-Path $projectRoot $importerRelative),
+    (Join-Path $toolsPath "unp4k.exe"),
+    (Join-Path $toolsPath "unforge.exe")
+)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required file not found: $requiredPath"
     }
 }
 
 Push-Location $projectRoot
+$worktreePath = $null
 try {
-    $branch = (& git branch --show-current).Trim()
-    if ($LASTEXITCODE -ne 0 -or $branch -ne "main") {
-        throw "Open the project on the main branch before running the updater."
-    }
-    $trackedChanges = @(& git status --porcelain --untracked-files=no)
-    if ($LASTEXITCODE -ne 0) {
-        throw "The project status could not be checked."
-    }
-    if ($trackedChanges.Count -gt 0) {
-        throw "The project has other unfinished changes. Finish or set them aside before updating game data."
-    }
-
     Write-Host ""
     Write-Host "1/5  Checking for the latest project version..."
-    Invoke-Checked git pull --ff-only origin main
+    Invoke-Checked git fetch origin $deploymentBranch
+
+    # Build and publish from an isolated checkout. This leaves the user's current
+    # branch and any unfinished work exactly as they are.
+    $worktreePath = Join-Path ([System.IO.Path]::GetTempPath()) ("sc-game-data-update-" + [guid]::NewGuid().ToString("N"))
+    Invoke-Checked git worktree add --detach $worktreePath "origin/$deploymentBranch"
+    Set-Location $worktreePath
+
+    $snapshotPath = Join-Path $worktreePath $snapshotRelative
+    $importerPath = Join-Path $worktreePath $importerRelative
 
     Write-Host ""
     Write-Host "2/5  Reading Data.p4k and rebuilding the database..."
-    Invoke-Checked $pythonPath $importerPath
+    Invoke-Checked $pythonPath $importerPath --tools-dir $toolsPath
 
     & git diff --quiet -- $snapshotRelative
     if ($LASTEXITCODE -eq 0) {
@@ -66,6 +71,8 @@ try {
     if ([string]::IsNullOrWhiteSpace($version)) {
         throw "The rebuilt snapshot does not contain a game version."
     }
+    $expectedBlueprints = @($snapshot.items).Count
+    $expectedMissions = @($snapshot.missions).Count
 
     Write-Host ""
     Write-Host "3/5  Running safety checks..."
@@ -75,7 +82,7 @@ try {
     Write-Host "4/5  Publishing $version..."
     Invoke-Checked git add -- $snapshotRelative
     Invoke-Checked git commit -m "Update game data to $version" -- $snapshotRelative
-    Invoke-Checked git push origin main
+    Invoke-Checked git push origin "HEAD:$deploymentBranch"
 
     Write-Host ""
     Write-Host "5/5  Waiting for the hosted website to confirm the update..."
@@ -84,7 +91,11 @@ try {
     while ((Get-Date) -lt $deadline) {
         try {
             $status = Invoke-RestMethod -Uri $productionStatusUrl -Method Get -TimeoutSec 20
-            if ([string]$status.version -eq $version) {
+            if (
+                [string]$status.version -eq $version -and
+                [int]$status.blueprints -eq $expectedBlueprints -and
+                [int]$status.missions -eq $expectedMissions
+            ) {
                 $deployed = $true
                 Write-Host ""
                 Write-Host "Update complete: $version" -ForegroundColor Green
@@ -102,5 +113,12 @@ try {
     }
 }
 finally {
+    Set-Location $projectRoot
+    if ($null -ne $worktreePath -and (Test-Path -LiteralPath $worktreePath)) {
+        & git worktree remove --force $worktreePath
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "The temporary checkout could not be removed: $worktreePath"
+        }
+    }
     Pop-Location
 }
