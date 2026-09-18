@@ -1540,7 +1540,18 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
         )
     application_channel_id = int(settings.get("application_channel_id") or 0)
     application_channel = next(
-        (item for item in channels if int(item["id"]) == application_channel_id and item["type"] == 0), None
+        (
+            item for item in channels
+            if int(item["id"]) == application_channel_id
+            and item["type"] == 0
+            and not any(
+                str(overwrite.get("id")) == str(guild_id)
+                and int(overwrite.get("type", 0)) == 0
+                and int(overwrite.get("deny", "0")) & (1 << 10)
+                for overwrite in item.get("permission_overwrites", [])
+            )
+        ),
+        None,
     )
     review_queue = next(
         (item for item in channels if item["name"] == "rep-review-queue" and item["type"] == 0), None
