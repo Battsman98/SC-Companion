@@ -434,3 +434,17 @@ def test_activity_tracking_uses_message_and_voice_events() -> None:
     assert "record_discord_message_activity" in message_source
     assert "start_discord_voice_session" in voice_source
     assert "finish_discord_voice_session" in voice_source
+
+
+def test_activity_command_does_not_require_reputation() -> None:
+    from src.bot import activity_command
+
+    source = inspect.getsource(activity_command.callback)
+    setup_source = inspect.getsource(GameAssistBot.setup_hook)
+    assert "discord_monthly_activity" in source
+    assert "reputation_progress" not in source
+    assert "target.joined_at" in source
+    assert 'name="Messages"' in source
+    assert 'name="Voice time"' in source
+    assert 'name="Active days"' in source
+    assert "self.tree.add_command(activity_command" in setup_source

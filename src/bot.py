@@ -877,6 +877,7 @@ class GameAssistBot(commands.Bot):
                 self.tree.add_command(award_group, guild=guild)
                 self.tree.add_command(reputation_group, guild=guild)
                 self.tree.add_command(progress_command, guild=guild)
+                self.tree.add_command(activity_command, guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
         if (self.settings.award_test_guild_id
@@ -886,6 +887,7 @@ class GameAssistBot(commands.Bot):
             self.tree.add_command(award_group, guild=award_guild)
             self.tree.add_command(reputation_group, guild=award_guild)
             self.tree.add_command(progress_command, guild=award_guild)
+            self.tree.add_command(activity_command, guild=award_guild)
             await self.tree.sync(guild=award_guild)
             logging.info("Synced testing-only award commands to guild %s", self.settings.award_test_guild_id)
 
@@ -3515,19 +3517,19 @@ class GameAssistBot(commands.Bot):
         if activity_channel is None and legacy_progress is not None:
             activity_channel = await legacy_progress.edit(
                 name="activity", category=main_category,
-                topic="Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+                topic="Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
                 reason="Replace unused reputation progress channel with SC Companion activity",
             )
         elif activity_channel is None:
             activity_channel = await guild.create_text_channel(
                 "activity", category=main_category,
-                topic="Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+                topic="Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
                 reason="Create SC Companion activity channel",
             )
         else:
             await activity_channel.edit(
                 category=main_category,
-                topic="Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+                topic="Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
                 reason="Repair SC Companion activity channel",
             )
         guide_embed = discord.Embed(
@@ -3559,8 +3561,8 @@ class GameAssistBot(commands.Bot):
         activity_embed = discord.Embed(
             title="SC Companion activity and reputation",
             description=(
-                "Use **`/progress`** in this channel to generate an activity card for yourself. You can optionally "
-                "choose another member to view their card."
+                "Use **`/activity`** in this channel for monthly Discord activity, even when no reputation has been "
+                "submitted. Use **`/progress`** for the combined activity and reputation card."
             ),
             color=discord.Color.blurple(),
         )
@@ -3595,7 +3597,7 @@ class GameAssistBot(commands.Bot):
             )
         activity_channel = discord.utils.find(lambda item: item.name == "activity", guild.text_channels)
         legacy_progress = discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels)
-        topic = "Use /progress to view monthly messages, voice activity, active days, and approved reputation."
+        topic = "Use /activity for monthly Discord activity or /progress for activity plus approved reputation."
         if activity_channel is None and legacy_progress is not None:
             activity_channel = await legacy_progress.edit(
                 name="activity", category=main_category, topic=topic,
@@ -3609,8 +3611,8 @@ class GameAssistBot(commands.Bot):
         activity_embed = discord.Embed(
             title="SC Companion activity and reputation",
             description=(
-                "Use **`/progress`** in this channel to generate an activity card for yourself. You can optionally "
-                "choose another member to view their card."
+                "Use **`/activity`** in this channel for monthly Discord activity, even when no reputation has been "
+                "submitted. Use **`/progress`** for the combined activity and reputation card."
             ),
             color=discord.Color.blurple(),
         )
@@ -7549,6 +7551,45 @@ async def progress_command(interaction: discord.Interaction, member: discord.Mem
     avatar_bytes = await target.display_avatar.with_size(256).read()
     card = _progress_card_image(target, avatar_bytes, activity, progress)
     await interaction.followup.send(file=discord.File(card, filename=f"sc-progress-{target.id}.png"))
+
+
+@app_commands.command(name="activity", description="Show monthly Discord message and voice activity.")
+@app_commands.describe(member="Member to display; leave blank to show yourself")
+async def activity_command(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot) or not _award_test_guild(interaction, bot) or interaction.guild is None:
+        await interaction.response.send_message("Activity tracking is limited to the SC Companion testing Discord.", ephemeral=True)
+        return
+    target = member or interaction.user
+    if not isinstance(target, discord.Member):
+        await interaction.response.send_message("That member is unavailable.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    activity = await bot.cache.discord_monthly_activity(interaction.guild.id, target.id)
+    voice_seconds = int(activity["voice_seconds"])
+    voice_hours, remaining = divmod(voice_seconds, 3600)
+    voice_minutes = remaining // 60
+    joined_at = target.joined_at
+    if joined_at is not None:
+        joined_timestamp = int(joined_at.timestamp())
+        days_in_server = max(0, (discord.utils.utcnow() - joined_at).days)
+        membership = f"<t:{joined_timestamp}:D> (<t:{joined_timestamp}:R>)\n{days_in_server:,} days in this Discord"
+    else:
+        membership = "Join date unavailable"
+    month_label = datetime.strptime(str(activity["month"]), "%Y-%m").strftime("%B %Y")
+    embed = discord.Embed(
+        title=f"{target.display_name}'s Discord Activity",
+        description=f"Activity recorded for **{month_label}** (UTC).",
+        color=discord.Color.blurple(),
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.add_field(name="Messages", value=f"{int(activity['message_count']):,}", inline=True)
+    embed.add_field(name="Voice time", value=f"{voice_hours:,}h {voice_minutes:02d}m", inline=True)
+    embed.add_field(name="Active days", value=f"{int(activity['active_days']):,}", inline=True)
+    embed.add_field(name="Member since", value=membership, inline=False)
+    embed.set_footer(text="Counts begin when SC Companion activity tracking is enabled; no message content or audio is stored.")
+    await interaction.followup.send(embed=embed)
 
 
 @reputation_group.command(name="submit", description="Submit a Star Citizen reputation level for review.")

@@ -1524,7 +1524,7 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
     legacy_progress = next((item for item in channels if item["name"] == "rep-progress" and item["type"] == 0), None)
     activity_payload = {
         "name": "activity", "type": 0, "parent_id": str(main_category["id"]),
-        "topic": "Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+        "topic": "Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
     }
     if activity is None and legacy_progress is not None:
         activity = await _discord_api(
@@ -1583,8 +1583,8 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
         "embeds": [{
             "title": "SC Companion activity and reputation",
             "description": (
-                "Use **`/progress`** in this channel to generate an activity card for yourself. You can optionally "
-                "choose another member to view their card."
+                "Use **`/activity`** in this channel for monthly Discord activity, even when no reputation has been "
+                "submitted. Use **`/progress`** for the combined activity and reputation card."
             ),
             "color": 5793266,
             "fields": [{
