@@ -951,6 +951,18 @@ button:hover, .button-link:hover, .tabs button.active {
   border-radius: 0;
 }
 
+.award-delete-button {
+  margin-left: auto;
+  border-color: #a83b3b;
+  background: #351313;
+  color: #ffd5d5;
+}
+
+.award-delete-button:hover {
+  background: #551b1b;
+  border-color: #e05252;
+}
+
 .award-existing-heading,
 .award-edit-heading {
   display: flex;

@@ -1238,6 +1238,13 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     award_definitions = await state().cache.award_definitions(guild_id, active_only=False) if awards_available else []
     award_reports = await state().cache.pending_award_reports(guild_id, 50) if awards_available else []
     reputation_settings = (await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}) if awards_available else None
+    if bot_guild is not None and awards_available:
+        for award in award_definitions:
+            try:
+                await _ensure_discord_award_role(guild_id, award["name"])
+            except HTTPException:
+                logging.warning("Could not synchronize Discord role for award %s in guild %s",
+                                award["id"], guild_id)
     roles = await _discord_guild_roles(guild_id) if bot_guild is not None and awards_available else []
     detected_routes = _discover_existing_routes(channels)
     if stored is None:
@@ -1797,6 +1804,28 @@ async def update_award_from_dashboard(guild_id: int, award_id: int, payload: Awa
         auto_grant=False,
     )
     return {"status": "saved"}
+
+
+@app.delete("/api/bot-management/guilds/{guild_id}/awards/{award_id}")
+async def delete_award_from_dashboard(guild_id: int, award_id: int,
+                                      user=Depends(require_user)) -> dict[str, str]:
+    await _award_dashboard_manager(guild_id, user)
+    award = await state().cache.award_definition(guild_id, award_id)
+    if award is None:
+        raise HTTPException(status_code=404, detail="That award was not found.")
+    roles = await _discord_guild_roles(guild_id)
+    role = next(
+        (item for item in roles if item["name"].casefold() == award["name"].casefold() and not item["managed"]),
+        None,
+    )
+    if role is not None:
+        await _discord_api(
+            "DELETE", f"/guilds/{guild_id}/roles/{role['id']}", bot_token=_public_bot_token(),
+        )
+    deleted = await state().cache.delete_award_definition(guild_id, award_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="That award was not found.")
+    return {"status": "deleted"}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards/reports/{report_id}")

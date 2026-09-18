@@ -655,6 +655,33 @@ class SQLiteCache:
         self._connection.commit()
         return bool(cursor.rowcount)
 
+    async def delete_award_definition(self, guild_id: int, award_id: int) -> bool:
+        """Delete an award and all of its reports and grants as one local transaction."""
+        exists = self._connection.execute(
+            "SELECT 1 FROM award_definitions WHERE guild_id = ? AND id = ?",
+            (guild_id, award_id),
+        ).fetchone()
+        if exists is None:
+            return False
+        try:
+            self._connection.execute(
+                "DELETE FROM award_completion_reports WHERE guild_id = ? AND award_id = ?",
+                (guild_id, award_id),
+            )
+            self._connection.execute(
+                "DELETE FROM award_grants WHERE guild_id = ? AND award_id = ?",
+                (guild_id, award_id),
+            )
+            self._connection.execute(
+                "DELETE FROM award_definitions WHERE guild_id = ? AND id = ?",
+                (guild_id, award_id),
+            )
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        return True
+
     async def submit_award_report(self, guild_id: int, award_id: int, user_id: int, user_name: str,
                                   task_name: str, citation: str) -> int:
         cursor = self._connection.execute(

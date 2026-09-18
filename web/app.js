@@ -1298,6 +1298,7 @@ async function loadGuildBotConfiguration(guildId) {
     }
     outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
     outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
+    outputs.botManagement.querySelectorAll("[data-award-delete]").forEach((button) => button.addEventListener("click", deleteDashboardAward));
     outputs.botManagement.querySelectorAll("[data-award-review]").forEach((button) => button.addEventListener("click", reviewDashboardAward));
   } catch (error) {
     outputs.botManagement.innerHTML = errorMessage(error.message);
@@ -2186,7 +2187,7 @@ function renderAwardManagement(config) {
         <label><span>Requirements</span><textarea name="requirements" rows="6" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea><small>${award.requirements?.length || 0}/20 requirements${award.award_type === "custom" ? " · Custom awards do not track requirements." : ""}</small></label>
         <label class="award-toggle award-active-toggle"><input type="checkbox" name="active" ${award.active ? "checked" : ""}><span><strong>Available to members</strong><small>Inactive awards remain saved but cannot receive new submissions or grants.</small></span></label>
         <div class="award-create-divider"></div>
-        <div class="award-form-actions award-create-actions"><button type="submit" class="award-create-primary">Save Award</button><span class="form-note" data-award-status></span></div>
+        <div class="award-form-actions award-create-actions"><button type="submit" class="award-create-primary">Save Award</button><button type="button" class="award-delete-button" data-award-delete data-award-id="${award.id}" data-award-name="${escapeAttribute(award.name)}">Delete Award</button><span class="form-note" data-award-status></span></div>
       </form></details>`).join("") : '<div class="state">No awards created yet.</div>'}</div>
     </section>
     <div class="tool-card award-card"><div class="award-card-heading"><div><h4>Completion reports</h4><p>Members submit award requests from the Discord Award Panel. Approve valid reports or reject submissions that do not meet the requirement.</p></div></div>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
@@ -2252,6 +2253,26 @@ async function editDashboardAward(event) {
   const form = event.currentTarget;
   const requirements = awardRequirements(form.elements.requirements.value);
   await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements, active: form.elements.active.checked });
+}
+
+async function deleteDashboardAward(event) {
+  const button = event.currentTarget;
+  const section = button.closest("[data-award-management]");
+  const awardName = button.dataset.awardName || "this award";
+  const accepted = await confirmInventoryClear({
+    title: `Delete ${awardName}?`,
+    message: "This removes the award, its Discord role, reports, and grant history. This cannot be undone.",
+    confirmLabel: "Delete Award",
+  });
+  if (!accepted) return;
+  button.disabled = true;
+  try {
+    await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/awards/${encodeURIComponent(button.dataset.awardId)}`, { method: "DELETE" });
+    await loadGuildBotConfiguration(section.dataset.guildId);
+  } catch (error) {
+    button.disabled = false;
+    window.alert(error.message);
+  }
 }
 
 async function reviewDashboardAward(event) {

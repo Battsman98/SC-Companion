@@ -154,6 +154,11 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
         earned = await cache.member_awards(guild_id, 99)
         assert {item["name"] for item in earned} == {"Community Contributor", "Outstanding Service"}
 
+        assert await cache.delete_award_definition(guild_id, custom_id)
+        assert await cache.award_definition(guild_id, custom_id) is None
+        assert {item["name"] for item in await cache.member_awards(guild_id, 99)} == {"Community Contributor"}
+        assert not await cache.delete_award_definition(guild_id, custom_id)
+
         tracker = await cache.award_definition(guild_id, tracker_id)
         assert tracker is not None
         assert tracker["auto_grant"] is False
@@ -161,7 +166,7 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
             guild_id, tracker_id, name="Contract Master", description="Updated description.",
             requirements=tracker["requirements"], active=False, auto_grant=False,
         )
-        assert [item["name"] for item in await cache.award_definitions(guild_id)] == ["Outstanding Service"]
+        assert await cache.award_definitions(guild_id) == []
         assert (await cache.award_definition(guild_id, tracker_id))["active"] is False
         assert (await cache.award_definition(guild_id, tracker_id))["auto_grant"] is False
 
