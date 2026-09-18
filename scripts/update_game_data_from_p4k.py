@@ -229,12 +229,37 @@ def number(value: str | None) -> int | float | None:
         return None
 
 
+def launcher_release_for_build(change: str) -> str | None:
+    """Return the public release name recorded by RSI Launcher for a build."""
+    app_data = os.environ.get("APPDATA")
+    if not app_data or not change:
+        return None
+    log_dir = Path(app_data) / "rsilauncher" / "logs"
+    try:
+        logs = sorted(log_dir.glob("*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    pattern = re.compile(r"(?:Star Citizen|SC)\s+LIVE\s+([0-9]+(?:\.[0-9]+)+)-live\.(\d+)", re.I)
+    for path in logs:
+        try:
+            matches = pattern.findall(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+        for release, build in reversed(matches):
+            if build == change:
+                return release
+    return None
+
+
 def version_label(game_dir: Path) -> str:
     manifest = game_dir / "build_manifest.id"
     try:
         data = json.loads(manifest.read_text(encoding="utf-8"))["Data"]
         branch = str(data.get("Branch") or "LIVE").upper()
         change = str(data.get("RequestedP4ChangeNum") or data.get("BuildId") or "")
+        release = launcher_release_for_build(change)
+        if release:
+            branch = f"SC-ALPHA-{release}"
         return f"{branch}-{change}".strip("-")
     except (OSError, ValueError, KeyError, TypeError):
         return f"LOCAL-{int((game_dir / 'Data.p4k').stat().st_mtime)}"

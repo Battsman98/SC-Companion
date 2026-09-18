@@ -7,6 +7,7 @@ $importerRelative = "scripts/update_game_data_from_p4k.py"
 $toolsPath = Join-Path $projectRoot "tools\sc-game-data"
 $gameArchive = "C:\StarCitizen\LIVE\Data.p4k"
 $productionStatusUrl = "https://sccompanion.org/api/game-data/status"
+$deploymentBranch = "codex/sc-companion-public"
 
 function Invoke-Checked {
     param(
@@ -40,12 +41,12 @@ $worktreePath = $null
 try {
     Write-Host ""
     Write-Host "1/5  Checking for the latest project version..."
-    Invoke-Checked git fetch origin main
+    Invoke-Checked git fetch origin $deploymentBranch
 
     # Build and publish from an isolated checkout. This leaves the user's current
     # branch and any unfinished work exactly as they are.
     $worktreePath = Join-Path ([System.IO.Path]::GetTempPath()) ("sc-game-data-update-" + [guid]::NewGuid().ToString("N"))
-    Invoke-Checked git worktree add --detach $worktreePath origin/main
+    Invoke-Checked git worktree add --detach $worktreePath "origin/$deploymentBranch"
     Set-Location $worktreePath
 
     $snapshotPath = Join-Path $worktreePath $snapshotRelative
@@ -70,6 +71,8 @@ try {
     if ([string]::IsNullOrWhiteSpace($version)) {
         throw "The rebuilt snapshot does not contain a game version."
     }
+    $expectedBlueprints = @($snapshot.items).Count
+    $expectedMissions = @($snapshot.missions).Count
 
     Write-Host ""
     Write-Host "3/5  Running safety checks..."
@@ -79,7 +82,7 @@ try {
     Write-Host "4/5  Publishing $version..."
     Invoke-Checked git add -- $snapshotRelative
     Invoke-Checked git commit -m "Update game data to $version" -- $snapshotRelative
-    Invoke-Checked git push origin HEAD:main
+    Invoke-Checked git push origin "HEAD:$deploymentBranch"
 
     Write-Host ""
     Write-Host "5/5  Waiting for the hosted website to confirm the update..."
@@ -88,7 +91,11 @@ try {
     while ((Get-Date) -lt $deadline) {
         try {
             $status = Invoke-RestMethod -Uri $productionStatusUrl -Method Get -TimeoutSec 20
-            if ([string]$status.version -eq $version) {
+            if (
+                [string]$status.version -eq $version -and
+                [int]$status.blueprints -eq $expectedBlueprints -and
+                [int]$status.missions -eq $expectedMissions
+            ) {
                 $deployed = $true
                 Write-Host ""
                 Write-Host "Update complete: $version" -ForegroundColor Green
