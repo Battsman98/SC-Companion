@@ -3609,6 +3609,17 @@ class GameAssistBot(commands.Bot):
         if file is not None:
             send_options["file"] = file
         message = await channel.send(**send_options)
+        logging.info(
+            "Reputation verification queued submission=%s guild=%s applicant=%s giver=%r level=%r "
+            "auto_verify=%s image_bytes=%s",
+            message.id,
+            guild_id,
+            applicant_id,
+            giver,
+            level,
+            auto_verify,
+            len(image_bytes),
+        )
 
         await self.verify_queued_reputation_submission(
             message=message,
@@ -3646,12 +3657,33 @@ class GameAssistBot(commands.Bot):
         if embed is None:
             return
 
+        verification_started = time.perf_counter()
+        logging.info(
+            "Reputation verification started submission=%s guild=%s applicant=%s giver=%r level=%r "
+            "auto_verify=%s image_bytes=%s",
+            message.id,
+            guild_id,
+            applicant_id,
+            giver,
+            level,
+            auto_verify,
+            len(image_bytes),
+        )
         verification = None
         attempts = 0
         if auto_verify and image_bytes:
             try:
                 async with asyncio.timeout(300):
                     for attempts in range(1, 4):
+                        attempt_started = time.perf_counter()
+                        logging.info(
+                            "Reputation verification attempt started submission=%s attempt=%s/3 "
+                            "giver=%r level=%r",
+                            message.id,
+                            attempts,
+                            giver,
+                            level,
+                        )
                         if attempts > 1:
                             for index, field in enumerate(embed.fields):
                                 if field.name == "Automatic verification":
@@ -3671,10 +3703,30 @@ class GameAssistBot(commands.Bot):
                         verification = await asyncio.to_thread(
                             verify_reputation_screenshot, variant, giver, level
                         )
+                        logging.info(
+                            "Reputation verification attempt finished submission=%s attempt=%s/3 "
+                            "elapsed=%.2fs verified=%s detected_giver=%r detected_level=%r "
+                            "confidence=%.3f reason=%r",
+                            message.id,
+                            attempts,
+                            time.perf_counter() - attempt_started,
+                            verification.verified,
+                            verification.detected_giver,
+                            verification.detected_level,
+                            verification.confidence,
+                            verification.reason,
+                        )
                         if verification.verified:
                             break
             except Exception as exc:
-                logging.warning("Reputation screenshot verification failed: %s", exc)
+                logging.warning(
+                    "Reputation verification failed submission=%s attempt=%s elapsed=%.2fs error=%r",
+                    message.id,
+                    attempts,
+                    time.perf_counter() - verification_started,
+                    exc,
+                    exc_info=True,
+                )
 
         for index, field in enumerate(embed.fields):
             if field.name == "Automatic verification":
@@ -3694,6 +3746,16 @@ class GameAssistBot(commands.Bot):
             )
             embed.add_field(name="Saved progress", value=f"{giver} — {level}", inline=False)
             await message.edit(content=None, embed=embed, view=None)
+            logging.info(
+                "Reputation verification approved submission=%s attempts=%s elapsed=%.2fs "
+                "giver=%r level=%r confidence=%.3f",
+                message.id,
+                attempts,
+                time.perf_counter() - verification_started,
+                giver,
+                level,
+                verification.confidence,
+            )
             await self.notify_reputation_applicant(
                 applicant_id,
                 f"✅ Your **{giver} — {level}** reputation submission was automatically verified and approved.",
@@ -3718,6 +3780,17 @@ class GameAssistBot(commands.Bot):
                 inline=False,
             )
             await message.edit(content=None, embed=embed, view=None)
+            logging.info(
+                "Reputation verification denied submission=%s attempts=%s elapsed=%.2fs "
+                "giver=%r requested_level=%r detected_level=%r confidence=%.3f",
+                message.id,
+                attempts,
+                time.perf_counter() - verification_started,
+                giver,
+                level,
+                verification.detected_level,
+                verification.confidence,
+            )
             await self.notify_reputation_applicant(
                 applicant_id,
                 f"❌ Your **{giver} — {level}** reputation submission was automatically denied after "
@@ -3742,6 +3815,19 @@ class GameAssistBot(commands.Bot):
             inline=False,
         )
         await message.edit(embed=embed, view=ReputationApplicationReviewView())
+        logging.info(
+            "Reputation verification needs manual review submission=%s attempts=%s elapsed=%.2fs "
+            "giver=%r level=%r detected_giver=%r detected_level=%r confidence=%.3f reason=%r",
+            message.id,
+            attempts,
+            time.perf_counter() - verification_started,
+            giver,
+            level,
+            verification.detected_giver if verification is not None else None,
+            verification.detected_level if verification is not None else None,
+            verification.confidence if verification is not None else 0.0,
+            reason,
+        )
         await self.notify_reputation_applicant(
             applicant_id,
             f"👀 SC Companion could not automatically verify your **{giver} — {level}** submission. "

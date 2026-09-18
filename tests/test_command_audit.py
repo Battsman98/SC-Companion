@@ -460,6 +460,12 @@ def test_reputation_submission_can_auto_verify_or_fall_back_to_review() -> None:
     assert "Manual review required" in verifier_source
     assert "notify_reputation_applicant" in verifier_source
     assert "Denied automatically after 3 attempts" in verifier_source
+    assert "Reputation verification attempt started" in verifier_source
+    assert "Reputation verification attempt finished" in verifier_source
+    assert "detected_giver=%r detected_level=%r" in verifier_source
+    assert "Reputation verification approved" in verifier_source
+    assert "Reputation verification denied" in verifier_source
+    assert "Reputation verification needs manual review" in verifier_source
 
 
 def test_pending_reputation_reviews_resume_after_restart() -> None:
