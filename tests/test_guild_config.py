@@ -80,7 +80,7 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "No SC Companion features are currently assigned to this category." in javascript
     assert "data-award-assignment-channel" in javascript
     assert "data-award-panel-channel" in javascript
-    assert "data-reputation-guidelines-channel" in javascript
+    assert "data-reputation-guidelines-channel" not in javascript
     assert "data-reputation-application-channel" in javascript
     assert "data-reputation-submission-channel" in javascript
     assert "data-reputation-activity-channel" in javascript
@@ -146,8 +146,11 @@ def test_reputation_submissions_use_a_public_panel_and_private_review_queue() ->
     assert "Your application is private." in provision_source
     assert 'settings.pop("submission_forum_id", None)' in provision_source
     assert '"rep-submissions-archive"' in provision_source
-    assert '"How to submit reputation progress"' in provision_source
-    assert "/rep-submit" in provision_source
+    assert 'item["name"] == "rep-guidelines"' in provision_source
+    assert '"DELETE", f"/channels/{guidelines' in provision_source
+    assert '"Submission requirements"' in provision_source
+    assert '"After approval"' in provision_source
+    assert 'settings.pop("guidelines_channel_id", None)' in provision_source
     assert 'item["name"] == "rep-progress"' in provision_source
     assert '"name": "activity"' in provision_source
     assert 'settings["activity_channel_id"]' in provision_source
@@ -172,7 +175,11 @@ def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
     assert 'discord.PermissionOverwrite(view_channel=False)' in repair_source
     assert "private_overwrites[guild.me]" in repair_source
     assert "manage_messages=True" not in repair_source
-    assert 'title="How to submit reputation progress"' in repair_source
+    assert 'item.name == "rep-guidelines"' in repair_source
+    assert 'await guidelines.delete(' in repair_source
+    assert 'name="Submission requirements"' in repair_source
+    assert 'name="After approval"' in repair_source
+    assert 'settings.pop("guidelines_channel_id", None)' in repair_source
     assert 'item.name == "rep-progress"' in repair_source
     assert 'name="activity"' in repair_source
     assert 'category=main_category' in repair_source

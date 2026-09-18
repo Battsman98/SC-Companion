@@ -386,7 +386,6 @@ class ReputationSettingsRequest(BaseModel):
     auto_create_role: bool = False
     application_channel_id: int | None = None
     activity_channel_id: int | None = None
-    guidelines_channel_id: int | None = None
     submission_channel_id: int | None = None
 
 
@@ -1257,7 +1256,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     if awards_available:
         channel_by_name = {item["name"]: int(item["id"]) for item in channels}
         award_channel_settings.setdefault("panel_channel_id", channel_by_name.get("award-panel"))
-        reputation_settings.setdefault("guidelines_channel_id", channel_by_name.get("rep-guidelines"))
+        reputation_settings.pop("guidelines_channel_id", None)
         reputation_settings.setdefault("submission_channel_id", channel_by_name.get("rep-review-queue"))
         reputation_settings.setdefault("application_channel_id", channel_by_name.get("rep-submissions"))
         reputation_settings.setdefault("activity_channel_id", channel_by_name.get("activity"))
@@ -1330,7 +1329,6 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             "submission_channel_id": _snowflake(reputation_settings.get("submission_channel_id")),
             "application_channel_id": _snowflake(reputation_settings.get("application_channel_id")),
             "activity_channel_id": _snowflake(reputation_settings.get("activity_channel_id")),
-            "guidelines_channel_id": _snowflake(reputation_settings.get("guidelines_channel_id")),
         } if reputation_settings is not None else None,
         "updated_at": stored.get("updated_at") if stored else None,
     }
@@ -1510,7 +1508,7 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
     roles = await _discord_guild_roles(guild_id)
     channels = await _discord_guild_channels(guild_id)
     valid_channel_ids = {int(item["id"]) for item in channels if item["type"] in {0, 5}}
-    for field_name in ("application_channel_id", "activity_channel_id", "guidelines_channel_id", "submission_channel_id"):
+    for field_name in ("application_channel_id", "activity_channel_id", "submission_channel_id"):
         channel_id = getattr(payload, field_name)
         if channel_id is not None and channel_id not in valid_channel_ids:
             raise HTTPException(status_code=422, detail="The selected reputation channel is unavailable.")
@@ -1527,9 +1525,10 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
         raise HTTPException(status_code=422, detail="The selected reputation reviewer role is unavailable.")
     current = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
     settings = {**current, "enabled": payload.enabled, "reviewer_role_id": role_id}
-    for field_name in ("application_channel_id", "activity_channel_id", "guidelines_channel_id", "submission_channel_id"):
+    for field_name in ("application_channel_id", "activity_channel_id", "submission_channel_id"):
         if field_name in payload.model_fields_set:
             settings[field_name] = getattr(payload, field_name)
+    settings.pop("guidelines_channel_id", None)
     await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
     return {"status": "saved", **settings}
 
@@ -1623,8 +1622,16 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
                 "permission_overwrites": private_overwrites,
             },
         )
-    specs = (("rep-guidelines", 0, "How to submit Star Citizen reputation progress."),
-             ("rep-submissions", 0, "Open the private reputation progress application form."))
+    for guidelines in [item for item in channels if item["name"] == "rep-guidelines" and item["type"] == 0]:
+        try:
+            await _discord_api(
+                "DELETE", f"/channels/{guidelines['id']}", bot_token=_public_bot_token(),
+            )
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
+    await state().cache.delete(f"guild:{guild_id}:reputation-guide-message")
+    specs = (("rep-submissions", 0, "Open the private reputation progress application form."),)
     made = {}
     for name, channel_type, topic in specs:
         channel = (
@@ -1668,41 +1675,7 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
     settings["application_channel_id"] = int(made["rep-submissions"]["id"])
     settings["activity_channel_id"] = int(activity["id"])
     settings.pop("submission_forum_id", None)
-    guide_payload = {
-        "embeds": [{
-            "title": "How to submit reputation progress",
-            "description": (
-                "Use **`/rep-submit`** anywhere in this server. Choose the reputation giver and your current "
-                "level, then attach a clear screenshot showing that level.\n\n"
-                "SC Companion sends the application to a private reviewer-only text queue. When approved, your "
-                "saved rank is updated and appears the next time **`/rep`** is used."
-            ),
-            "color": 15844367,
-            "fields": [{
-                "name": "What reviewers need",
-                "value": "The giver name, visible reputation level, and an uncropped-enough screenshot to verify it.",
-                "inline": False,
-            }],
-        }],
-    }
-    guide_key = f"guild:{guild_id}:reputation-guide-message"
-    guide_message_id = await state().cache.get(guide_key)
-    guide_message = None
-    if guide_message_id:
-        try:
-            guide_message = await _discord_api(
-                "PATCH", f"/channels/{made['rep-guidelines']['id']}/messages/{guide_message_id}",
-                bot_token=_public_bot_token(), json_payload=guide_payload,
-            )
-        except HTTPException as error:
-            if error.status_code != 404:
-                raise
-    if guide_message is None:
-        guide_message = await _discord_api(
-            "POST", f"/channels/{made['rep-guidelines']['id']}/messages",
-            bot_token=_public_bot_token(), json_payload=guide_payload,
-        )
-        await state().cache.set(guide_key, int(guide_message["id"]), 315360000)
+    settings.pop("guidelines_channel_id", None)
     panel_payload = {
         "embeds": [{
             "title": "Submit Reputation Progress",
@@ -1715,6 +1688,19 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
                 {"name": "1", "value": "Which reputation giver are you submitting?", "inline": False},
                 {"name": "2", "value": "What is your current reputation level?", "inline": False},
                 {"name": "3", "value": "Upload a clear verification screenshot.", "inline": False},
+                {
+                    "name": "Submission requirements",
+                    "value": (
+                        "Use a clear, uncropped-enough screenshot that visibly shows both the reputation giver "
+                        "and your current level. SC Companion sends it only to the configured reviewers."
+                    ),
+                    "inline": False,
+                },
+                {
+                    "name": "After approval",
+                    "value": "Your saved rank is updated and appears the next time **`/rep`** is used.",
+                    "inline": False,
+                },
             ],
             "footer": {"text": "Select Submit Reputation to begin. Your application is private."},
         }],

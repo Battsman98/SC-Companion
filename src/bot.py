@@ -3737,13 +3737,10 @@ class GameAssistBot(commands.Bot):
                 overwrites={},
                 reason="Repair public reputation application panel",
             )
-        guidelines = discord.utils.find(lambda item: item.name == "rep-guidelines", guild.text_channels)
-        if guidelines is None:
-            guidelines = await guild.create_text_channel(
-                "rep-guidelines", category=category,
-                topic="How to submit Star Citizen reputation progress.",
-                reason="Create reputation submission guide",
-            )
+        for guidelines in [item for item in guild.text_channels if item.name == "rep-guidelines"]:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await guidelines.delete(reason="Move reputation guidance into the application panel")
+        await self.cache.delete(f"guild:{guild.id}:reputation-guide-message")
         activity_channel = discord.utils.find(lambda item: item.name == "activity", guild.text_channels)
         legacy_progress = discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels)
         if activity_channel is None and legacy_progress is not None:
@@ -3764,32 +3761,6 @@ class GameAssistBot(commands.Bot):
                 topic="Use /activity for monthly Discord activity or /rep for activity plus approved reputation.",
                 reason="Repair SC Companion activity channel",
             )
-        guide_embed = discord.Embed(
-            title="How to submit reputation progress",
-            description=(
-                "Use **`/rep-submit`** anywhere in this server. Choose the reputation giver and your current "
-                "level, then attach a clear screenshot showing that level.\n\n"
-                "SC Companion sends the application to a private reviewer-only text queue. When approved, your "
-                "saved rank is updated and appears the next time **`/rep`** is used."
-            ),
-            color=discord.Color.gold(),
-        )
-        guide_embed.add_field(
-            name="What reviewers need",
-            value="The giver name, visible reputation level, and an uncropped-enough screenshot to verify it.",
-            inline=False,
-        )
-        guide_key = f"guild:{guild.id}:reputation-guide-message"
-        guide_message_id = await self.cache.get(guide_key)
-        guide_message = None
-        if guide_message_id:
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                guide_message = await guidelines.fetch_message(int(guide_message_id))
-        if guide_message is None:
-            guide_message = await guidelines.send(embed=guide_embed)
-            await self.cache.set(guide_key, guide_message.id, 315360000)
-        else:
-            await guide_message.edit(embed=guide_embed)
         panel_embed = discord.Embed(
             title="Submit Reputation Progress",
             description=(
@@ -3801,6 +3772,19 @@ class GameAssistBot(commands.Bot):
         panel_embed.add_field(name="1", value="Which reputation giver are you submitting?", inline=False)
         panel_embed.add_field(name="2", value="What is your current reputation level?", inline=False)
         panel_embed.add_field(name="3", value="Upload a clear verification screenshot.", inline=False)
+        panel_embed.add_field(
+            name="Submission requirements",
+            value=(
+                "Use a clear, uncropped-enough screenshot that visibly shows both the reputation giver and "
+                "your current level. SC Companion sends it only to the configured reviewers."
+            ),
+            inline=False,
+        )
+        panel_embed.add_field(
+            name="After approval",
+            value="Your saved rank is updated and appears the next time **`/rep`** is used.",
+            inline=False,
+        )
         panel_embed.set_footer(text="Select Submit Reputation to begin. Your application is private.")
         panel_key = f"guild:{guild.id}:reputation-submission-panel"
         panel_message_id = await self.cache.get(panel_key)
@@ -3840,6 +3824,7 @@ class GameAssistBot(commands.Bot):
         settings["submission_channel_id"] = review_queue.id
         settings["application_channel_id"] = submission.id
         settings["activity_channel_id"] = activity_channel.id
+        settings.pop("guidelines_channel_id", None)
         settings.pop("submission_forum_id", None)
         await self.cache.set(settings_key, settings, 315360000)
 
