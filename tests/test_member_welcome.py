@@ -80,3 +80,24 @@ def test_sc_companion_does_not_update_peep_member_counter() -> None:
     asyncio.run(GameAssistBot.sync_total_members_channel(bot, guild))
 
     channel.edit.assert_not_awaited()
+
+
+def test_peep_recreates_missing_total_members_voice_channel() -> None:
+    default_role = object()
+    guild = SimpleNamespace(
+        id=123,
+        voice_channels=[],
+        member_count=75,
+        members=[],
+        default_role=default_role,
+        create_voice_channel=AsyncMock(),
+    )
+    bot = SimpleNamespace(settings=SimpleNamespace(runtime_profile="peep", discord_guild_id=123))
+
+    asyncio.run(GameAssistBot.sync_total_members_channel(bot, guild))
+
+    guild.create_voice_channel.assert_awaited_once()
+    creation = guild.create_voice_channel.await_args.kwargs
+    assert creation["name"] == "Total Members: 75"
+    assert creation["position"] == 2
+    assert creation["overwrites"][default_role].connect is False

@@ -170,6 +170,7 @@ ANNIVERSARY_ROLE_NAME = "1 Year Member"
 ANNIVERSARY_CHANNEL_NAME = "welcome"
 WELCOME_CHANNEL_NAME = "welcome"
 TOTAL_MEMBERS_CHANNEL_LABEL = "Total Members"
+TOTAL_MEMBERS_CHANNEL_POSITION = 2
 ANNIVERSARY_AGE = timedelta(days=365)
 ANNIVERSARY_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 APPLICATION_REVIEW_CHANNEL_NAME = "membership-application-reviews"
@@ -2119,11 +2120,19 @@ class GameAssistBot(commands.Bot):
             lambda item: item.name.casefold().startswith(prefix),
             guild.voice_channels,
         )
+        name = f"{TOTAL_MEMBERS_CHANNEL_LABEL}: {guild.member_count or len(guild.members)}"
         if channel is None:
-            logging.error("Could not update member count: %s voice channel is missing", TOTAL_MEMBERS_CHANNEL_LABEL)
+            try:
+                await guild.create_voice_channel(
+                    name=name,
+                    overwrites={guild.default_role: discord.PermissionOverwrite(connect=False)},
+                    position=TOTAL_MEMBERS_CHANNEL_POSITION,
+                    reason="Restore Peep's total member count channel",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logging.exception("Could not restore the total member count channel")
             return
 
-        name = f"{TOTAL_MEMBERS_CHANNEL_LABEL}: {guild.member_count or len(guild.members)}"
         if channel.name == name:
             return
         try:
