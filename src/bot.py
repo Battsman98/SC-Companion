@@ -7739,10 +7739,17 @@ class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
             return
         if await _enabled_award_settings(interaction, bot) is None:
             return
-        report_id = await bot.cache.submit_award_report(
+        report_id = await bot.cache.submit_award_nomination(
             interaction.guild.id, int(self.award["id"]), self.nominee.id, str(self.nominee),
-            "Award nomination", str(self.reason.value).strip(),
+            str(self.reason.value).strip(),
         )
+        if report_id is None:
+            await interaction.response.send_message(
+                f"{self.nominee.mention} already has an award recommendation awaiting review. "
+                "A manager must approve or reject it before another can be submitted.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message(
             f"Recommendation `#{report_id}` submitted: {self.nominee.mention} for **{self.award['name']}**.",
             ephemeral=True,

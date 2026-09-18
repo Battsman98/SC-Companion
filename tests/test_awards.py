@@ -146,3 +146,34 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
         await cache.close()
 
     asyncio.run(scenario())
+
+
+def test_only_one_pending_award_nomination_is_allowed_per_recipient(tmp_path) -> None:
+    async def scenario() -> None:
+        cache = await SQLiteCache.create(str(tmp_path / "award-nominations.sqlite3"))
+        guild_id = 123
+        first_award = await cache.create_award_definition(
+            guild_id, "First Award", "First description.", "custom", [], 1,
+        )
+        second_award = await cache.create_award_definition(
+            guild_id, "Second Award", "Second description.", "custom", [], 1,
+        )
+
+        first_report = await cache.submit_award_nomination(
+            guild_id, first_award, 99, "Pilot", "First recommendation.",
+        )
+        assert first_report is not None
+        assert await cache.submit_award_nomination(
+            guild_id, first_award, 100, "Second Pilot", "Recommendation for another member.",
+        ) is not None
+        assert await cache.submit_award_nomination(
+            guild_id, second_award, 99, "Pilot", "Second recommendation.",
+        ) is None
+
+        assert await cache.review_award_report(guild_id, first_report, "rejected", 1)
+        assert await cache.submit_award_nomination(
+            guild_id, second_award, 99, "Pilot", "Second recommendation.",
+        ) is not None
+        await cache.close()
+
+    asyncio.run(scenario())

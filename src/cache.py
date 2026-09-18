@@ -666,6 +666,21 @@ class SQLiteCache:
         self._connection.commit()
         return int(cursor.lastrowid)
 
+    async def submit_award_nomination(self, guild_id: int, award_id: int, user_id: int,
+                                      user_name: str, citation: str) -> int | None:
+        """Create one nomination per recipient while an earlier nomination is pending."""
+        existing = self._connection.execute(
+            """SELECT id FROM award_completion_reports
+               WHERE guild_id = ? AND user_id = ? AND status = 'pending'
+               AND LOWER(task_name) = 'award nomination' LIMIT 1""",
+            (guild_id, user_id),
+        ).fetchone()
+        if existing is not None:
+            return None
+        return await self.submit_award_report(
+            guild_id, award_id, user_id, user_name, "Award nomination", citation,
+        )
+
     async def pending_award_reports(self, guild_id: int, limit: int = 20) -> list[dict[str, Any]]:
         rows = self._connection.execute(
             """SELECT r.id, r.award_id, d.name, r.user_id, r.user_name, r.task_name, r.citation, r.created_at
