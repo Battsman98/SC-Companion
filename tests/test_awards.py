@@ -134,7 +134,7 @@ def test_award_review_panel_lists_pending_recommendations_in_pages() -> None:
 
     assert report_select.max_values == 1
     assert len(report_select.options) == 25
-    assert report_select.options[0].label == "#1 · Service Award"
+    assert report_select.options[0].label == "Service Award"
     assert report_select.options[0].description == "Pilot 1: Recommendation 1"
     assert view.next.disabled is False
     assert view.approve.disabled is True

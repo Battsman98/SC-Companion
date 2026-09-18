@@ -8014,7 +8014,7 @@ class AwardReportSelect(discord.ui.Select):
         start = page * 25
         options = [
             discord.SelectOption(
-                label=f"#{report['id']} · {report['award_name']}"[:100],
+                label=report["award_name"][:100],
                 value=str(report["id"]),
                 description=f"{report['user_name']}: {report['citation']}"[:100],
             )
@@ -8167,7 +8167,7 @@ class AwardReviewView(discord.ui.View):
         if result is None:
             notice = "That recommendation was already reviewed."
         else:
-            notice = f"Recommendation `#{report['id']}` was **{decision}**."
+            notice = f"The recommendation for **{report['award_name']}** was **{decision}**."
             if decision == "approved" and result.get("task_name", "").casefold() == "award nomination":
                 granted, role_assigned, announced = await _grant_approved_award_nomination(
                     bot, interaction.guild, result, interaction.user.id,
