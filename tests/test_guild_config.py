@@ -120,6 +120,7 @@ def test_reputation_submissions_use_a_public_panel_and_private_review_queue() ->
     assert '("rep-submissions", 0,' in provision_source
     assert '"deny": str(1 << 10)' in provision_source
     assert 'str(reviewer_role_id)' in provision_source
+    assert 'state().settings.public_discord_client_id' in provision_source
     assert 'settings["submission_channel_id"]' in provision_source
     assert '"name": "rep-review-queue"' in provision_source
     assert '"title": "Submit Reputation Progress"' in provision_source
@@ -150,6 +151,7 @@ def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
     assert "ReputationSubmissionPanelView()" in repair_source
     assert 'await guild.create_text_channel(' in repair_source
     assert 'discord.PermissionOverwrite(view_channel=False)' in repair_source
+    assert "private_overwrites[guild.me]" in repair_source
     assert 'title="How to submit reputation progress"' in repair_source
     assert 'item.name == "rep-progress"' in repair_source
     assert 'name="activity"' in repair_source
