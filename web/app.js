@@ -1205,20 +1205,21 @@ function bindDiscordChannelPickers(container) {
   });
 }
 
-function renderDiscordServerChannelDirectory(channels) {
+function renderFeatureAssignmentsByCategory(channels, modules) {
   const categories = channels.filter((channel) => channel.type === 4).sort((left, right) => (left.position ?? 0) - (right.position ?? 0));
-  const childChannels = channels.filter((channel) => channel.type !== 4).sort((left, right) => (left.position ?? 0) - (right.position ?? 0));
-  const channelIcon = (type) => ({ 2: "◖", 13: "◖", 15: "▤", 16: "▤" }[type] || "#");
-  const channelRows = (items) => items.length
-    ? items.map((channel) => `<div class="discord-server-channel"><span aria-hidden="true">${channelIcon(channel.type)}</span><strong>${escapeHtml(channel.name)}</strong></div>`).join("")
-    : '<span class="discord-channel-empty">No channels in this category</span>';
+  const channelById = new Map(channels.map((channel) => [String(channel.id), channel]));
+  const assignmentRow = (module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel${renderDiscordChannelPicker(channels, module.channel_id)}</label>${module.key === "trade_tools" ? `<label>Marketplace forum${renderDiscordChannelPicker(channels, module.resource_channel_id, { forum: true })}</label>` : ""}</div></div>`;
+  const assignedCategoryId = (module) => {
+    const channel = channelById.get(String(module.channel_id || ""));
+    return channel?.parent_id ? String(channel.parent_id) : null;
+  };
   const categoryRows = categories.map((category) => {
-    const children = childChannels.filter((channel) => String(channel.parent_id || "") === String(category.id));
-    return `<details class="discord-server-category"><summary><span>${escapeHtml(category.name)}</span><small>${children.length} ${children.length === 1 ? "channel" : "channels"}</small></summary><div class="discord-server-category-channels">${channelRows(children)}</div></details>`;
+    const assignments = modules.filter((module) => assignedCategoryId(module) === String(category.id));
+    return `<details class="discord-server-category feature-assignment-category"><summary><span>${escapeHtml(category.name)}</span><small>${assignments.length} ${assignments.length === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${assignments.length ? assignments.map(assignmentRow).join("") : '<p class="discord-channel-empty">No SC Companion features are currently assigned to this category.</p>'}</div></details>`;
   }).join("");
-  const uncategorized = childChannels.filter((channel) => !channel.parent_id);
-  const rootRows = uncategorized.length ? `<details class="discord-server-category"><summary><span>Uncategorized</span><small>${uncategorized.length} ${uncategorized.length === 1 ? "channel" : "channels"}</small></summary><div class="discord-server-category-channels">${channelRows(uncategorized)}</div></details>` : "";
-  return `<section class="discord-server-directory" aria-labelledby="discordServerDirectoryTitle"><div class="discord-server-directory-heading"><div><p class="guide-kicker">SERVER STRUCTURE</p><h4 id="discordServerDirectoryTitle">Discord Categories</h4></div><small>${categories.length} ${categories.length === 1 ? "category" : "categories"}</small></div><p>Select a category to show or hide its channels.</p><div class="discord-server-category-list">${categoryRows}${rootRows}</div></section>`;
+  const unassigned = modules.filter((module) => !assignedCategoryId(module));
+  const unassignedRow = `<details class="discord-server-category feature-assignment-category"><summary><span>Any Channel / Unassigned</span><small>${unassigned.length} ${unassigned.length === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${unassigned.length ? unassigned.map(assignmentRow).join("") : '<p class="discord-channel-empty">No unassigned features.</p>'}</div></details>`;
+  return `<div class="feature-assignment-directory">${categoryRows}${unassignedRow}</div>`;
 }
 
 async function loadGuildBotConfiguration(guildId) {
@@ -1269,10 +1270,8 @@ async function loadGuildBotConfiguration(guildId) {
         </div><div class="bot-management-actions"><button type="submit">Save Features</button><button type="button" data-update-feature-channels>Create or Repair All Feature Channels</button><span data-bot-management-status></span></div>
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
-        <div class="section-heading"><h3>Channel Management</h3><p>Choose where commands run and where feature-specific content is posted. These choices are used when manual setup is selected.</p></div>
-        ${renderDiscordServerChannelDirectory(config.channels)}
-        <div class="section-heading bot-channel-assignments-heading"><h4>Feature Assignments</h4><p>Choose which channel each SC Companion feature uses.</p></div>
-        <div class="bot-module-list">${config.modules.map((module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel${renderDiscordChannelPicker(config.channels, module.channel_id)}</label>${module.key === "trade_tools" ? `<label>Marketplace forum${renderDiscordChannelPicker(config.channels, module.resource_channel_id, { forum: true })}</label>` : ""}</div></div>`).join("")}</div>
+        <div class="section-heading"><h3>Feature Assignments by Category</h3><p>Open a Discord category to change the SC Companion features assigned there. Moving a feature to a channel in another category takes effect after you save.</p></div>
+        ${renderFeatureAssignmentsByCategory(config.channels, config.modules)}
         <div class="bot-management-actions"><button type="submit">Save Channels</button><span data-bot-management-status></span></div>
       </section>
     </form>
