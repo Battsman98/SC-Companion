@@ -1522,7 +1522,7 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
         private_overwrites.append({
             "id": str(public_bot_id),
             "type": 1,
-            "allow": str((1 << 10) | (1 << 11) | (1 << 13) | (1 << 14) | (1 << 15) | (1 << 16)),
+            "allow": str((1 << 10) | (1 << 11) | (1 << 14) | (1 << 15) | (1 << 16)),
             "deny": "0",
         })
     legacy_forum = next(

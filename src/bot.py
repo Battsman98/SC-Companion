@@ -3606,7 +3606,7 @@ class GameAssistBot(commands.Bot):
         if guild.me is not None:
             private_overwrites[guild.me] = discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, read_message_history=True,
-                manage_messages=True, attach_files=True, embed_links=True,
+                attach_files=True, embed_links=True,
             )
         for forum in [channel for channel in guild.forums if channel.name == "rep-submissions"]:
             await forum.edit(

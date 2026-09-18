@@ -159,6 +159,7 @@ def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
     assert 'await guild.create_text_channel(' in repair_source
     assert 'discord.PermissionOverwrite(view_channel=False)' in repair_source
     assert "private_overwrites[guild.me]" in repair_source
+    assert "manage_messages=True" not in repair_source
     assert 'title="How to submit reputation progress"' in repair_source
     assert 'item.name == "rep-progress"' in repair_source
     assert 'name="activity"' in repair_source
