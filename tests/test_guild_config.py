@@ -72,8 +72,11 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Save Channels" in javascript
     assert "Add SC Companion to Discord" in javascript
     assert "renderDiscordChannelPicker" in javascript
+    assert "renderDiscordServerChannelDirectory" in javascript
     assert 'channel.type === 4' in javascript
     assert 'class="discord-channel-category"' in javascript
+    assert 'class="discord-server-category"' in javascript
+    assert "Select a category to show or hide its channels." in javascript
     assert "Create an award" in javascript
     assert "Enable awards" not in javascript
     assert "Where should awards be announced?" in javascript
