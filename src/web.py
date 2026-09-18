@@ -383,6 +383,8 @@ class ReputationSettingsRequest(BaseModel):
     enabled: bool
     reviewer_role_id: int | None = None
     auto_create_role: bool = False
+    application_channel_id: int | None = None
+    activity_channel_id: int | None = None
 
 
 class AwardDefinitionRequest(BaseModel):
@@ -1314,6 +1316,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             **reputation_settings,
             "reviewer_role_id": _snowflake(reputation_settings.get("reviewer_role_id")),
             "submission_channel_id": _snowflake(reputation_settings.get("submission_channel_id")),
+            "application_channel_id": _snowflake(reputation_settings.get("application_channel_id")),
             "activity_channel_id": _snowflake(reputation_settings.get("activity_channel_id")),
         } if reputation_settings is not None else None,
         "updated_at": stored.get("updated_at") if stored else None,
@@ -1485,6 +1488,12 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
                                    user=Depends(require_user)) -> dict[str, Any]:
     await _award_dashboard_manager(guild_id, user)
     roles = await _discord_guild_roles(guild_id)
+    channels = await _discord_guild_channels(guild_id)
+    valid_channel_ids = {int(item["id"]) for item in channels if item["type"] in {0, 5}}
+    for field_name in ("application_channel_id", "activity_channel_id"):
+        channel_id = getattr(payload, field_name)
+        if channel_id is not None and channel_id not in valid_channel_ids:
+            raise HTTPException(status_code=422, detail="The selected reputation channel is unavailable.")
     role_id = payload.reviewer_role_id
     if payload.auto_create_role:
         role = next((item for item in roles if item["name"] == "Reputation Reviewer" and not item["managed"]), None)
@@ -1498,6 +1507,9 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
         raise HTTPException(status_code=422, detail="The selected reputation reviewer role is unavailable.")
     current = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
     settings = {**current, "enabled": payload.enabled, "reviewer_role_id": role_id}
+    for field_name in ("application_channel_id", "activity_channel_id"):
+        if field_name in payload.model_fields_set:
+            settings[field_name] = getattr(payload, field_name)
     await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
     return {"status": "saved", **settings}
 

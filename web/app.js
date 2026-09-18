@@ -1154,7 +1154,7 @@ async function loadManageableGuilds() {
   }
 }
 
-function renderDiscordChannelPicker(channels, selected, { forum = false } = {}) {
+function renderDiscordChannelPicker(channels, selected, { forum = false, attribute = "" } = {}) {
   const allowedTypes = forum ? new Set([15, 16]) : new Set([0, 5]);
   const emptyLabel = forum ? "Marketplace disabled" : "Any channel";
   const categories = channels
@@ -1188,7 +1188,7 @@ function renderDiscordChannelPicker(channels, selected, { forum = false } = {}) 
       <button type="button" class="discord-channel-choice ${selectedChannel ? "" : "selected"}" data-channel-choice="">${emptyLabel}</button>
       ${categoryMarkup}${uncategorizedMarkup}
     </div>
-    <select class="discord-channel-native" ${forum ? "data-module-resource-channel" : "data-module-channel"} tabindex="-1" aria-hidden="true">${optionMarkup}</select>
+    <select class="discord-channel-native" ${attribute || (forum ? "data-module-resource-channel" : "data-module-channel")} tabindex="-1" aria-hidden="true">${optionMarkup}</select>
   </details>`;
 }
 
@@ -1205,7 +1205,8 @@ function bindDiscordChannelPickers(container) {
   });
 }
 
-function renderFeatureAssignmentsByCategory(channels, modules) {
+function renderFeatureAssignmentsByCategory(config) {
+  const { channels, modules } = config;
   const categories = channels.filter((channel) => channel.type === 4).sort((left, right) => (left.position ?? 0) - (right.position ?? 0));
   const channelById = new Map(channels.map((channel) => [String(channel.id), channel]));
   const assignmentRow = (module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel${renderDiscordChannelPicker(channels, module.channel_id)}</label>${module.key === "trade_tools" ? `<label>Marketplace forum${renderDiscordChannelPicker(channels, module.resource_channel_id, { forum: true })}</label>` : ""}</div></div>`;
@@ -1213,12 +1214,28 @@ function renderFeatureAssignmentsByCategory(channels, modules) {
     const channel = channelById.get(String(module.channel_id || ""));
     return channel?.parent_id ? String(channel.parent_id) : null;
   };
+  const awardSettings = config.awards_available ? (config.awards?.settings || {}) : null;
+  const reputationSettings = config.awards_available ? (config.reputation || {}) : null;
+  const specialCategoryId = (channelId) => channelById.get(String(channelId || ""))?.parent_id;
+  const namedCategoryId = (name) => categories.find((category) => category.name.toLowerCase().includes(name))?.id;
+  const awardCategoryId = awardSettings ? (specialCategoryId(awardSettings.announcement_channel_id) || namedCategoryId("awards")) : null;
+  const reputationCategoryId = reputationSettings ? (specialCategoryId(reputationSettings.application_channel_id) || namedCategoryId("reputation progress")) : null;
+  const awardRow = () => `<div class="bot-module-row special-feature-assignment" data-award-channel-assignment><div class="bot-module-copy"><span><strong>Awards</strong><small>Contract and custom award announcements.</small></span></div><div><label>Announcement channel${renderDiscordChannelPicker(channels, awardSettings?.announcement_channel_id, { attribute: "data-award-assignment-channel" })}</label></div></div>`;
+  const reputationRow = () => `<div class="bot-module-row special-feature-assignment" data-reputation-channel-assignment><div class="bot-module-copy"><span><strong>Reputation Progress</strong><small>Member applications and activity/progress cards.</small></span></div><div><label>Application channel${renderDiscordChannelPicker(channels, reputationSettings?.application_channel_id, { attribute: "data-reputation-application-channel" })}</label><label>Activity channel${renderDiscordChannelPicker(channels, reputationSettings?.activity_channel_id, { attribute: "data-reputation-activity-channel" })}</label></div></div>`;
   const categoryRows = categories.map((category) => {
     const assignments = modules.filter((module) => assignedCategoryId(module) === String(category.id));
-    return `<details class="discord-server-category feature-assignment-category"><summary><span>${escapeHtml(category.name)}</span><small>${assignments.length} ${assignments.length === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${assignments.length ? assignments.map(assignmentRow).join("") : '<p class="discord-channel-empty">No SC Companion features are currently assigned to this category.</p>'}</div></details>`;
+    const specials = [];
+    if (awardSettings && String(awardCategoryId || "") === String(category.id)) specials.push(awardRow());
+    if (reputationSettings && String(reputationCategoryId || "") === String(category.id)) specials.push(reputationRow());
+    const featureCount = assignments.length + specials.length;
+    return `<details class="discord-server-category feature-assignment-category"><summary><span>${escapeHtml(category.name)}</span><small>${featureCount} ${featureCount === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${featureCount ? assignments.map(assignmentRow).join("") + specials.join("") : '<p class="discord-channel-empty">No SC Companion features are currently assigned to this category.</p>'}</div></details>`;
   }).join("");
   const unassigned = modules.filter((module) => !assignedCategoryId(module));
-  const unassignedRow = `<details class="discord-server-category feature-assignment-category"><summary><span>Any Channel / Unassigned</span><small>${unassigned.length} ${unassigned.length === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${unassigned.length ? unassigned.map(assignmentRow).join("") : '<p class="discord-channel-empty">No unassigned features.</p>'}</div></details>`;
+  const unassignedSpecials = [];
+  if (awardSettings && !awardCategoryId) unassignedSpecials.push(awardRow());
+  if (reputationSettings && !reputationCategoryId) unassignedSpecials.push(reputationRow());
+  const unassignedCount = unassigned.length + unassignedSpecials.length;
+  const unassignedRow = `<details class="discord-server-category feature-assignment-category"><summary><span>Any Channel / Unassigned</span><small>${unassignedCount} ${unassignedCount === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${unassignedCount ? unassigned.map(assignmentRow).join("") + unassignedSpecials.join("") : '<p class="discord-channel-empty">No unassigned features.</p>'}</div></details>`;
   return `<div class="feature-assignment-directory">${categoryRows}${unassignedRow}</div>`;
 }
 
@@ -1271,7 +1288,7 @@ async function loadGuildBotConfiguration(guildId) {
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
         <div class="section-heading"><h3>Feature Assignments by Category</h3><p>Open a Discord category to change the SC Companion features assigned there. Moving a feature to a channel in another category takes effect after you save.</p></div>
-        ${renderFeatureAssignmentsByCategory(config.channels, config.modules)}
+        ${renderFeatureAssignmentsByCategory(config)}
         <div class="bot-management-actions"><button type="submit">Save Channels</button><span data-bot-management-status></span></div>
       </section>
     </form>
@@ -1427,12 +1444,13 @@ async function saveGuildBotConfiguration(event) {
     await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}`, { method: "PUT", body: payload });
     const awardFeature = form.querySelector("[data-award-feature]");
     if (awardFeature) {
+      const assignmentChannel = form.querySelector("[data-award-assignment-channel]");
       await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/awards/settings`, {
         method: "PUT",
         body: {
           enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked,
           manager_role_id: awardFeature.dataset.managerRoleId || null,
-          announcement_channel_id: awardFeature.dataset.announcementChannelId || null,
+          announcement_channel_id: assignmentChannel?.value || awardFeature.dataset.announcementChannelId || null,
         },
       });
     }
@@ -1441,7 +1459,10 @@ async function saveGuildBotConfiguration(event) {
       await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/reputation/settings`, {
         method: "PUT",
         body: { enabled: reputationFeature.querySelector("[data-reputation-feature-enabled]").checked,
-          reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null, auto_create_role: false },
+          reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null,
+          application_channel_id: form.querySelector("[data-reputation-application-channel]")?.value || null,
+          activity_channel_id: form.querySelector("[data-reputation-activity-channel]")?.value || null,
+          auto_create_role: false },
       });
     }
     status.textContent = channelSetupMode === "automatic" ? "Settings saved. The bot will make the channels shortly." : "Bot settings saved.";
