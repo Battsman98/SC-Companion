@@ -1458,6 +1458,15 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
     if category is None:
         category = await _discord_api("POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
                                       json_payload={"name": "📊 REPUTATION PROGRESS", "type": 4})
+    main_category = next(
+        (item for item in channels if item["type"] == 4 and item["name"].casefold() in {"🚀 sc companion", "sc companion"}),
+        None,
+    )
+    if main_category is None:
+        main_category = await _discord_api(
+            "POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
+            json_payload={"name": "🚀 SC COMPANION", "type": 4},
+        )
     settings = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
     reviewer_role_id = settings.get("reviewer_role_id")
     if not reviewer_role_id:
@@ -1488,7 +1497,6 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
             },
         )
     specs = (("rep-guidelines", 0, "How to submit Star Citizen reputation progress."),
-             ("rep-progress", 0, "Reviewed Star Citizen reputation progress."),
              ("rep-submissions", 0, "Private reputation application queue for the configured reviewer role."))
     made = {}
     for name, channel_type, topic in specs:
@@ -1507,7 +1515,29 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
                               "permission_overwrites": private_overwrites},
             )
         made[name] = channel
+    activity = next((item for item in channels if item["name"] == "activity" and item["type"] == 0), None)
+    legacy_progress = next((item for item in channels if item["name"] == "rep-progress" and item["type"] == 0), None)
+    activity_payload = {
+        "name": "activity", "type": 0, "parent_id": str(main_category["id"]),
+        "topic": "Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+    }
+    if activity is None and legacy_progress is not None:
+        activity = await _discord_api(
+            "PATCH", f"/channels/{legacy_progress['id']}", bot_token=_public_bot_token(),
+            json_payload=activity_payload,
+        )
+    elif activity is None:
+        activity = await _discord_api(
+            "POST", f"/guilds/{guild_id}/channels", bot_token=_public_bot_token(),
+            json_payload=activity_payload,
+        )
+    else:
+        activity = await _discord_api(
+            "PATCH", f"/channels/{activity['id']}", bot_token=_public_bot_token(),
+            json_payload=activity_payload,
+        )
     settings["submission_channel_id"] = int(made["rep-submissions"]["id"])
+    settings["activity_channel_id"] = int(activity["id"])
     settings.pop("submission_forum_id", None)
     guide_payload = {
         "embeds": [{
@@ -1544,6 +1574,39 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
             bot_token=_public_bot_token(), json_payload=guide_payload,
         )
         await state().cache.set(guide_key, int(guide_message["id"]), 315360000)
+    activity_guide_payload = {
+        "embeds": [{
+            "title": "SC Companion activity and reputation",
+            "description": (
+                "Use **`/progress`** in this channel to generate an activity card for yourself. You can optionally "
+                "choose another member to view their card."
+            ),
+            "color": 5793266,
+            "fields": [{
+                "name": "The card includes",
+                "value": "Current-month messages, voice time, active days, and every approved reputation ladder.",
+                "inline": False,
+            }],
+        }],
+    }
+    activity_key = f"guild:{guild_id}:activity-guide-message"
+    activity_message_id = await state().cache.get(activity_key)
+    activity_message = None
+    if activity_message_id:
+        try:
+            activity_message = await _discord_api(
+                "PATCH", f"/channels/{activity['id']}/messages/{activity_message_id}",
+                bot_token=_public_bot_token(), json_payload=activity_guide_payload,
+            )
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
+    if activity_message is None:
+        activity_message = await _discord_api(
+            "POST", f"/channels/{activity['id']}/messages",
+            bot_token=_public_bot_token(), json_payload=activity_guide_payload,
+        )
+        await state().cache.set(activity_key, int(activity_message["id"]), 315360000)
     await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
     return {"status": "ready", "channel_id": _snowflake(made["rep-submissions"]["id"])}
 

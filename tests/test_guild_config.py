@@ -119,6 +119,10 @@ def test_reputation_submissions_use_a_private_application_queue() -> None:
     assert '"rep-submissions-archive"' in provision_source
     assert '"How to submit reputation progress"' in provision_source
     assert "/rep submit" in provision_source
+    assert 'item["name"] == "rep-progress"' in provision_source
+    assert '"name": "activity"' in provision_source
+    assert 'settings["activity_channel_id"]' in provision_source
+    assert '"SC Companion activity and reputation"' in provision_source
 
 
 def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
@@ -130,6 +134,10 @@ def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
     assert 'await guild.create_text_channel(' in repair_source
     assert 'discord.PermissionOverwrite(view_channel=False)' in repair_source
     assert 'title="How to submit reputation progress"' in repair_source
+    assert 'item.name == "rep-progress"' in repair_source
+    assert 'name="activity"' in repair_source
+    assert 'category=main_category' in repair_source
+    assert 'title="SC Companion activity and reputation"' in repair_source
     assert '"repair reputation submission channels"' in ready_source
 
 

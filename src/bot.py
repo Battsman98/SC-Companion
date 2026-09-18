@@ -3430,6 +3430,13 @@ class GameAssistBot(commands.Bot):
             category = await guild.create_category(
                 "📊 REPUTATION PROGRESS", reason="Set up reputation progress channels"
             )
+        main_category = discord.utils.find(
+            lambda item: item.name.casefold() in SC_COMPANION_CATEGORY_ALIASES, guild.categories
+        )
+        if main_category is None:
+            main_category = await guild.create_category(
+                SC_COMPANION_CATEGORY_NAME, reason="Set up SC Companion activity channel"
+            )
         private_overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             reviewer_role: discord.PermissionOverwrite(
@@ -3467,6 +3474,26 @@ class GameAssistBot(commands.Bot):
                 topic="How to submit Star Citizen reputation progress.",
                 reason="Create reputation submission guide",
             )
+        activity_channel = discord.utils.find(lambda item: item.name == "activity", guild.text_channels)
+        legacy_progress = discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels)
+        if activity_channel is None and legacy_progress is not None:
+            activity_channel = await legacy_progress.edit(
+                name="activity", category=main_category,
+                topic="Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+                reason="Replace unused reputation progress channel with SC Companion activity",
+            )
+        elif activity_channel is None:
+            activity_channel = await guild.create_text_channel(
+                "activity", category=main_category,
+                topic="Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+                reason="Create SC Companion activity channel",
+            )
+        else:
+            await activity_channel.edit(
+                category=main_category,
+                topic="Use /progress to view monthly messages, voice activity, active days, and approved reputation.",
+                reason="Repair SC Companion activity channel",
+            )
         guide_embed = discord.Embed(
             title="How to submit reputation progress",
             description=(
@@ -3493,7 +3520,32 @@ class GameAssistBot(commands.Bot):
             await self.cache.set(guide_key, guide_message.id, 315360000)
         else:
             await guide_message.edit(embed=guide_embed)
+        activity_embed = discord.Embed(
+            title="SC Companion activity and reputation",
+            description=(
+                "Use **`/progress`** in this channel to generate an activity card for yourself. You can optionally "
+                "choose another member to view their card."
+            ),
+            color=discord.Color.blurple(),
+        )
+        activity_embed.add_field(
+            name="The card includes",
+            value="Current-month messages, voice time, active days, and every approved reputation ladder.",
+            inline=False,
+        )
+        activity_key = f"guild:{guild.id}:activity-guide-message"
+        activity_message_id = await self.cache.get(activity_key)
+        activity_message = None
+        if activity_message_id:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                activity_message = await activity_channel.fetch_message(int(activity_message_id))
+        if activity_message is None:
+            activity_message = await activity_channel.send(embed=activity_embed)
+            await self.cache.set(activity_key, activity_message.id, 315360000)
+        else:
+            await activity_message.edit(embed=activity_embed)
         settings["submission_channel_id"] = submission.id
+        settings["activity_channel_id"] = activity_channel.id
         settings.pop("submission_forum_id", None)
         await self.cache.set(settings_key, settings, 315360000)
 
