@@ -179,7 +179,7 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
             if json_payload["type"] == 4:
                 return {"id": "800", "name": json_payload["name"], "type": 4}
             ids = {
-                "award-list-criteria": "902", "award-announcements": "904",
+                "award-panel": "902", "award-announcements": "904",
             }
             return {"id": ids[json_payload["name"]], "name": json_payload["name"],
                     "type": 0, "parent_id": "800"}
@@ -196,7 +196,7 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
         assert result["category_id"] == "800"
         assert result["channel_id"] == "904"
         assert result["channels"] == {
-            "award-list-criteria": "902", "award-announcements": "904",
+            "award-panel": "902", "award-announcements": "904",
         }
         assert discord_api.await_count == 3
         assert discord_api.await_args_list[0].kwargs["json_payload"] == {
@@ -226,7 +226,16 @@ def test_award_channel_repair_deletes_only_retired_channels_in_awards_category(m
         monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
         monkeypatch.setattr(web, "_award_dashboard_manager", AsyncMock(return_value={"id": 123}))
         monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=channels))
-        discord_api = AsyncMock(return_value={})
+        async def discord_response(method, path, *, bot_token, json_payload=None):
+            del bot_token
+            if method == "PATCH" and path == "/channels/902":
+                return {
+                    "id": "902", "name": json_payload["name"], "type": 0,
+                    "parent_id": json_payload["parent_id"],
+                }
+            return {}
+
+        discord_api = AsyncMock(side_effect=discord_response)
         monkeypatch.setattr(web, "_discord_api", discord_api)
         monkeypatch.setattr(web, "_public_bot_token", lambda: "public-token")
 
@@ -239,6 +248,12 @@ def test_award_channel_repair_deletes_only_retired_channels_in_awards_category(m
             call.args[1] for call in discord_api.await_args_list if call.args[0] == "DELETE"
         ]
         assert deleted_paths == ["/channels/901", "/channels/903"]
+        renamed_calls = [
+            call for call in discord_api.await_args_list
+            if call.args[:2] == ("PATCH", "/channels/902")
+        ]
+        assert len(renamed_calls) == 1
+        assert renamed_calls[0].kwargs["json_payload"]["name"] == "award-panel"
         cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 904)
 
     asyncio.run(scenario())

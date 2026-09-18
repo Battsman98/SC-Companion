@@ -8,7 +8,10 @@ from src.bot import (
     AWARD_NAME_LIMIT,
     AWARD_TASK_LIMIT,
     AWARDS_PER_DISCORD_PAGE,
+    AwardChoiceSelect,
+    AwardNominationView,
     AwardPanelView,
+    AwardRecommendationModal,
     GameAssistBot,
     _award_list_embed,
     _award_requirements,
@@ -57,6 +60,26 @@ def test_award_panel_is_persistent_and_lists_awards_in_pages() -> None:
     assert len(second.fields) == 1
     assert "Page 1 of 2" in (first.footer.text or "")
     assert "Page 2 of 2" in (second.footer.text or "")
+
+
+def test_award_nomination_uses_member_search_award_descriptions_and_pages() -> None:
+    awards = [
+        {"id": index, "name": f"Award {index}", "description": f"Description {index}"}
+        for index in range(1, 27)
+    ]
+    view = AwardNominationView(awards, user_id=99)
+    member_select = next(item for item in view.children if item.__class__.__name__ == "AwardNomineeSelect")
+    award_select = next(item for item in view.children if isinstance(item, AwardChoiceSelect))
+
+    assert member_select.placeholder == "Who is the award for? Search for a member"
+    assert award_select.placeholder == "What award do you want to submit?"
+    assert award_select.options[0].label == "Award 1"
+    assert award_select.options[0].description == "Description 1"
+    assert len(award_select.options) == 25
+    assert view.next.disabled is False
+
+    modal = AwardRecommendationModal(awards[0], object())
+    assert modal.reason.label == "Why do you recommend this award?"
 
 
 def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> None:

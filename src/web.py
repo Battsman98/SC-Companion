@@ -1394,12 +1394,12 @@ async def create_award_announcement_channel(guild_id: int, user=Depends(require_
                 "DELETE", f"/channels/{channel['id']}", bot_token=_public_bot_token()
             )
     channel_specs = (
-        ("award-list-criteria", "Current awards and the requirements for earning them."),
+        ("award-panel", "Browse, create, and submit SC Companion awards."),
         ("award-announcements", "SC Companion award recipient announcements and recognition."),
     )
     award_channels: dict[str, Any] = {}
     for name, topic in channel_specs:
-        aliases = {name}
+        aliases = {name, "award-list-criteria"} if name == "award-panel" else {name}
         if name == "award-announcements":
             aliases.update({"awards"})
         channel = next(
@@ -1745,7 +1745,9 @@ async def grant_award_from_dashboard(guild_id: int, payload: AwardGrantRequest,
     member = await _discord_guild_member(guild_id, payload.member_id)
     if award["requirements"]:
         approved = await state().cache.approved_award_tasks(guild_id, award["id"], member["id"])
-        if not all(task.casefold() in approved for task in award["requirements"]):
+        if "award nomination" not in approved and not all(
+            task.casefold() in approved for task in award["requirements"]
+        ):
             raise HTTPException(status_code=422, detail="This member has not completed every award requirement.")
     granted = await state().cache.grant_award(
         guild_id, award["id"], member["id"], member["name"], payload.citation.strip(), user.id

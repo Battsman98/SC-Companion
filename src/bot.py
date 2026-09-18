@@ -3529,9 +3529,21 @@ class GameAssistBot(commands.Bot):
         if category is None:
             return
         channel = discord.utils.find(
-            lambda item: item.name == "award-list-criteria" and item.category_id == category.id,
+            lambda item: item.name == "award-panel" and item.category_id == category.id,
             guild.text_channels,
         )
+        if channel is None and guild.me.guild_permissions.manage_channels:
+            legacy = discord.utils.find(
+                lambda item: item.name == "award-list-criteria" and item.category_id == category.id,
+                guild.text_channels,
+            )
+            if legacy is not None:
+                await legacy.edit(
+                    name="award-panel",
+                    topic="Browse, create, and submit SC Companion awards.",
+                    reason="Rename the SC Companion award panel channel",
+                )
+                channel = legacy
         if channel is None or not channel.permissions_for(guild.me).send_messages:
             return
         cache_key = f"guild:{guild.id}:award-panel-message"
@@ -7189,12 +7201,12 @@ class AwardAdminView(discord.ui.View):
             with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                 await retired.delete(reason="Remove retired award category channel")
         channel_specs = (
-            ("award-list-criteria", "Current awards and the requirements for earning them."),
+            ("award-panel", "Browse, create, and submit SC Companion awards."),
             ("award-announcements", "SC Companion award recipient announcements and recognition."),
         )
         award_channels: dict[str, discord.TextChannel] = {}
         for name, topic in channel_specs:
-            aliases = {name, "awards"} if name == "award-announcements" else {name}
+            aliases = {name, "awards"} if name == "award-announcements" else {name, "award-list-criteria"}
             channel = discord.utils.find(lambda item: item.name in aliases, interaction.guild.text_channels)
             if channel is None:
                 channel = await interaction.guild.create_text_channel(
@@ -7592,6 +7604,16 @@ async def _can_manage_awards(interaction: discord.Interaction, bot: "GameAssistB
                 and any(role.id == role_id for role in interaction.user.roles))
 
 
+async def _has_award_manager_role(interaction: discord.Interaction, bot: "GameAssistBot") -> bool:
+    """Require the configured role for panel-based award creation."""
+    if not _award_test_guild(interaction, bot) or interaction.guild is None:
+        return False
+    settings = await bot.cache.award_settings(interaction.guild.id)
+    role_id = settings.get("manager_role_id")
+    return bool(role_id and isinstance(interaction.user, discord.Member)
+                and any(role.id == role_id for role in interaction.user.roles))
+
+
 async def _enabled_award_settings(interaction: discord.Interaction, bot: "GameAssistBot") -> dict | None:
     if not _award_test_guild(interaction, bot):
         await interaction.response.send_message("Awards are limited to the SC Companion testing Discord.", ephemeral=True)
@@ -7676,7 +7698,7 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
             return
         if await _enabled_award_settings(interaction, bot) is None:
             return
-        if not await _can_manage_awards(interaction, bot):
+        if not await _has_award_manager_role(interaction, bot):
             await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
             return
         tasks = _award_requirements(str(self.requirements.value))
@@ -7698,15 +7720,17 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
         )
 
 
-class AwardSubmissionModal(discord.ui.Modal, title="Submit an Award Request"):
-    award_id = discord.ui.TextInput(label="Award number", placeholder="Example: 3", max_length=10)
-    requirement = discord.ui.TextInput(
-        label="Completed requirement (tracked awards)", required=False, max_length=AWARD_TASK_LIMIT,
-    )
-    citation = discord.ui.TextInput(
-        label="Citation or supporting details", style=discord.TextStyle.paragraph,
+class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
+    reason = discord.ui.TextInput(
+        label="Why do you recommend this award?", style=discord.TextStyle.paragraph,
+        placeholder="Describe why this member should receive the award.",
         max_length=AWARD_CITATION_LIMIT,
     )
+
+    def __init__(self, award: dict, nominee: discord.Member | discord.User) -> None:
+        super().__init__()
+        self.award = award
+        self.nominee = nominee
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         bot = interaction.client
@@ -7715,35 +7739,114 @@ class AwardSubmissionModal(discord.ui.Modal, title="Submit an Award Request"):
             return
         if await _enabled_award_settings(interaction, bot) is None:
             return
-        try:
-            award_number = int(str(self.award_id.value).strip())
-        except ValueError:
-            await interaction.response.send_message("Enter the numeric award number shown in Browse Awards.", ephemeral=True)
-            return
-        award = await bot.cache.award_definition(interaction.guild.id, award_number)
-        if award is None or not award["active"]:
-            await interaction.response.send_message("That active award was not found.", ephemeral=True)
-            return
-        task_name = "Nomination"
-        if award["requirements"]:
-            task_name = next(
-                (item for item in award["requirements"]
-                 if item.casefold() == str(self.requirement.value).strip().casefold()),
-                "",
-            )
-            if not task_name:
-                choices = ", ".join(award["requirements"])
-                await interaction.response.send_message(
-                    f"Enter one exact requirement: {choices}"[:1900], ephemeral=True,
-                )
-                return
         report_id = await bot.cache.submit_award_report(
-            interaction.guild.id, award_number, interaction.user.id, str(interaction.user),
-            task_name, str(self.citation.value).strip(),
+            interaction.guild.id, int(self.award["id"]), self.nominee.id, str(self.nominee),
+            "Award nomination", str(self.reason.value).strip(),
         )
         await interaction.response.send_message(
-            f"Award request `#{report_id}` was submitted for **{award['name']}**.", ephemeral=True,
+            f"Recommendation `#{report_id}` submitted: {self.nominee.mention} for **{self.award['name']}**.",
+            ephemeral=True,
         )
+
+
+class AwardNomineeSelect(discord.ui.UserSelect):
+    def __init__(self) -> None:
+        super().__init__(placeholder="Who is the award for? Search for a member", min_values=1, max_values=1, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if not isinstance(view, AwardNominationView):
+            return
+        view.nominee = self.values[0]
+        await interaction.response.edit_message(content=view.summary(), view=view)
+
+
+class AwardChoiceSelect(discord.ui.Select):
+    def __init__(self, awards: list[dict], page: int) -> None:
+        start = page * 25
+        options = [
+            discord.SelectOption(
+                label=str(award["name"])[:100],
+                value=str(award["id"]),
+                description=(str(award["description"]).strip() or "No description provided.")[:100],
+            )
+            for award in awards[start:start + 25]
+        ]
+        super().__init__(
+            placeholder="What award do you want to submit?", options=options,
+            min_values=1, max_values=1, row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if not isinstance(view, AwardNominationView):
+            return
+        view.award_id = int(self.values[0])
+        await interaction.response.edit_message(content=view.summary(), view=view)
+
+
+class AwardNominationView(discord.ui.View):
+    def __init__(self, awards: list[dict], user_id: int, page: int = 0) -> None:
+        super().__init__(timeout=300)
+        self.awards = awards
+        self.user_id = user_id
+        self.page = page
+        self.nominee: discord.Member | discord.User | None = None
+        self.award_id: int | None = None
+        self.add_item(AwardNomineeSelect())
+        self.add_item(AwardChoiceSelect(awards, page))
+        self.previous.disabled = page <= 0
+        self.next.disabled = (page + 1) * 25 >= len(awards)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("Open the Award Panel to start your own submission.", ephemeral=True)
+        return False
+
+    def selected_award(self) -> dict | None:
+        return next((award for award in self.awards if award["id"] == self.award_id), None)
+
+    def summary(self) -> str:
+        nominee = self.nominee.mention if self.nominee is not None else "Not selected"
+        award = self.selected_award()
+        award_text = f"**{award['name']}** — {award['description']}" if award else "Not selected"
+        return (
+            "Select the member and award, then continue.\n"
+            f"**Who is the award for?** {nominee}\n"
+            f"**Selected award:** {award_text}"
+        )[:1900]
+
+    def rebuild_award_select(self) -> None:
+        for item in list(self.children):
+            if isinstance(item, AwardChoiceSelect):
+                self.remove_item(item)
+        self.add_item(AwardChoiceSelect(self.awards, self.page))
+        self.previous.disabled = self.page <= 0
+        self.next.disabled = (self.page + 1) * 25 >= len(self.awards)
+
+    @discord.ui.button(label="Previous awards", style=discord.ButtonStyle.secondary, row=2)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        self.page = max(0, self.page - 1)
+        self.rebuild_award_select()
+        await interaction.response.edit_message(content=self.summary(), view=self)
+
+    @discord.ui.button(label="Next awards", style=discord.ButtonStyle.secondary, row=2)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        self.page = min((len(self.awards) - 1) // 25, self.page + 1)
+        self.rebuild_award_select()
+        await interaction.response.edit_message(content=self.summary(), view=self)
+
+    @discord.ui.button(label="Continue", style=discord.ButtonStyle.success, row=3)
+    async def continue_submission(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        award = self.selected_award()
+        if self.nominee is None or award is None:
+            await interaction.response.send_message("Select both a member and an award first.", ephemeral=True)
+            return
+        await interaction.response.send_modal(AwardRecommendationModal(award, self.nominee))
 
 
 class AwardPanelView(discord.ui.View):
@@ -7768,7 +7871,12 @@ class AwardPanelView(discord.ui.View):
         bot = interaction.client
         if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
             return
-        await interaction.response.send_modal(AwardSubmissionModal())
+        awards = await bot.cache.award_definitions(interaction.guild_id or 0)
+        if not awards:
+            await interaction.response.send_message("No active awards are available yet.", ephemeral=True)
+            return
+        view = AwardNominationView(awards, interaction.user.id)
+        await interaction.response.send_message(content=view.summary(), view=view, ephemeral=True)
 
     @discord.ui.button(label="Create Award", style=discord.ButtonStyle.secondary,
                        emoji="➕", custom_id="sc-companion:awards:create")
@@ -7780,7 +7888,7 @@ class AwardPanelView(discord.ui.View):
             return
         if await _enabled_award_settings(interaction, bot) is None:
             return
-        if not await _can_manage_awards(interaction, bot):
+        if not await _has_award_manager_role(interaction, bot):
             await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
             return
         await interaction.response.send_modal(AwardCreationModal())
@@ -8186,7 +8294,10 @@ async def award_review_command(interaction: discord.Interaction, report_id: int,
     if decision.value == "approved":
         award = await bot.cache.award_definition(interaction.guild_id or 0, result["award_id"])
         approved = await bot.cache.approved_award_tasks(interaction.guild_id or 0, result["award_id"], result["user_id"])
-        if award and all(task.casefold() in approved for task in award["requirements"]):
+        if award and "award nomination" in approved:
+            completion = (f" <@{result['user_id']}> has an approved recommendation; "
+                          f"a manager can now grant **{award['name']}**.")
+        elif award and all(task.casefold() in approved for task in award["requirements"]):
             completion = (f" All requirements are approved for <@{result['user_id']}>; "
                           f"a manager can now grant **{award['name']}**.")
     await interaction.response.send_message(f"Report `#{report_id}` {decision.value}.{completion}", ephemeral=True)
@@ -8210,7 +8321,9 @@ async def award_grant_command(interaction: discord.Interaction, member: discord.
         return
     if award["requirements"]:
         approved = await bot.cache.approved_award_tasks(interaction.guild_id or 0, award_id, member.id)
-        if not all(task.casefold() in approved for task in award["requirements"]):
+        if "award nomination" not in approved and not all(
+            task.casefold() in approved for task in award["requirements"]
+        ):
             await interaction.response.send_message(
                 "That member has not completed every award requirement.", ephemeral=True
             )
