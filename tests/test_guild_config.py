@@ -124,6 +124,8 @@ def test_reputation_submissions_use_a_public_panel_and_private_review_queue() ->
     assert 'state().settings.public_discord_client_id' in provision_source
     assert 'settings["submission_channel_id"]' in provision_source
     assert '"name": "rep-review-queue"' in provision_source
+    assert 'settings.get("application_channel_id")' in provision_source
+    assert 'f"/channels/{legacy_submission' not in provision_source
     assert '"title": "Submit Reputation Progress"' in provision_source
     assert '"custom_id": "reputation_application:start"' in provision_source
     assert "Your application is private." in provision_source
@@ -148,6 +150,7 @@ def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
     assert 'guild.forums if channel.name == "rep-submissions"' in repair_source
     assert 'name="rep-submissions-archive"' in repair_source
     assert 'item.name == "rep-review-queue"' in repair_source
+    assert "legacy_submission_is_private" in repair_source
     assert 'title="Submit Reputation Progress"' in repair_source
     assert "ReputationSubmissionPanelView()" in repair_source
     assert 'await guild.create_text_channel(' in repair_source
