@@ -169,6 +169,7 @@ MEMBER_ROLE_NAME = "Members"
 ANNIVERSARY_ROLE_NAME = "1 Year Member"
 ANNIVERSARY_CHANNEL_NAME = "welcome"
 WELCOME_CHANNEL_NAME = "welcome"
+TOTAL_MEMBERS_CHANNEL_LABEL = "Total Members"
 ANNIVERSARY_AGE = timedelta(days=365)
 ANNIVERSARY_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 APPLICATION_REVIEW_CHANNEL_NAME = "membership-application-reviews"
@@ -886,6 +887,12 @@ class GameAssistBot(commands.Bot):
             await self._run_startup_step(
                 f"publish About panel in {guild.id}", lambda guild=guild: self.ensure_about_panel(guild)
             )
+        if self.settings.runtime_profile == "peep":
+            guild = self.get_guild(self.settings.discord_guild_id or 0)
+            if guild is not None:
+                await self._run_startup_step(
+                    "sync total member count", lambda: self.sync_total_members_channel(guild)
+                )
         if self._commands_reference_synced:
             return
 
@@ -2053,6 +2060,15 @@ class GameAssistBot(commands.Bot):
             return
         await self._assign_new_visitor(member)
         await self._send_member_welcome(member)
+        await self.sync_total_members_channel(member.guild)
+
+    async def on_member_remove(self, member: discord.Member) -> None:
+        if (
+            self.settings.runtime_profile != "peep"
+            or member.guild.id != self.settings.discord_guild_id
+        ):
+            return
+        await self.sync_total_members_channel(member.guild)
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if (
@@ -2093,6 +2109,27 @@ class GameAssistBot(commands.Bot):
             )
         except (discord.Forbidden, discord.HTTPException):
             logging.exception("Could not welcome member %s in channel %s", member.id, channel.id)
+
+    async def sync_total_members_channel(self, guild: discord.Guild) -> None:
+        """Keep Peep's existing member-count voice channel current."""
+        if self.settings.runtime_profile != "peep" or guild.id != self.settings.discord_guild_id:
+            return
+        prefix = f"{TOTAL_MEMBERS_CHANNEL_LABEL.casefold()}:"
+        channel = discord.utils.find(
+            lambda item: item.name.casefold().startswith(prefix),
+            guild.voice_channels,
+        )
+        if channel is None:
+            logging.error("Could not update member count: %s voice channel is missing", TOTAL_MEMBERS_CHANNEL_LABEL)
+            return
+
+        name = f"{TOTAL_MEMBERS_CHANNEL_LABEL}: {guild.member_count or len(guild.members)}"
+        if channel.name == name:
+            return
+        try:
+            await channel.edit(name=name, reason="Keep Peep's total member count current")
+        except (discord.Forbidden, discord.HTTPException):
+            logging.exception("Could not update total member count channel %s", channel.id)
 
     async def _assign_new_visitor(self, member: discord.Member) -> None:
         role = discord.utils.find(

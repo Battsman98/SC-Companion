@@ -10,6 +10,7 @@ def test_peep_welcomes_screened_human_after_assigning_visitor() -> None:
         settings=SimpleNamespace(runtime_profile="peep", discord_guild_id=123),
         _assign_new_visitor=AsyncMock(),
         _send_member_welcome=AsyncMock(),
+        sync_total_members_channel=AsyncMock(),
     )
     member = SimpleNamespace(bot=False, pending=False, guild=SimpleNamespace(id=123))
 
@@ -17,6 +18,7 @@ def test_peep_welcomes_screened_human_after_assigning_visitor() -> None:
 
     bot._assign_new_visitor.assert_awaited_once_with(member)
     bot._send_member_welcome.assert_awaited_once_with(member)
+    bot.sync_total_members_channel.assert_awaited_once_with(member.guild)
 
 
 def test_public_sc_companion_does_not_send_peep_welcome() -> None:
@@ -24,6 +26,7 @@ def test_public_sc_companion_does_not_send_peep_welcome() -> None:
         settings=SimpleNamespace(runtime_profile="public", discord_guild_id=123),
         _assign_new_visitor=AsyncMock(),
         _send_member_welcome=AsyncMock(),
+        sync_total_members_channel=AsyncMock(),
     )
     member = SimpleNamespace(bot=False, pending=False, guild=SimpleNamespace(id=123))
 
@@ -31,6 +34,7 @@ def test_public_sc_companion_does_not_send_peep_welcome() -> None:
 
     bot._assign_new_visitor.assert_not_awaited()
     bot._send_member_welcome.assert_not_awaited()
+    bot.sync_total_members_channel.assert_not_awaited()
 
 
 def test_peep_welcome_mentions_member_and_includes_avatar_and_member_number() -> None:
@@ -53,3 +57,26 @@ def test_peep_welcome_mentions_member_and_includes_avatar_and_member_number() ->
     assert message["embed"].thumbnail.url == "https://cdn.discordapp.com/avatar.png"
     assert message["embed"].footer.text == "Crew member #75"
     assert message["allowed_mentions"].users is True
+
+
+def test_peep_updates_existing_total_members_voice_channel() -> None:
+    channel = SimpleNamespace(name="Total Members: 74", id=456, edit=AsyncMock())
+    guild = SimpleNamespace(id=123, voice_channels=[channel], member_count=75, members=[])
+    bot = SimpleNamespace(settings=SimpleNamespace(runtime_profile="peep", discord_guild_id=123))
+
+    asyncio.run(GameAssistBot.sync_total_members_channel(bot, guild))
+
+    channel.edit.assert_awaited_once_with(
+        name="Total Members: 75",
+        reason="Keep Peep's total member count current",
+    )
+
+
+def test_sc_companion_does_not_update_peep_member_counter() -> None:
+    channel = SimpleNamespace(name="Total Members: 74", id=456, edit=AsyncMock())
+    guild = SimpleNamespace(id=123, voice_channels=[channel], member_count=75, members=[])
+    bot = SimpleNamespace(settings=SimpleNamespace(runtime_profile="public", discord_guild_id=123))
+
+    asyncio.run(GameAssistBot.sync_total_members_channel(bot, guild))
+
+    channel.edit.assert_not_awaited()
