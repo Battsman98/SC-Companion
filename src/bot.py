@@ -530,7 +530,15 @@ class GameAssistCommandTree(app_commands.CommandTree):
 
         allowed_channel_ids: set[int] = set()
         module_key = module_for_command(command_name)
-        shared_utility = command_name == "status" or command_name.startswith("admin ")
+        testing_guild_utility = (
+            interaction.guild_id == bot.settings.award_test_guild_id
+            and (
+                command_name in {"activity", "progress"}
+                or command_name.startswith("rep ")
+                or command_name.startswith("award ")
+            )
+        )
+        shared_utility = command_name == "status" or command_name.startswith("admin ") or testing_guild_utility
         if configured is not None and not is_primary_guild and module_key is None and not shared_utility:
             await interaction.response.send_message(
                 f"`/{command_name}` is not available in the shared bot yet.",

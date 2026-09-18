@@ -14,6 +14,7 @@ from src.bot import (
     build_command_channel_directory_embed,
     build_loot_command_example_embed,
     GameAssistBot,
+    GameAssistCommandTree,
     INVENTORY_CHANNEL_ID,
     LOOT_CHANNEL_ID,
     loot_search_command,
@@ -448,3 +449,12 @@ def test_activity_command_does_not_require_reputation() -> None:
     assert 'name="Voice time"' in source
     assert 'name="Active days"' in source
     assert "self.tree.add_command(activity_command" in setup_source
+
+
+def test_testing_guild_commands_pass_the_shared_bot_gate() -> None:
+    source = inspect.getsource(GameAssistCommandTree.interaction_check)
+
+    assert "testing_guild_utility" in source
+    assert 'command_name in {"activity", "progress"}' in source
+    assert 'command_name.startswith("rep ")' in source
+    assert 'command_name.startswith("award ")' in source
