@@ -178,6 +178,10 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
         assert await cache.grant_award(guild_id, tracker_id, 99, "Pilot", "All contracts approved.", 1)
         assert not await cache.grant_award(guild_id, tracker_id, 99, "Pilot", "Duplicate.", 1)
         assert await cache.grant_award(guild_id, custom_id, 99, "Pilot", "Always helps the crew.", 1)
+        grants = await cache.award_grants(guild_id)
+        assert [item["award_name"] for item in grants] == ["Outstanding Service", "Community Contributor"]
+        assert grants[0]["recipient_id"] == 99
+        assert grants[0]["citation"] == "Always helps the crew."
         earned = await cache.member_awards(guild_id, 99)
         assert {item["name"] for item in earned} == {"Community Contributor", "Outstanding Service"}
 
@@ -209,7 +213,7 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
     asyncio.run(scenario())
 
 
-def test_award_nomination_batches_allow_many_recipients_and_twenty_pending_each(tmp_path) -> None:
+def test_award_nominations_reject_same_award_for_pending_or_awarded_recipient(tmp_path) -> None:
     async def scenario() -> None:
         cache = await SQLiteCache.create(str(tmp_path / "award-nominations.sqlite3"))
         guild_id = 123
@@ -224,12 +228,17 @@ def test_award_nomination_batches_allow_many_recipients_and_twenty_pending_each(
             guild_id, first_award, [(99, "Pilot"), (100, "Second Pilot")], "Shared recommendation.",
         )
         assert first_batch is not None and len(first_batch) == 2
-        for index in range(19):
-            assert await cache.submit_award_nominations(
-                guild_id, second_award, [(99, "Pilot")], f"Recommendation {index}.",
-            ) is not None
         assert await cache.submit_award_nominations(
-            guild_id, second_award, [(99, "Pilot")], "Twenty-first pending recommendation.",
+            guild_id, first_award, [(99, "Pilot")], "Duplicate pending recommendation.",
+        ) is None
+        assert await cache.submit_award_nominations(
+            guild_id, second_award, [(99, "Pilot")], "A different award remains valid.",
+        ) is not None
+        reviewed = await cache.review_award_report(guild_id, first_batch[0], "approved", 1)
+        assert reviewed is not None
+        assert await cache.grant_award(guild_id, first_award, 99, "Pilot", "Approved.", 1)
+        assert await cache.submit_award_nominations(
+            guild_id, first_award, [(99, "Pilot")], "Duplicate granted recommendation.",
         ) is None
         assert await cache.submit_award_nominations(
             guild_id, first_award, [(101, "Third Pilot")], "Another member remains eligible.",

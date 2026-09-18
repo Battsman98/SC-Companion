@@ -705,8 +705,22 @@ class SQLiteCache:
     async def submit_award_nominations(self, guild_id: int, award_id: int,
                                        recipients: list[tuple[int, str]], citation: str,
                                        max_pending_per_recipient: int = 20) -> list[int] | None:
-        """Submit one award for several recipients without exceeding each member's queue limit."""
+        """Submit one award for several recipients unless it is pending or already granted."""
+        if len({user_id for user_id, _user_name in recipients}) != len(recipients):
+            return None
         for user_id, _user_name in recipients:
+            existing = self._connection.execute(
+                "SELECT 1 FROM award_grants WHERE guild_id = ? AND award_id = ? AND recipient_id = ?",
+                (guild_id, award_id, user_id),
+            ).fetchone()
+            pending = self._connection.execute(
+                """SELECT 1 FROM award_completion_reports
+                   WHERE guild_id = ? AND award_id = ? AND user_id = ? AND status = 'pending'
+                   AND LOWER(task_name) = 'award nomination' LIMIT 1""",
+                (guild_id, award_id, user_id),
+            ).fetchone()
+            if existing is not None or pending is not None:
+                return None
             row = self._connection.execute(
                 """SELECT COUNT(*) FROM award_completion_reports
                    WHERE guild_id = ? AND user_id = ? AND status = 'pending'
@@ -789,6 +803,20 @@ class SQLiteCache:
         return [{"id": int(row[0]), "award_id": int(row[1]), "name": str(row[2]),
                  "description": str(row[3]), "citation": str(row[4]),
                  "granted_by": int(row[5]), "granted_at": int(row[6])} for row in rows]
+
+    async def award_grants(self, guild_id: int, limit: int = 100) -> list[dict[str, Any]]:
+        """Return the server's issued-award log, newest first."""
+        rows = self._connection.execute(
+            """SELECT g.id, g.award_id, d.name, g.recipient_id, g.recipient_name,
+                      g.citation, g.granted_by, g.granted_at
+               FROM award_grants g JOIN award_definitions d ON d.id = g.award_id
+               WHERE g.guild_id = ? ORDER BY g.granted_at DESC, g.id DESC LIMIT ?""",
+            (guild_id, limit),
+        ).fetchall()
+        return [{"id": int(row[0]), "award_id": int(row[1]), "award_name": str(row[2]),
+                 "recipient_id": int(row[3]), "recipient_name": str(row[4]),
+                 "citation": str(row[5]), "granted_by": int(row[6]),
+                 "granted_at": int(row[7])} for row in rows]
 
     async def save_guild_bot_settings(
         self,

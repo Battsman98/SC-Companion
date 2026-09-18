@@ -1252,6 +1252,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     award_channel_settings = (await state().cache.get(f"guild:{guild_id}:award-channel-settings") or {}) if awards_available else {}
     award_definitions = await state().cache.award_definitions(guild_id, active_only=False) if awards_available else []
     award_reports = await state().cache.pending_award_reports(guild_id, 50) if awards_available else []
+    award_grants = await state().cache.award_grants(guild_id, 100) if awards_available else []
     reputation_settings = (await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}) if awards_available else None
     if awards_available:
         channel_by_name = {item["name"]: int(item["id"]) for item in channels}
@@ -1321,6 +1322,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             } if award_settings else None,
             "definitions": award_definitions,
             "pending_reports": award_reports,
+            "grants": award_grants,
             "roles": [{**role, "id": _snowflake(role["id"])} for role in roles if not role["managed"]],
         } if awards_available else None,
         "reputation": {

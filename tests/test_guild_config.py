@@ -115,6 +115,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert 'award_type: requirements.length ? "tracker" : "custom"' in javascript
     assert "Automatically grant when complete" not in javascript
     assert "Members submit award requests from the Discord Award Panel." in javascript
+    assert "Award Log" in javascript
+    assert "Issued awards and recipients" in javascript
     assert 'class="tool-card award-edit-disclosure"' in javascript
     assert "data-award-delete" in javascript
     assert 'method: "DELETE"' in javascript

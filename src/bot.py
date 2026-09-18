@@ -7864,8 +7864,8 @@ class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
         )
         if report_ids is None:
             await interaction.response.send_message(
-                "At least one selected member already has 20 award recommendations awaiting review. "
-                "A manager must resolve one before another can be submitted for that member.",
+                "At least one selected member already has this award, already has this award awaiting review, "
+                "or has 20 award recommendations pending. Choose eligible recipients or wait for a manager review.",
                 ephemeral=True,
             )
             return
