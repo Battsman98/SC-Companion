@@ -1154,6 +1154,57 @@ async function loadManageableGuilds() {
   }
 }
 
+function renderDiscordChannelPicker(channels, selected, { forum = false } = {}) {
+  const allowedTypes = forum ? new Set([15, 16]) : new Set([0, 5]);
+  const emptyLabel = forum ? "Marketplace disabled" : "Any channel";
+  const categories = channels
+    .filter((channel) => channel.type === 4)
+    .sort((left, right) => (left.position ?? 0) - (right.position ?? 0));
+  const selectable = channels
+    .filter((channel) => allowedTypes.has(channel.type))
+    .sort((left, right) => (left.position ?? 0) - (right.position ?? 0));
+  const selectedChannel = selectable.find((channel) => String(channel.id) === String(selected || ""));
+  const optionMarkup = [
+    `<option value="">${emptyLabel}</option>`,
+    ...selectable.map((channel) => `<option value="${escapeAttribute(channel.id)}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>${escapeHtml(channel.name)}</option>`),
+  ].join("");
+  const categoryMarkup = categories.map((category) => {
+    const children = selectable.filter((channel) => String(channel.parent_id || "") === String(category.id));
+    return `<details class="discord-channel-category" ${children.some((channel) => String(channel.id) === String(selected || "")) ? "open" : ""}>
+      <summary><span>${escapeHtml(category.name)}</span><small>${children.length}</small></summary>
+      <div class="discord-channel-category-items">${children.length
+        ? children.map((channel) => `<button type="button" data-channel-choice="${escapeAttribute(channel.id)}" class="discord-channel-choice ${String(channel.id) === String(selected || "") ? "selected" : ""}"><span aria-hidden="true">#</span>${escapeHtml(channel.name)}</button>`).join("")
+        : '<span class="discord-channel-empty">No compatible channels</span>'}</div>
+    </details>`;
+  }).join("");
+  const uncategorized = selectable.filter((channel) => !channel.parent_id);
+  const uncategorizedMarkup = uncategorized.length ? `<details class="discord-channel-category" ${uncategorized.some((channel) => String(channel.id) === String(selected || "")) ? "open" : ""}>
+    <summary><span>Uncategorized</span><small>${uncategorized.length}</small></summary>
+    <div class="discord-channel-category-items">${uncategorized.map((channel) => `<button type="button" data-channel-choice="${escapeAttribute(channel.id)}" class="discord-channel-choice ${String(channel.id) === String(selected || "") ? "selected" : ""}"><span aria-hidden="true">#</span>${escapeHtml(channel.name)}</button>`).join("")}</div>
+  </details>` : "";
+  return `<details class="discord-channel-picker">
+    <summary data-channel-picker-label>${selectedChannel ? `#${escapeHtml(selectedChannel.name)}` : emptyLabel}</summary>
+    <div class="discord-channel-menu">
+      <button type="button" class="discord-channel-choice ${selectedChannel ? "" : "selected"}" data-channel-choice="">${emptyLabel}</button>
+      ${categoryMarkup}${uncategorizedMarkup}
+    </div>
+    <select class="discord-channel-native" ${forum ? "data-module-resource-channel" : "data-module-channel"} tabindex="-1" aria-hidden="true">${optionMarkup}</select>
+  </details>`;
+}
+
+function bindDiscordChannelPickers(container) {
+  container.querySelectorAll(".discord-channel-picker").forEach((picker) => {
+    const select = picker.querySelector("select");
+    const label = picker.querySelector("[data-channel-picker-label]");
+    picker.querySelectorAll("[data-channel-choice]").forEach((button) => button.addEventListener("click", () => {
+      select.value = button.dataset.channelChoice;
+      label.textContent = button.dataset.channelChoice ? `#${button.textContent.replace(/^#/, "").trim()}` : button.textContent.trim();
+      picker.querySelectorAll("[data-channel-choice]").forEach((choice) => choice.classList.toggle("selected", choice === button));
+      picker.open = false;
+    }));
+  });
+}
+
 async function loadGuildBotConfiguration(guildId) {
   if (!guildId) {
     outputs.botManagement.innerHTML = stateMessage("Choose a Discord server to configure.");
@@ -1166,14 +1217,6 @@ async function loadGuildBotConfiguration(guildId) {
       outputs.botManagement.innerHTML = `<div class="state"><strong>SC Companion is not in ${escapeHtml(config.guild.name)} yet.</strong><p>Invite the bot, approve the requested permissions, then return here and choose Refresh.</p>${config.invite_url ? `<a class="button-link" href="${escapeAttribute(config.invite_url)}" target="_blank" rel="noopener">Invite Bot</a>` : ""}</div>`;
       return;
     }
-    const channelOptions = (selected) => [
-      '<option value="">Any channel</option>',
-      ...config.channels.filter((channel) => [0, 5].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
-    ].join("");
-    const forumOptions = (selected) => [
-      '<option value="">Marketplace disabled</option>',
-      ...config.channels.filter((channel) => [15, 16].includes(channel.type)).map((channel) => `<option value="${channel.id}" ${String(selected || "") === String(channel.id) ? "selected" : ""}>#${escapeHtml(channel.name)}</option>`),
-    ].join("");
     const setupMode = config.channel_setup_mode || "";
     const managementSections = [
       ["setup", "Setup"],
@@ -1211,7 +1254,7 @@ async function loadGuildBotConfiguration(guildId) {
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
         <div class="section-heading"><h3>Channel Management</h3><p>Choose where commands run and where feature-specific content is posted. These choices are used when manual setup is selected.</p></div>
-        <div class="bot-module-list">${config.modules.map((module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel<select data-module-channel>${channelOptions(module.channel_id)}</select></label>${module.key === "trade_tools" ? `<label>Marketplace forum<select data-module-resource-channel>${forumOptions(module.resource_channel_id)}</select></label>` : ""}</div></div>`).join("")}</div>
+        <div class="bot-module-list">${config.modules.map((module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel${renderDiscordChannelPicker(config.channels, module.channel_id)}</label>${module.key === "trade_tools" ? `<label>Marketplace forum${renderDiscordChannelPicker(config.channels, module.resource_channel_id, { forum: true })}</label>` : ""}</div></div>`).join("")}</div>
         <div class="bot-management-actions"><button type="submit">Save Channels</button><span data-bot-management-status></span></div>
       </section>
     </form>
@@ -1220,6 +1263,7 @@ async function loadGuildBotConfiguration(guildId) {
     initializeBotManagementTabs();
     outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
     const managementForm = outputs.botManagement.querySelector("[data-bot-management-form]");
+    bindDiscordChannelPickers(managementForm);
     const updateChannelMode = () => {
       const automatic = managementForm.querySelector('[name="channel_setup_mode"]:checked')?.value === "automatic";
       managementForm.querySelectorAll("[data-module-channel], [data-module-resource-channel]").forEach((select) => {

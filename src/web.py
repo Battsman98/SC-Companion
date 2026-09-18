@@ -1275,7 +1275,11 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             for key, definition in BOT_MODULES.items()
         ],
         "channels": [
-            {**channel, "id": _snowflake(channel["id"])}
+            {
+                **channel,
+                "id": _snowflake(channel["id"]),
+                "parent_id": _snowflake(channel.get("parent_id")),
+            }
             for channel in channels
         ],
         "awards_available": awards_available,
