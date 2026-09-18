@@ -7733,7 +7733,7 @@ def _award_list_embed(awards: list[dict], page: int) -> discord.Embed:
         value = f"{award['description']}\n**Type:** {kind}"
         if requirements:
             value += f"\n**Requirements:**\n{requirements}"
-        embed.add_field(name=f"#{award['id']} · {award['name']}", value=value[:1024], inline=False)
+        embed.add_field(name=award["name"], value=value[:1024], inline=False)
     embed.set_footer(text=f"Page {page + 1} of {total_pages} · Submit from the Award Panel")
     return embed
 
@@ -7849,7 +7849,7 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
             " SC Companion needs Manage Roles permission to create the matching award role."
         )
         await interaction.response.send_message(
-            f"Created **{str(self.award_name.value).strip()}** as award `#{award_id}`.{role_note}", ephemeral=True,
+            f"Created award **{str(self.award_name.value).strip()}**.{role_note}", ephemeral=True,
         )
 
 
@@ -7944,6 +7944,11 @@ class AwardChoiceSelect(discord.ui.Select):
         if not isinstance(view, AwardNominationView):
             return
         view.award_id = int(self.values[0])
+        for item in list(view.children):
+            if isinstance(item, AwardChoiceSelect) or (
+                isinstance(item, discord.ui.Button) and item.label in {"Previous awards", "Next awards"}
+            ):
+                view.remove_item(item)
         await interaction.response.edit_message(content=view.summary(), view=view)
 
 
@@ -8615,7 +8620,7 @@ async def award_create_command(interaction: discord.Interaction, name: str, desc
     role = await _ensure_award_role(interaction.guild, name.strip(), color_value) if interaction.guild else None
     role_note = f" Discord role: {role.mention}." if role is not None else ""
     await interaction.response.send_message(
-        f"Created **{name.strip()}** as award `#{award_id}`.{role_note}", ephemeral=True,
+        f"Created award **{name.strip()}**.{role_note}", ephemeral=True,
     )
 
 

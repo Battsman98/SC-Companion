@@ -64,6 +64,7 @@ def test_award_panel_is_persistent_and_lists_awards_in_pages() -> None:
     second = _award_list_embed(awards, 1)
     assert len(first.fields) == AWARDS_PER_DISCORD_PAGE
     assert len(second.fields) == 1
+    assert first.fields[0].name == "Award 1"
     assert "Page 1 of 2" in (first.footer.text or "")
     assert "Page 2 of 2" in (second.footer.text or "")
 
@@ -85,6 +86,9 @@ def test_award_nomination_uses_member_search_award_descriptions_and_pages() -> N
     assert award_select.options[0].description == "Description 1"
     assert len(award_select.options) == 25
     assert view.next.disabled is False
+    selection_source = inspect.getsource(AwardChoiceSelect.callback)
+    assert "view.remove_item(item)" in selection_source
+    assert 'item.label in {"Previous awards", "Next awards"}' in selection_source
 
     modal = AwardRecommendationModal(awards[0], [object()])
     assert modal.reason.label == "Why do you recommend this award?"
