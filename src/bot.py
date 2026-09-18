@@ -19,6 +19,7 @@ from src.config import Settings
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.reputation import REPUTATION_LADDERS, reputation_colors
+from src.reputation_verifier import verify_reputation_screenshot
 from src.sources.base import (
     BlueprintIngredient,
     BlueprintMission,
@@ -3783,6 +3784,14 @@ class GameAssistBot(commands.Bot):
         panel_embed.add_field(
             name="After approval",
             value="Your saved rank is updated and appears the next time **`/rep`** is used.",
+            inline=False,
+        )
+        panel_embed.add_field(
+            name="Automatic verification",
+            value=(
+                "When enabled by the server manager, SC Companion checks that the screenshot giver and highest "
+                "achieved level exactly match the application. Unclear results go to reviewers."
+            ),
             inline=False,
         )
         panel_embed.set_footer(text="Select Submit Reputation to begin. Your application is private.")
@@ -8553,17 +8562,54 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
     if not reviewer_role_id:
         await interaction.followup.send("No reputation reviewer role is configured.", ephemeral=True)
         return
-    file = await screenshot.to_file()
+    image_bytes = await screenshot.read(use_cached=True)
+    file = discord.File(io.BytesIO(image_bytes), filename=screenshot.filename or "reputation-proof.png")
+    auto_verify = bool(settings.get(
+        "auto_verify", interaction.guild.id == bot.settings.award_test_guild_id
+    ))
+    verification = None
+    if auto_verify:
+        verification = await asyncio.to_thread(
+            verify_reputation_screenshot, image_bytes, giver, rep_level
+        )
     embed = discord.Embed(
         title="Reputation progress application",
-        description="A member submitted reputation progress for reviewer approval.",
-        color=discord.Color.blurple(),
+        description=(
+            "SC Companion automatically verified this reputation submission."
+            if verification and verification.verified
+            else "A member submitted reputation progress for reviewer approval."
+        ),
+        color=discord.Color.green() if verification and verification.verified else discord.Color.blurple(),
         timestamp=discord.utils.utcnow(),
     )
     embed.add_field(name="Applicant", value=f"<@{interaction.user.id}>", inline=False)
     embed.add_field(name="Reputation giver", value=giver, inline=True)
     embed.add_field(name="Current level", value=rep_level, inline=True)
+    if verification is not None:
+        embed.add_field(
+            name="Automatic verification",
+            value=(
+                f"Approved automatically ({verification.confidence:.0%} confidence)."
+                if verification.verified
+                else f"Manual review required: {verification.reason}"
+            ),
+            inline=False,
+        )
     embed.set_image(url=f"attachment://{file.filename}")
+    if verification and verification.verified:
+        approver_id = bot.user.id if bot.user is not None else 0
+        await bot.cache.save_reputation_progress(
+            interaction.guild.id, interaction.user.id, giver, rep_level, approver_id
+        )
+        embed.add_field(name="Saved progress", value=f"{giver} — {rep_level}", inline=False)
+        await channel.send(
+            embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()
+        )
+        await interaction.followup.send(
+            f"Your screenshot was verified automatically. **{giver} — {rep_level}** is now saved.",
+            ephemeral=True,
+        )
+        return
     await channel.send(
         content=f"<@&{reviewer_role_id}>",
         embed=embed,
@@ -8572,7 +8618,9 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
         allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
     )
     await interaction.followup.send(
-        "Your reputation application was submitted privately for reviewer approval.", ephemeral=True
+        "Your reputation application was submitted privately for reviewer approval."
+        + (" Automatic verification could not confirm it, so no progress was changed." if auto_verify else ""),
+        ephemeral=True,
     )
 
 

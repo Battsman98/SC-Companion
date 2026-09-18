@@ -384,6 +384,7 @@ class ReputationSettingsRequest(BaseModel):
     enabled: bool
     reviewer_role_id: int | None = None
     auto_create_role: bool = False
+    auto_verify: bool | None = None
     application_channel_id: int | None = None
     activity_channel_id: int | None = None
     submission_channel_id: int | None = None
@@ -1261,6 +1262,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
         reputation_settings.setdefault("submission_channel_id", channel_by_name.get("rep-review-queue"))
         reputation_settings.setdefault("application_channel_id", channel_by_name.get("rep-submissions"))
         reputation_settings.setdefault("activity_channel_id", channel_by_name.get("activity"))
+        reputation_settings.setdefault("auto_verify", guild_id == state().settings.award_test_guild_id)
     if bot_guild is not None and awards_available:
         for award in award_definitions:
             try:
@@ -1527,6 +1529,10 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
         raise HTTPException(status_code=422, detail="The selected reputation reviewer role is unavailable.")
     current = await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}
     settings = {**current, "enabled": payload.enabled, "reviewer_role_id": role_id}
+    if payload.auto_verify is not None:
+        settings["auto_verify"] = payload.auto_verify
+    else:
+        settings.setdefault("auto_verify", guild_id == state().settings.award_test_guild_id)
     for field_name in ("application_channel_id", "activity_channel_id", "submission_channel_id"):
         if field_name in payload.model_fields_set:
             settings[field_name] = getattr(payload, field_name)
@@ -1701,6 +1707,14 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
                 {
                     "name": "After approval",
                     "value": "Your saved rank is updated and appears the next time **`/rep`** is used.",
+                    "inline": False,
+                },
+                {
+                    "name": "Automatic verification",
+                    "value": (
+                        "When enabled by the server manager, SC Companion checks that the screenshot giver and "
+                        "highest achieved level exactly match the application. Unclear results go to reviewers."
+                    ),
                     "inline": False,
                 },
             ],

@@ -84,6 +84,9 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "data-reputation-application-channel" in javascript
     assert "data-reputation-submission-channel" in javascript
     assert "data-reputation-activity-channel" in javascript
+    assert 'name="auto_verify"' in javascript
+    assert "Automatically verify screenshots" in javascript
+    assert "auto_verify: form.elements.auto_verify.checked" in javascript
     assert "Create an award" in javascript
     assert "Enable awards" not in javascript
     assert "Where should awards be announced?" in javascript
@@ -153,6 +156,7 @@ def test_reputation_submissions_use_a_public_panel_and_private_review_queue() ->
     assert '"DELETE", f"/channels/{guidelines' in provision_source
     assert '"Submission requirements"' in provision_source
     assert '"After approval"' in provision_source
+    assert '"Automatic verification"' in provision_source
     assert 'settings.pop("guidelines_channel_id", None)' in provision_source
     assert 'item["name"] == "rep-progress"' in provision_source
     assert '"name": "activity"' in provision_source

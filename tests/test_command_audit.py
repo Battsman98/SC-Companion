@@ -444,6 +444,17 @@ def test_reputation_panel_uses_dependent_giver_and_level_selects() -> None:
     assert "discord.ui.TextInput" not in modal_source
 
 
+def test_reputation_submission_can_auto_verify_or_fall_back_to_review() -> None:
+    from src.bot import reputation_submit_command
+
+    source = inspect.getsource(reputation_submit_command.callback)
+    assert '"auto_verify"' in source
+    assert "verify_reputation_screenshot" in source
+    assert "save_reputation_progress" in source
+    assert "ReputationApplicationReviewView()" in source
+    assert "Manual review required" in source
+
+
 def test_activity_tracking_uses_message_and_voice_events() -> None:
     message_source = inspect.getsource(GameAssistBot.on_message)
     voice_source = inspect.getsource(GameAssistBot.on_voice_state_update)

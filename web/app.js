@@ -1350,7 +1350,7 @@ function renderAwardChannelFeature(config) {
 
 function renderReputationFeature(config) {
   const settings = config.reputation || {};
-  return `<div class="bot-feature-row" data-reputation-feature data-reviewer-role-id="${escapeAttribute(settings.reviewer_role_id || "")}">
+  return `<div class="bot-feature-row" data-reputation-feature data-reviewer-role-id="${escapeAttribute(settings.reviewer_role_id || "")}" data-auto-verify="${settings.auto_verify ? "true" : "false"}">
     <label class="bot-module-copy"><input type="checkbox" data-reputation-feature-enabled ${settings.enabled ? "checked" : ""}><span><strong>Reputation Progress Tracker</strong><small><code>/activity</code> always shows server membership time and the current month's messages, voice time, and active days—even without reputation. <code>/rep</code> adds all approved reputation ladders in the matching SC Companion embed layout.</small><small>Screenshot applications stay private for reviewers. ${settings.submission_channel_id ? "Private application queue configured." : "No private application queue is associated yet."}</small></span></label>
   </div>`;
 }
@@ -1366,6 +1366,7 @@ function renderReputationManagement(config) {
         <label class="award-toggle reputation-role-toggle"><input type="checkbox" name="auto_create_role"><span><strong>Create reviewer role</strong><small>SC Companion creates or reuses the Reputation Reviewer role.</small></span></label>
         <label class="reputation-role-field"><span>Or choose an existing role</span><select name="reviewer_role_id">${options}</select><small>Only this role, server administrators, and SC Companion can see applications.</small></label>
       </div>
+      <label class="award-toggle"><input type="checkbox" name="auto_verify" ${settings.auto_verify ? "checked" : ""}><span><strong>Automatically verify screenshots</strong><small>SC Companion approves exact giver and highest-achieved-level matches. Unclear or mismatched screenshots remain private for manual review.</small></span></label>
       <div class="award-form-actions"><button type="submit">Save Progress Tracker</button><span class="form-note" data-reputation-status></span></div>
     </form>
   </section>`;
@@ -1416,7 +1417,7 @@ async function updateAllFeatureChannels(event) {
     const reputationFeature = form.querySelector("[data-reputation-feature]");
     if (reputationFeature) {
       const enabled = reputationFeature.querySelector("[data-reputation-feature-enabled]").checked;
-      await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled, reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null, auto_create_role: false } });
+      await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled, reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null, auto_verify: reputationFeature.dataset.autoVerify === "true", auto_create_role: false } });
       if (enabled) await api(`/api/bot-management/guilds/${encodeURIComponent(form.dataset.guildId)}/reputation/channels`, { method: "POST" });
     }
     status.textContent = "All enabled feature channels are being created or repaired. Discord may take up to one minute to finish.";
@@ -1461,6 +1462,7 @@ async function saveGuildBotConfiguration(event) {
         method: "PUT",
         body: { enabled: reputationFeature.querySelector("[data-reputation-feature-enabled]").checked,
           reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null,
+          auto_verify: reputationFeature.dataset.autoVerify === "true",
           application_channel_id: form.querySelector("[data-reputation-application-channel]")?.value || null,
           submission_channel_id: form.querySelector("[data-reputation-submission-channel]")?.value || null,
           activity_channel_id: form.querySelector("[data-reputation-activity-channel]")?.value || null,
@@ -2280,7 +2282,7 @@ async function saveReputationSettings(event) {
   status.textContent = "Saving...";
   try {
     const enabled = section.dataset.enabled === "true";
-    const result = await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled, reviewer_role_id: form.elements.reviewer_role_id.value || null, auto_create_role: form.elements.auto_create_role.checked } });
+    const result = await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled, reviewer_role_id: form.elements.reviewer_role_id.value || null, auto_create_role: form.elements.auto_create_role.checked, auto_verify: form.elements.auto_verify.checked } });
     const provisioning = enabled
       ? await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/channels`, { method: "POST" })
       : null;
