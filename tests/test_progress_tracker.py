@@ -20,9 +20,11 @@ def test_monthly_activity_and_reputation_progress(tmp_path: Path) -> None:
             await cache.save_reputation_progress(1, 2, "Covalex", "Senior", 9, 100)
             await cache.save_reputation_progress(1, 2, "Covalex", "Master", 9, 200)
             await cache.save_reputation_progress(1, 2, "Red Wind Linehaul", "Junior", 9, 300)
+            await cache.save_reputation_progress(1, 2, "Miles Eckhart", "Security Contractor", 9, 400)
             progress = await cache.reputation_progress(1, 2)
             assert [(item["giver"], item["level"]) for item in progress] == [
-                ("Covalex", "Master"), ("Red Wind Linehaul", "Junior")
+                ("Covalex", "Master"), ("Eckhart Security", "Contractor"),
+                ("Red Wind Linehaul", "Junior"),
             ]
         finally:
             await cache.close()

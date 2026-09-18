@@ -9,7 +9,7 @@ REPUTATION_LADDERS: dict[str, tuple[str, ...]] = {
     "Shubin Interstellar": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
     "Vaughn": ("Under Review", "Assassin In Training", "Tracker Trainee", "Low Level Assassin", "Assassin", "High Value Assassin", "Elite Assassin", "Master Assassin"),
     "United Wayfarers Club": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor", "Elite Contractor"),
-    "Miles Eckhart": ("Applicant", "Security Trainee", "Jr. Security Contractor", "Security Contractor", "Sr. Security Contractor", "Lead Security Contractor"),
+    "Eckhart Security": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor", "Elite Contractor"),
     "Hurston Dynamics": ("Security Trainee", "Jr. Security Contractor", "Security Contractor", "Sr. Security Contractor", "Lead Security Contractor"),
     "Adagio Holdings": ("Neutral", "Jr. Contractor", "Contractor"),
     "Bit Zeros": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
@@ -34,6 +34,44 @@ REPUTATION_LADDERS: dict[str, tuple[str, ...]] = {
     "Highpoint Wilderness Specialists": ("Neutral",),
     'Tecia "Twitch" Pacheco': ("Neutral",),
 }
+
+# Preserve progress approved before the catalog used the in-game faction name
+# and primary Standing ladder. These aliases are intentionally limited to
+# Eckhart; similarly named Security ranks remain valid for other factions.
+_REPUTATION_GIVER_ALIASES = {
+    "miles eckhart": "Eckhart Security",
+}
+_ECKHART_LEVEL_ALIASES = {
+    "applicant": "Neutral",
+    "security trainee": "Neutral",
+    "jr. security contractor": "Jr. Contractor",
+    "security contractor": "Contractor",
+    "sr. security contractor": "Sr. Contractor",
+    "lead security contractor": "Head Contractor",
+}
+
+
+def canonical_reputation_giver(giver: str) -> str | None:
+    """Return the supported in-game giver name, accepting retired labels."""
+    normalized = giver.strip().casefold()
+    alias = _REPUTATION_GIVER_ALIASES.get(normalized)
+    if alias:
+        return alias
+    return next((name for name in REPUTATION_LADDERS if name.casefold() == normalized), None)
+
+
+def canonical_reputation_level(giver: str, level: str) -> str | None:
+    """Return a level on the giver's current primary ladder."""
+    canonical_giver = canonical_reputation_giver(giver)
+    if canonical_giver is None:
+        return None
+    normalized = level.strip().casefold()
+    if canonical_giver == "Eckhart Security":
+        normalized = _ECKHART_LEVEL_ALIASES.get(normalized, level.strip()).casefold()
+    return next(
+        (name for name in REPUTATION_LADDERS[canonical_giver] if name.casefold() == normalized),
+        None,
+    )
 
 # Pairing colors instead of assigning Discord roles keeps the visual identity
 # scalable. With eight colors there are 56 ordered combinations, enough for

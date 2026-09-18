@@ -445,14 +445,18 @@ def test_reputation_panel_uses_dependent_giver_and_level_selects() -> None:
 
 
 def test_reputation_submission_can_auto_verify_or_fall_back_to_review() -> None:
-    from src.bot import reputation_submit_command
+    from src.bot import GameAssistBot, reputation_submit_command
 
     source = inspect.getsource(reputation_submit_command.callback)
     assert '"auto_verify"' in source
-    assert "verify_reputation_screenshot" in source
-    assert "save_reputation_progress" in source
-    assert "ReputationApplicationReviewView()" in source
-    assert "Manual review required" in source
+    assert "process_reputation_submission" in source
+    worker_source = inspect.getsource(GameAssistBot.process_reputation_submission)
+    assert "verify_reputation_screenshot" in worker_source
+    assert "Automatic screenshot verification is pending" in worker_source
+    assert "ReputationApplicationReviewView" in worker_source
+    assert "save_reputation_progress" in worker_source
+    assert "ReputationApplicationReviewView()" in worker_source
+    assert "Manual review required" in worker_source
 
 
 def test_activity_tracking_uses_message_and_voice_events() -> None:

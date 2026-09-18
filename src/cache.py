@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.postgres_compat import PostgresConnection
+from src.reputation import canonical_reputation_giver, canonical_reputation_level
 
 
 AUDIT_ACTION_TYPES = {
@@ -2316,12 +2317,14 @@ class SQLiteCache:
     async def save_reputation_progress(
         self, guild_id: int, user_id: int, giver: str, level: str, approved_by: int, at: int | None = None
     ) -> None:
+        canonical_giver = canonical_reputation_giver(giver) or giver
+        canonical_level = canonical_reputation_level(canonical_giver, level) or level
         self._connection.execute(
             """INSERT INTO reputation_progress (guild_id, user_id, giver, level, approved_by, updated_at)
                VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(guild_id, user_id, giver) DO UPDATE SET
                    level = excluded.level, approved_by = excluded.approved_by, updated_at = excluded.updated_at""",
-            (guild_id, user_id, giver, level, approved_by, int(at or time.time())),
+            (guild_id, user_id, canonical_giver, canonical_level, approved_by, int(at or time.time())),
         )
         self._connection.commit()
 
@@ -2331,7 +2334,16 @@ class SQLiteCache:
                WHERE guild_id = ? AND user_id = ? ORDER BY giver COLLATE NOCASE""",
             (guild_id, user_id),
         ).fetchall()
-        return [dict(zip(("giver", "level", "approved_by", "updated_at"), row)) for row in rows]
+        progress: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            item = dict(zip(("giver", "level", "approved_by", "updated_at"), row))
+            giver = canonical_reputation_giver(str(item["giver"])) or str(item["giver"])
+            level = canonical_reputation_level(giver, str(item["level"])) or str(item["level"])
+            item.update(giver=giver, level=level)
+            previous = progress.get(giver.casefold())
+            if previous is None or int(item["updated_at"]) >= int(previous["updated_at"]):
+                progress[giver.casefold()] = item
+        return sorted(progress.values(), key=lambda item: str(item["giver"]).casefold())
 
     async def close(self) -> None:
         self._connection.close()
