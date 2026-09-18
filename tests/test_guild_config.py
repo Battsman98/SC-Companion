@@ -158,8 +158,7 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
             if json_payload["type"] == 4:
                 return {"id": "800", "name": json_payload["name"], "type": 4}
             ids = {
-                "award-guidelines": "901", "award-list-criteria": "902",
-                "award-progress-tracker": "903", "award-announcements": "904",
+                "award-list-criteria": "902", "award-announcements": "904",
             }
             return {"id": ids[json_payload["name"]], "name": json_payload["name"],
                     "type": 0, "parent_id": "800"}
@@ -176,13 +175,49 @@ def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
         assert result["category_id"] == "800"
         assert result["channel_id"] == "904"
         assert result["channels"] == {
-            "award-guidelines": "901", "award-list-criteria": "902",
-            "award-announcements": "904",
+            "award-list-criteria": "902", "award-announcements": "904",
         }
-        assert discord_api.await_count == 4
+        assert discord_api.await_count == 3
         assert discord_api.await_args_list[0].kwargs["json_payload"] == {
             "name": "🏆 AWARDS", "type": 4,
         }
+        cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 904)
+
+    asyncio.run(scenario())
+
+
+def test_award_channel_repair_deletes_only_retired_channels_in_awards_category(monkeypatch) -> None:
+    async def scenario() -> None:
+        cache = SimpleNamespace(
+            award_settings=AsyncMock(return_value={
+                "enabled": True, "manager_role_id": 456, "announcement_channel_id": 904,
+            }),
+            save_award_settings=AsyncMock(),
+        )
+        channels = [
+            {"id": "800", "name": "🏆 AWARDS", "type": 4},
+            {"id": "901", "name": "award-guidelines", "type": 0, "parent_id": "800"},
+            {"id": "903", "name": "award-progress-tracker", "type": 0, "parent_id": "800"},
+            {"id": "902", "name": "award-list-criteria", "type": 0, "parent_id": "800"},
+            {"id": "904", "name": "award-announcements", "type": 0, "parent_id": "800"},
+            {"id": "999", "name": "award-guidelines", "type": 0, "parent_id": "700"},
+        ]
+        monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
+        monkeypatch.setattr(web, "_award_dashboard_manager", AsyncMock(return_value={"id": 123}))
+        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=channels))
+        discord_api = AsyncMock(return_value={})
+        monkeypatch.setattr(web, "_discord_api", discord_api)
+        monkeypatch.setattr(web, "_public_bot_token", lambda: "public-token")
+
+        result = await web.create_award_announcement_channel(
+            123, SimpleNamespace(id=99, username="owner")
+        )
+
+        assert result["status"] == "associated"
+        deleted_paths = [
+            call.args[1] for call in discord_api.await_args_list if call.args[0] == "DELETE"
+        ]
+        assert deleted_paths == ["/channels/901", "/channels/903"]
         cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 904)
 
     asyncio.run(scenario())

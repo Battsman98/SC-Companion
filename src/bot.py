@@ -947,6 +947,10 @@ class GameAssistBot(commands.Bot):
             reputation_guild = self.get_guild(self.settings.award_test_guild_id)
             if reputation_guild is not None:
                 await self._run_startup_step(
+                    "remove retired award channels",
+                    lambda: self.remove_retired_award_channels(reputation_guild),
+                )
+                await self._run_startup_step(
                     "repair reputation submission channels",
                     lambda: self.ensure_reputation_submission_channels(reputation_guild),
                 )
@@ -3414,6 +3418,24 @@ class GameAssistBot(commands.Bot):
             embed.add_field(name="Saved progress", value=f"{giver} — {level}", inline=False)
         await message.edit(embed=embed, view=None)
         await interaction.followup.send(f"Application {status.lower()}.", ephemeral=True)
+
+    async def remove_retired_award_channels(self, guild: discord.Guild) -> None:
+        """Remove channels retired from the testing guild's Awards category."""
+        if guild.me is None or not guild.me.guild_permissions.manage_channels:
+            return
+        category = discord.utils.find(
+            lambda item: item.name.casefold() in {
+                "🏆 awards".casefold(), "🏆 awards & progress".casefold(),
+            },
+            guild.categories,
+        )
+        if category is None:
+            return
+        for channel in [
+            item for item in category.channels
+            if item.name in {"award-guidelines", "award-progress-tracker"}
+        ]:
+            await channel.delete(reason="Remove retired award category channel")
 
     async def ensure_reputation_submission_channels(self, guild: discord.Guild) -> None:
         settings_key = f"guild:{guild.id}:reputation-settings"
@@ -6942,8 +6964,13 @@ class AwardAdminView(discord.ui.View):
             )
         elif category.name != "🏆 AWARDS":
             await category.edit(name="🏆 AWARDS", reason="Separate awards from reputation progress")
+        for retired in [
+            item for item in category.channels
+            if item.name in {"award-guidelines", "award-progress-tracker"}
+        ]:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await retired.delete(reason="Remove retired award category channel")
         channel_specs = (
-            ("award-guidelines", "How SC Companion awards, reports, reviews, and citations work."),
             ("award-list-criteria", "Current awards and the requirements for earning them."),
             ("award-announcements", "SC Companion award recipient announcements and recognition."),
         )

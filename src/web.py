@@ -1389,8 +1389,13 @@ async def create_award_announcement_channel(guild_id: int, user=Depends(require_
     elif category["name"] != "🏆 AWARDS":
         category = await _discord_api("PATCH", f"/channels/{category['id']}", bot_token=_public_bot_token(),
                                       json_payload={"name": "🏆 AWARDS"})
+    retired_names = {"award-guidelines", "award-progress-tracker"}
+    for channel in channels:
+        if channel.get("parent_id") == category["id"] and channel["name"] in retired_names:
+            await _discord_api(
+                "DELETE", f"/channels/{channel['id']}", bot_token=_public_bot_token()
+            )
     channel_specs = (
-        ("award-guidelines", "How SC Companion awards, reports, reviews, and citations work."),
         ("award-list-criteria", "Current awards and the requirements for earning them."),
         ("award-announcements", "SC Companion award recipient announcements and recognition."),
     )
