@@ -1314,6 +1314,15 @@ class GameAssistBot(commands.Bot):
                     await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
                     await self.sync_first_run_notice(guild)
                     await self.ensure_about_panel(guild)
+                    if guild.id == self.settings.award_test_guild_id:
+                        needs_reputation_channel_repair = (
+                            any(channel.name == "rep-submissions" for channel in guild.forums)
+                            or discord.utils.find(lambda item: item.name == "rep-submissions", guild.text_channels) is None
+                            or discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels) is not None
+                            or discord.utils.find(lambda item: item.name == "activity", guild.text_channels) is None
+                        )
+                        if needs_reputation_channel_repair:
+                            await self.ensure_reputation_submission_channels(guild)
             await asyncio.sleep(60)
 
     async def ensure_about_panel(self, guild: discord.Guild) -> None:
