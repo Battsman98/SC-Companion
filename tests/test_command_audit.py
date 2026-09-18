@@ -428,6 +428,22 @@ def test_reputation_review_buttons_survive_bot_restarts() -> None:
     assert "self.add_view(ReputationApplicationReviewView())" in setup_source
 
 
+def test_reputation_panel_uses_dependent_giver_and_level_selects() -> None:
+    from src.bot import (
+        ReputationGiverSelect,
+        ReputationLevelSelect,
+        ReputationSubmissionModal,
+    )
+
+    giver_source = inspect.getsource(ReputationGiverSelect)
+    level_source = inspect.getsource(ReputationLevelSelect)
+    modal_source = inspect.getsource(ReputationSubmissionModal)
+    assert "givers[start:start + 25]" in giver_source
+    assert "REPUTATION_LADDERS[giver]" in level_source
+    assert "ReputationSubmissionModal(self.giver, self.values[0])" in level_source
+    assert "discord.ui.TextInput" not in modal_source
+
+
 def test_activity_tracking_uses_message_and_voice_events() -> None:
     message_source = inspect.getsource(GameAssistBot.on_message)
     voice_source = inspect.getsource(GameAssistBot.on_voice_state_update)

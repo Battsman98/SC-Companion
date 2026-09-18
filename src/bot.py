@@ -781,33 +781,94 @@ class ReputationApplicationReviewView(discord.ui.View):
 
 
 class ReputationSubmissionModal(discord.ui.Modal, title="Submit reputation progress"):
-    giver = discord.ui.TextInput(
-        label="Reputation giver",
-        placeholder="Example: Covalex",
-        min_length=1,
-        max_length=80,
-    )
-    level = discord.ui.TextInput(
-        label="Current reputation level",
-        placeholder="Example: Master",
-        min_length=1,
-        max_length=80,
-    )
-
-    def __init__(self) -> None:
+    def __init__(self, giver: str, level: str) -> None:
         super().__init__()
+        self.giver = giver
+        self.level = level
         self.screenshot = discord.ui.FileUpload(required=True, min_values=1, max_values=1)
         self.add_item(discord.ui.Label(
             text="Verification screenshot",
-            description="Upload a clear image showing the giver and current reputation level.",
+            description=f"{giver} — {level}. Upload a clear image showing this reputation level.",
             component=self.screenshot,
         ))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         attachment = self.screenshot.values[0]
         await reputation_submit_command.callback(
-            interaction, str(self.giver).strip(), str(self.level).strip(), attachment
+            interaction, self.giver, self.level, attachment
         )
+
+
+class ReputationLevelSelect(discord.ui.Select):
+    def __init__(self, giver: str) -> None:
+        self.giver = giver
+        super().__init__(
+            placeholder=f"Choose your {giver} level…",
+            min_values=1,
+            max_values=1,
+            options=[discord.SelectOption(label=level, value=level) for level in REPUTATION_LADDERS[giver]],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ReputationSubmissionModal(self.giver, self.values[0]))
+
+
+class ReputationLevelSelectView(discord.ui.View):
+    def __init__(self, giver: str) -> None:
+        super().__init__(timeout=300)
+        self.add_item(ReputationLevelSelect(giver))
+
+
+class ReputationGiverSelect(discord.ui.Select):
+    def __init__(self, page: int) -> None:
+        givers = tuple(REPUTATION_LADDERS)
+        start = page * 25
+        super().__init__(
+            placeholder="Choose a reputation giver…",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(label=giver[:100], value=giver)
+                for giver in givers[start:start + 25]
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        giver = self.values[0]
+        embed = discord.Embed(
+            title="Submit reputation progress — Step 2 of 3",
+            description=f"Selected giver: **{giver}**\nNow choose your current reputation level.",
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.edit_message(embed=embed, view=ReputationLevelSelectView(giver))
+
+
+class ReputationGiverSelectView(discord.ui.View):
+    def __init__(self, page: int = 0) -> None:
+        super().__init__(timeout=300)
+        self.page = page
+        self.add_item(ReputationGiverSelect(page))
+        self.previous_page.disabled = page == 0
+        self.next_page.disabled = (page + 1) * 25 >= len(REPUTATION_LADDERS)
+
+    async def _show_page(self, interaction: discord.Interaction, page: int) -> None:
+        total_pages = (len(REPUTATION_LADDERS) + 24) // 25
+        embed = discord.Embed(
+            title="Submit reputation progress — Step 1 of 3",
+            description=f"Choose the reputation giver first. Page {page + 1} of {total_pages}.",
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.edit_message(embed=embed, view=ReputationGiverSelectView(page))
+
+    @discord.ui.button(label="Previous givers", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._show_page(interaction, max(0, self.page - 1))
+
+    @discord.ui.button(label="More givers", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self._show_page(interaction, self.page + 1)
 
 
 class ReputationSubmissionPanelView(discord.ui.View):
@@ -825,7 +886,17 @@ class ReputationSubmissionPanelView(discord.ui.View):
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("Applications are only available inside the server.", ephemeral=True)
             return
-        await interaction.response.send_modal(ReputationSubmissionModal())
+        embed = discord.Embed(
+            title="Submit reputation progress — Step 1 of 3",
+            description=(
+                "Choose the reputation giver first. "
+                f"Page 1 of {(len(REPUTATION_LADDERS) + 24) // 25}."
+            ),
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(
+            embed=embed, view=ReputationGiverSelectView(), ephemeral=True
+        )
 
 
 class GameAssistBot(commands.Bot):
