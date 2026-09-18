@@ -7885,6 +7885,7 @@ class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
                         f"<@&{manager_role_id}> **{len(report_ids)} award recommendation(s) ready for review**\n"
                         f"Award: **{self.award['name']}**\nRecipients: {mentions}"[:1900],
                         allowed_mentions=discord.AllowedMentions(roles=True, users=False),
+                        view=AwardNotificationReviewView(report_ids, self.award["name"]),
                     )
             except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                 logging.warning("Could not notify award manager role %s in guild %s",
@@ -8032,6 +8033,67 @@ class AwardReportSelect(discord.ui.Select):
         view.approve.disabled = False
         view.reject.disabled = False
         await interaction.response.edit_message(content=view.summary(), view=view)
+
+
+class AwardNotificationReviewView(discord.ui.View):
+    """Approve or reject every recipient in one award-panel submission."""
+
+    def __init__(self, report_ids: list[int], award_name: str) -> None:
+        super().__init__(timeout=604800)
+        self.report_ids = list(report_ids)
+        self.award_name = award_name
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        bot = interaction.client
+        if isinstance(bot, GameAssistBot) and await _has_award_manager_role(interaction, bot):
+            return True
+        await interaction.response.send_message(
+            "Only the configured Award Manager role can review this recommendation.", ephemeral=True,
+        )
+        return False
+
+    async def review_batch(self, interaction: discord.Interaction, decision: str) -> None:
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None:
+            await interaction.response.send_message("Award review is unavailable here.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        reviewed = 0
+        granted = 0
+        for report_id in self.report_ids:
+            result = await bot.cache.review_award_report(
+                interaction.guild.id, report_id, decision, interaction.user.id,
+            )
+            if result is None:
+                continue
+            reviewed += 1
+            if decision == "approved" and result.get("task_name", "").casefold() == "award nomination":
+                award_granted, _role_assigned, _announced = await _grant_approved_award_nomination(
+                    bot, interaction.guild, result, interaction.user.id,
+                )
+                granted += int(award_granted)
+        action = "Approved" if decision == "approved" else "Rejected"
+        original = interaction.message.content if interaction.message is not None else "Award recommendation"
+        result_line = f"\n\n**{action} by {interaction.user.mention}** · {reviewed} reviewed"
+        if decision == "approved":
+            result_line += f" · {granted} granted"
+        if interaction.message is not None:
+            await interaction.message.edit(content=(original + result_line)[:2000], view=None)
+        await interaction.followup.send(
+            f"{action} {reviewed} recommendation(s) for **{self.award_name}**."
+            + (f" {granted} award(s) were granted." if decision == "approved" else ""),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self.review_batch(interaction, "approved")
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await self.review_batch(interaction, "rejected")
 
 
 class AwardReviewView(discord.ui.View):

@@ -11,6 +11,7 @@ from src.bot import (
     AwardChoiceSelect,
     AwardCreationModal,
     AwardNominationView,
+    AwardNotificationReviewView,
     AwardPanelView,
     AwardRecommendationModal,
     AwardReportSelect,
@@ -112,6 +113,12 @@ def test_award_review_notifications_are_role_private_and_announcements_use_descr
     assert "view_channel=False" in private_source
     assert "manager_role: discord.PermissionOverwrite(view_channel=True" in private_source
     assert 'name="Award description"' in announcement_source
+    notification = AwardNotificationReviewView([1, 2], "Service Award")
+    assert notification.report_ids == [1, 2]
+    assert {item.label for item in notification.children} == {"Approve", "Reject"}
+    assert notification.timeout == 604800
+    submission_source = inspect.getsource(AwardRecommendationModal.on_submit)
+    assert "view=AwardNotificationReviewView" in submission_source
 
 
 def test_award_review_panel_lists_pending_recommendations_in_pages() -> None:
