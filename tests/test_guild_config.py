@@ -72,8 +72,12 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Save Channels" in javascript
     assert "Add SC Companion to Discord" in javascript
     assert "renderDiscordChannelPicker" in javascript
+    assert "renderFeatureAssignmentsByCategory" in javascript
     assert 'channel.type === 4' in javascript
     assert 'class="discord-channel-category"' in javascript
+    assert 'class="discord-server-category feature-assignment-category"' in javascript
+    assert "Feature Assignments by Category" in javascript
+    assert "No SC Companion features are currently assigned to this category." in javascript
     assert "Create an award" in javascript
     assert "Enable awards" not in javascript
     assert "Where should awards be announced?" in javascript
@@ -106,6 +110,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Automatically grant when complete" not in javascript
     assert "Members submit award requests from the Discord Award Panel." in javascript
     assert 'class="tool-card award-edit-disclosure"' in javascript
+    assert "data-award-delete" in javascript
+    assert 'method: "DELETE"' in javascript
     assert '<summary><span>${escapeHtml(award.name)}</span>' in javascript
     assert "award-status-badge" in javascript
     assert "form.elements.auto_grant" not in javascript
@@ -285,16 +291,43 @@ def test_award_role_is_created_reused_and_assigned(monkeypatch) -> None:
         assert role_id == 777
         assert discord_api.await_args_list[0].args[:2] == ("POST", "/guilds/123/roles")
         assert discord_api.await_args_list[0].kwargs["json_payload"] == {
-            "name": "Service Award", "mentionable": True,
+            "name": "Service Award", "color": 14002510, "mentionable": True,
         }
         assert discord_api.await_args_list[1].args[:2] == (
             "PUT", "/guilds/123/members/456/roles/777",
         )
 
-        roles.return_value = [{"id": 777, "name": "Service Award", "managed": False}]
+        roles.return_value = [{"id": 777, "name": "Service Award", "managed": False, "color": 14002510}]
         discord_api.reset_mock()
         assert (await web._ensure_discord_award_role(123, "service award"))["id"] == 777
         discord_api.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_deleting_award_removes_discord_role_before_database_record(monkeypatch) -> None:
+    async def scenario() -> None:
+        award = {"id": 9, "name": "Service Award"}
+        cache = SimpleNamespace(
+            award_definition=AsyncMock(return_value=award),
+            delete_award_definition=AsyncMock(return_value=True),
+        )
+        discord_api = AsyncMock(return_value={})
+        monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache))
+        monkeypatch.setattr(web, "_award_dashboard_manager", AsyncMock(return_value={"id": 123}))
+        monkeypatch.setattr(web, "_discord_guild_roles", AsyncMock(return_value=[
+            {"id": 777, "name": "Service Award", "managed": False},
+        ]))
+        monkeypatch.setattr(web, "_discord_api", discord_api)
+        monkeypatch.setattr(web, "_public_bot_token", lambda: "public-token")
+
+        result = await web.delete_award_from_dashboard(123, 9, SimpleNamespace(id=99))
+
+        assert result == {"status": "deleted"}
+        discord_api.assert_awaited_once_with(
+            "DELETE", "/guilds/123/roles/777", bot_token="public-token",
+        )
+        cache.delete_award_definition.assert_awaited_once_with(123, 9)
 
     asyncio.run(scenario())
 

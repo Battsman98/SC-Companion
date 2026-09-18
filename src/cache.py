@@ -414,6 +414,7 @@ class SQLiteCache:
                 award_type TEXT NOT NULL,
                 requirements_json TEXT NOT NULL DEFAULT '[]',
                 auto_grant INTEGER NOT NULL DEFAULT 0,
+                role_color INTEGER NOT NULL DEFAULT 14002510,
                 active INTEGER NOT NULL DEFAULT 1,
                 created_by INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
@@ -538,6 +539,7 @@ class SQLiteCache:
         cls._ensure_column(connection, "guild_bot_settings", "channel_setup_mode", "TEXT NOT NULL DEFAULT 'manual'")
         cls._ensure_column(connection, "award_guild_settings", "announcement_channel_id", "INTEGER")
         cls._ensure_column(connection, "award_definitions", "auto_grant", "INTEGER NOT NULL DEFAULT 0")
+        cls._ensure_column(connection, "award_definitions", "role_color", "INTEGER NOT NULL DEFAULT 14002510")
         connection.execute("UPDATE award_definitions SET auto_grant = 0 WHERE auto_grant <> 0")
         cls._backfill_audit_action_types(connection)
         # Scanner diagnostics are transient. PostgreSQL TRUNCATE releases the
@@ -601,16 +603,19 @@ class SQLiteCache:
         self._connection.commit()
 
     async def create_award_definition(self, guild_id: int, name: str, description: str, award_type: str,
-                                      requirements: list[str], created_by: int, auto_grant: bool = False) -> int:
+                                      requirements: list[str], created_by: int, auto_grant: bool = False,
+                                      role_color: int = 14002510) -> int:
         del auto_grant  # Retained in the signature for compatibility with older callers.
         if award_type not in {"tracker", "custom"}:
             raise ValueError("Unknown award type")
         now = int(time.time())
         cursor = self._connection.execute(
             """INSERT INTO award_definitions
-               (guild_id, name, description, award_type, requirements_json, auto_grant, created_by, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (guild_id, name, description, award_type, json.dumps(requirements), 0, created_by, now, now),
+               (guild_id, name, description, award_type, requirements_json, auto_grant, role_color,
+                created_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (guild_id, name, description, award_type, json.dumps(requirements), 0, role_color,
+             created_by, now, now),
         )
         self._connection.commit()
         return int(cursor.lastrowid)
@@ -618,6 +623,7 @@ class SQLiteCache:
     async def award_definition(self, guild_id: int, award_id: int) -> dict[str, Any] | None:
         row = self._connection.execute(
             """SELECT id, guild_id, name, description, award_type, requirements_json, auto_grant, active,
+                      role_color,
                       created_by, created_at, updated_at
                FROM award_definitions WHERE guild_id = ? AND id = ?""",
             (guild_id, award_id),
@@ -628,6 +634,7 @@ class SQLiteCache:
         suffix = " AND active = 1" if active_only else ""
         rows = self._connection.execute(
             """SELECT id, guild_id, name, description, award_type, requirements_json, auto_grant, active,
+                      role_color,
                       created_by, created_at, updated_at
                FROM award_definitions WHERE guild_id = ?""" + suffix + " ORDER BY LOWER(name), id",
             (guild_id,),
@@ -641,19 +648,48 @@ class SQLiteCache:
         return {"id": int(row[0]), "guild_id": int(row[1]), "name": str(row[2]),
                 "description": str(row[3]), "award_type": str(row[4]),
                 "requirements": json.loads(row[5]), "auto_grant": bool(row[6]), "active": bool(row[7]),
-                "created_by": int(row[8]), "created_at": int(row[9]), "updated_at": int(row[10])}
+                "role_color": int(row[8]), "created_by": int(row[9]), "created_at": int(row[10]),
+                "updated_at": int(row[11])}
 
     async def update_award_definition(self, guild_id: int, award_id: int, *, name: str,
                                       description: str, requirements: list[str], active: bool,
-                                      auto_grant: bool = False) -> bool:
+                                      auto_grant: bool = False, role_color: int | None = None) -> bool:
         del auto_grant  # Automatic granting has been retired.
         cursor = self._connection.execute(
-            """UPDATE award_definitions SET name = ?, description = ?, requirements_json = ?, auto_grant = ?, active = ?, updated_at = ?
+            """UPDATE award_definitions SET name = ?, description = ?, requirements_json = ?, auto_grant = ?,
+               role_color = COALESCE(?, role_color), active = ?, updated_at = ?
                WHERE guild_id = ? AND id = ?""",
-            (name, description, json.dumps(requirements), 0, int(active), int(time.time()), guild_id, award_id),
+            (name, description, json.dumps(requirements), 0, role_color, int(active), int(time.time()), guild_id, award_id),
         )
         self._connection.commit()
         return bool(cursor.rowcount)
+
+    async def delete_award_definition(self, guild_id: int, award_id: int) -> bool:
+        """Delete an award and all of its reports and grants as one local transaction."""
+        exists = self._connection.execute(
+            "SELECT 1 FROM award_definitions WHERE guild_id = ? AND id = ?",
+            (guild_id, award_id),
+        ).fetchone()
+        if exists is None:
+            return False
+        try:
+            self._connection.execute(
+                "DELETE FROM award_completion_reports WHERE guild_id = ? AND award_id = ?",
+                (guild_id, award_id),
+            )
+            self._connection.execute(
+                "DELETE FROM award_grants WHERE guild_id = ? AND award_id = ?",
+                (guild_id, award_id),
+            )
+            self._connection.execute(
+                "DELETE FROM award_definitions WHERE guild_id = ? AND id = ?",
+                (guild_id, award_id),
+            )
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        return True
 
     async def submit_award_report(self, guild_id: int, award_id: int, user_id: int, user_name: str,
                                   task_name: str, citation: str) -> int:

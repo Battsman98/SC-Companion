@@ -1205,6 +1205,23 @@ function bindDiscordChannelPickers(container) {
   });
 }
 
+function renderFeatureAssignmentsByCategory(channels, modules) {
+  const categories = channels.filter((channel) => channel.type === 4).sort((left, right) => (left.position ?? 0) - (right.position ?? 0));
+  const channelById = new Map(channels.map((channel) => [String(channel.id), channel]));
+  const assignmentRow = (module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel${renderDiscordChannelPicker(channels, module.channel_id)}</label>${module.key === "trade_tools" ? `<label>Marketplace forum${renderDiscordChannelPicker(channels, module.resource_channel_id, { forum: true })}</label>` : ""}</div></div>`;
+  const assignedCategoryId = (module) => {
+    const channel = channelById.get(String(module.channel_id || ""));
+    return channel?.parent_id ? String(channel.parent_id) : null;
+  };
+  const categoryRows = categories.map((category) => {
+    const assignments = modules.filter((module) => assignedCategoryId(module) === String(category.id));
+    return `<details class="discord-server-category feature-assignment-category"><summary><span>${escapeHtml(category.name)}</span><small>${assignments.length} ${assignments.length === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${assignments.length ? assignments.map(assignmentRow).join("") : '<p class="discord-channel-empty">No SC Companion features are currently assigned to this category.</p>'}</div></details>`;
+  }).join("");
+  const unassigned = modules.filter((module) => !assignedCategoryId(module));
+  const unassignedRow = `<details class="discord-server-category feature-assignment-category"><summary><span>Any Channel / Unassigned</span><small>${unassigned.length} ${unassigned.length === 1 ? "feature" : "features"}</small></summary><div class="feature-assignment-category-items">${unassigned.length ? unassigned.map(assignmentRow).join("") : '<p class="discord-channel-empty">No unassigned features.</p>'}</div></details>`;
+  return `<div class="feature-assignment-directory">${categoryRows}${unassignedRow}</div>`;
+}
+
 async function loadGuildBotConfiguration(guildId) {
   if (!guildId) {
     outputs.botManagement.innerHTML = stateMessage("Choose a Discord server to configure.");
@@ -1253,8 +1270,8 @@ async function loadGuildBotConfiguration(guildId) {
         </div><div class="bot-management-actions"><button type="submit">Save Features</button><button type="button" data-update-feature-channels>Create or Repair All Feature Channels</button><span data-bot-management-status></span></div>
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
-        <div class="section-heading"><h3>Channel Management</h3><p>Choose where commands run and where feature-specific content is posted. These choices are used when manual setup is selected.</p></div>
-        <div class="bot-module-list">${config.modules.map((module) => `<div class="bot-module-row" data-module-channel-key="${escapeAttribute(module.key)}"><div class="bot-module-copy"><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small></span></div><div><label>Command channel${renderDiscordChannelPicker(config.channels, module.channel_id)}</label>${module.key === "trade_tools" ? `<label>Marketplace forum${renderDiscordChannelPicker(config.channels, module.resource_channel_id, { forum: true })}</label>` : ""}</div></div>`).join("")}</div>
+        <div class="section-heading"><h3>Feature Assignments by Category</h3><p>Open a Discord category to change the SC Companion features assigned there. Moving a feature to a channel in another category takes effect after you save.</p></div>
+        ${renderFeatureAssignmentsByCategory(config.channels, config.modules)}
         <div class="bot-management-actions"><button type="submit">Save Channels</button><span data-bot-management-status></span></div>
       </section>
     </form>
@@ -1298,6 +1315,7 @@ async function loadGuildBotConfiguration(guildId) {
     }
     outputs.botManagement.querySelector("[data-award-grant-form]")?.addEventListener("submit", grantDashboardAward);
     outputs.botManagement.querySelectorAll("[data-award-edit-form]").forEach((form) => form.addEventListener("submit", editDashboardAward));
+    outputs.botManagement.querySelectorAll("[data-award-delete]").forEach((button) => button.addEventListener("click", deleteDashboardAward));
     outputs.botManagement.querySelectorAll("[data-award-review]").forEach((button) => button.addEventListener("click", reviewDashboardAward));
   } catch (error) {
     outputs.botManagement.innerHTML = errorMessage(error.message);
@@ -2168,6 +2186,7 @@ function renderAwardManagement(config) {
       <div class="award-create-layout">
         <form data-award-create-form class="tool-card award-form award-create-card">
           <label><span>Award title <b aria-hidden="true">*</b></span><input name="title" maxlength="80" placeholder="Example: Outstanding Service" required><small data-award-title-count>0/80 characters</small></label>
+          <label><span>Discord role color</span><input name="role_color" type="color" value="#d5a94e"><small>This color is used for the award's Discord role.</small></label>
           <div class="award-create-divider"></div>
           <label><span>Description <b aria-hidden="true">*</b></span><textarea name="description" maxlength="500" rows="5" placeholder="What this award represents and why it matters..." required></textarea><small data-award-description-count>0/500 characters</small></label>
           <label><span>Requirements</span><textarea name="requirements" rows="6" placeholder="Enter one task or achievement per line\nExample: Complete a community event\nExample: Assist another member"></textarea><small><span data-award-requirement-count>0/20 requirements</span> · Leave blank when the award does not require tracked progress.</small></label>
@@ -2181,12 +2200,13 @@ function renderAwardManagement(config) {
       <div class="award-existing-list">${definitions.length ? definitions.map((award) => `<details class="tool-card award-edit-disclosure"><summary><span>${escapeHtml(award.name)}</span><span class="award-disclosure-chevron" aria-hidden="true">⌄</span></summary><form data-award-edit-form data-award-id="${award.id}" class="award-form award-create-card award-edit-card">
         <div class="award-edit-heading"><div><span class="award-type-badge">${escapeHtml(award.award_type === "tracker" ? "Tracked award" : "Custom award")}</span><h5>#${award.id} · ${escapeHtml(award.name)}</h5></div><span class="award-status-badge ${award.active ? "is-active" : "is-inactive"}">${award.active ? "Active" : "Inactive"}</span></div>
         <label><span>Award title <b aria-hidden="true">*</b></span><input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required><small>${award.name.length}/80 characters</small></label>
+        <label><span>Discord role color</span><input name="role_color" type="color" value="#${Number(award.role_color ?? 14002510).toString(16).padStart(6, "0")}"><small>Saving updates the matching Discord role color.</small></label>
         <div class="award-create-divider"></div>
         <label><span>Description <b aria-hidden="true">*</b></span><textarea name="description" maxlength="500" rows="5" required>${escapeHtml(award.description)}</textarea><small>${award.description.length}/500 characters</small></label>
         <label><span>Requirements</span><textarea name="requirements" rows="6" ${award.award_type === "custom" ? "disabled" : ""}>${escapeHtml((award.requirements || []).join("\n"))}</textarea><small>${award.requirements?.length || 0}/20 requirements${award.award_type === "custom" ? " · Custom awards do not track requirements." : ""}</small></label>
         <label class="award-toggle award-active-toggle"><input type="checkbox" name="active" ${award.active ? "checked" : ""}><span><strong>Available to members</strong><small>Inactive awards remain saved but cannot receive new submissions or grants.</small></span></label>
         <div class="award-create-divider"></div>
-        <div class="award-form-actions award-create-actions"><button type="submit" class="award-create-primary">Save Award</button><span class="form-note" data-award-status></span></div>
+        <div class="award-form-actions award-create-actions"><button type="submit" class="award-create-primary">Save Award</button><button type="button" class="award-delete-button" data-award-delete data-award-id="${award.id}" data-award-name="${escapeAttribute(award.name)}">Delete Award</button><span class="form-note" data-award-status></span></div>
       </form></details>`).join("") : '<div class="state">No awards created yet.</div>'}</div>
     </section>
     <div class="tool-card award-card"><div class="award-card-heading"><div><h4>Completion reports</h4><p>Members submit award requests from the Discord Award Panel. Approve valid reports or reject submissions that do not meet the requirement.</p></div></div>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
@@ -2225,7 +2245,7 @@ async function createDashboardAward(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const requirements = awardRequirements(form.elements.requirements.value);
-  await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements });
+  await awardDashboardRequest(form, "", "POST", { name: form.elements.title.value, description: form.elements.description.value, award_type: requirements.length ? "tracker" : "custom", requirements, role_color: form.elements.role_color.value });
 }
 
 async function saveReputationSettings(event) {
@@ -2251,7 +2271,27 @@ async function editDashboardAward(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const requirements = awardRequirements(form.elements.requirements.value);
-  await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements, active: form.elements.active.checked });
+  await awardDashboardRequest(form, `/${form.dataset.awardId}`, "PUT", { name: form.elements.name.value, description: form.elements.description.value, requirements, active: form.elements.active.checked, role_color: form.elements.role_color.value });
+}
+
+async function deleteDashboardAward(event) {
+  const button = event.currentTarget;
+  const section = button.closest("[data-award-management]");
+  const awardName = button.dataset.awardName || "this award";
+  const accepted = await confirmInventoryClear({
+    title: `Delete ${awardName}?`,
+    message: "This removes the award, its Discord role, reports, and grant history. This cannot be undone.",
+    confirmLabel: "Delete Award",
+  });
+  if (!accepted) return;
+  button.disabled = true;
+  try {
+    await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/awards/${encodeURIComponent(button.dataset.awardId)}`, { method: "DELETE" });
+    await loadGuildBotConfiguration(section.dataset.guildId);
+  } catch (error) {
+    button.disabled = false;
+    window.alert(error.message);
+  }
 }
 
 async function reviewDashboardAward(event) {

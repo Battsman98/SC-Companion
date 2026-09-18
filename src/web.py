@@ -390,6 +390,7 @@ class AwardDefinitionRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     award_type: str = Field(pattern="^(tracker|custom)$")
     requirements: list[str] = Field(default_factory=list, max_length=20)
+    role_color: str = Field(default="#D5A94E", pattern="^#[0-9A-Fa-f]{6}$")
 
 
 class AwardDefinitionUpdateRequest(BaseModel):
@@ -397,6 +398,7 @@ class AwardDefinitionUpdateRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     requirements: list[str] = Field(default_factory=list, max_length=20)
     active: bool = True
+    role_color: str = Field(default="#D5A94E", pattern="^#[0-9A-Fa-f]{6}$")
 
 
 class AwardReviewRequest(BaseModel):
@@ -1041,7 +1043,7 @@ async def _discord_guild_roles(guild_id: int) -> list[dict[str, Any]]:
             if response.status >= 400 or not isinstance(payload, list):
                 raise HTTPException(status_code=503, detail="Discord roles are temporarily unavailable.")
     return [{"id": int(role["id"]), "name": str(role.get("name") or "role"),
-             "managed": bool(role.get("managed"))} for role in payload]
+             "managed": bool(role.get("managed")), "color": int(role.get("color") or 0)} for role in payload]
 
 
 async def _discord_guild_member(guild_id: int, member_id: int) -> dict[str, Any]:
@@ -1075,22 +1077,30 @@ async def _send_award_announcement(channel_id: int | None, content: str) -> None
                 raise HTTPException(status_code=502, detail="The award was saved, but its Discord announcement failed.")
 
 
-async def _ensure_discord_award_role(guild_id: int, award_name: str) -> dict[str, Any]:
+async def _ensure_discord_award_role(guild_id: int, award_name: str,
+                                     role_color: int | None = None) -> dict[str, Any]:
     roles = await _discord_guild_roles(guild_id)
     role = next(
         (item for item in roles if item["name"].casefold() == award_name.casefold() and not item["managed"]),
         None,
     )
     if role is not None:
+        if role_color is not None and int(role.get("color") or 0) != role_color:
+            role = await _discord_api(
+                "PATCH", f"/guilds/{guild_id}/roles/{role['id']}", bot_token=_public_bot_token(),
+                json_payload={"color": role_color, "mentionable": True},
+            )
         return role
     return await _discord_api(
         "POST", f"/guilds/{guild_id}/roles", bot_token=_public_bot_token(),
-        json_payload={"name": award_name[:100], "mentionable": True},
+        json_payload={"name": award_name[:100], "color": 14002510 if role_color is None else role_color,
+                      "mentionable": True},
     )
 
 
-async def _assign_discord_award_role(guild_id: int, member_id: int, award_name: str) -> int:
-    role = await _ensure_discord_award_role(guild_id, award_name)
+async def _assign_discord_award_role(guild_id: int, member_id: int, award_name: str,
+                                     role_color: int | None = None) -> int:
+    role = await _ensure_discord_award_role(guild_id, award_name, role_color)
     await _discord_api(
         "PUT", f"/guilds/{guild_id}/members/{member_id}/roles/{role['id']}",
         bot_token=_public_bot_token(),
@@ -1238,6 +1248,13 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     award_definitions = await state().cache.award_definitions(guild_id, active_only=False) if awards_available else []
     award_reports = await state().cache.pending_award_reports(guild_id, 50) if awards_available else []
     reputation_settings = (await state().cache.get(f"guild:{guild_id}:reputation-settings") or {}) if awards_available else None
+    if bot_guild is not None and awards_available:
+        for award in award_definitions:
+            try:
+                await _ensure_discord_award_role(guild_id, award["name"], award["role_color"])
+            except HTTPException:
+                logging.warning("Could not synchronize Discord role for award %s in guild %s",
+                                award["id"], guild_id)
     roles = await _discord_guild_roles(guild_id) if bot_guild is not None and awards_available else []
     detected_routes = _discover_existing_routes(channels)
     if stored is None:
@@ -1759,9 +1776,9 @@ async def create_award_from_dashboard(guild_id: int, payload: AwardDefinitionReq
         raise HTTPException(status_code=409, detail="An award with that name already exists.")
     award_id = await state().cache.create_award_definition(
         guild_id, payload.name.strip(), payload.description.strip(), payload.award_type, requirements, user.id,
-        auto_grant=False,
+        auto_grant=False, role_color=int(payload.role_color[1:], 16),
     )
-    role = await _ensure_discord_award_role(guild_id, payload.name.strip())
+    role = await _ensure_discord_award_role(guild_id, payload.name.strip(), int(payload.role_color[1:], 16))
     return {"status": "created", "award_id": award_id, "role_id": _snowflake(role["id"])}
 
 
@@ -1791,12 +1808,45 @@ async def update_award_from_dashboard(guild_id: int, award_id: int, payload: Awa
             )
         else:
             await _ensure_discord_award_role(guild_id, next_name)
+    role_color = int(payload.role_color[1:], 16)
+    roles = await _discord_guild_roles(guild_id)
+    award_role = next((item for item in roles if item["name"].casefold() == next_name.casefold()
+                       and not item["managed"]), None)
+    if award_role is not None:
+        await _discord_api(
+            "PATCH", f"/guilds/{guild_id}/roles/{award_role['id']}", bot_token=_public_bot_token(),
+            json_payload={"color": role_color, "mentionable": True},
+        )
+    else:
+        await _ensure_discord_award_role(guild_id, next_name, role_color)
     await state().cache.update_award_definition(
         guild_id, award_id, name=next_name, description=payload.description.strip(),
         requirements=requirements, active=payload.active,
-        auto_grant=False,
+        auto_grant=False, role_color=role_color,
     )
     return {"status": "saved"}
+
+
+@app.delete("/api/bot-management/guilds/{guild_id}/awards/{award_id}")
+async def delete_award_from_dashboard(guild_id: int, award_id: int,
+                                      user=Depends(require_user)) -> dict[str, str]:
+    await _award_dashboard_manager(guild_id, user)
+    award = await state().cache.award_definition(guild_id, award_id)
+    if award is None:
+        raise HTTPException(status_code=404, detail="That award was not found.")
+    roles = await _discord_guild_roles(guild_id)
+    role = next(
+        (item for item in roles if item["name"].casefold() == award["name"].casefold() and not item["managed"]),
+        None,
+    )
+    if role is not None:
+        await _discord_api(
+            "DELETE", f"/guilds/{guild_id}/roles/{role['id']}", bot_token=_public_bot_token(),
+        )
+    deleted = await state().cache.delete_award_definition(guild_id, award_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="That award was not found.")
+    return {"status": "deleted"}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards/reports/{report_id}")
@@ -1814,7 +1864,9 @@ async def review_award_from_dashboard(guild_id: int, report_id: int, payload: Aw
             granted = await state().cache.grant_award(
                 guild_id, award["id"], result["user_id"], result["user_name"], result["citation"], user.id,
             )
-            role_id = await _assign_discord_award_role(guild_id, result["user_id"], award["name"])
+            role_id = await _assign_discord_award_role(
+                guild_id, result["user_id"], award["name"], int(award["role_color"]),
+            )
             if granted:
                 settings = await state().cache.award_settings(guild_id)
                 announcement_channel_id = settings.get("announcement_channel_id")
@@ -1824,7 +1876,8 @@ async def review_award_from_dashboard(guild_id: int, report_id: int, payload: Aw
                     announcement_channel_id = announcement["id"] if announcement else None
                 await _send_award_announcement(
                     announcement_channel_id,
-                    f"🏆 <@{result['user_id']}> earned **{award['name']}** — {result['citation']}",
+                    f"🏆 <@{result['user_id']}> earned **{award['name']}**\n"
+                    f"**Award description:** {award['description']}",
                 )
     return {"status": payload.decision, "award_granted": granted, "role_id": _snowflake(role_id)}
 
@@ -1848,7 +1901,9 @@ async def grant_award_from_dashboard(guild_id: int, payload: AwardGrantRequest,
     )
     if not granted:
         raise HTTPException(status_code=409, detail="That member already has this award.")
-    role_id = await _assign_discord_award_role(guild_id, member["id"], award["name"])
+    role_id = await _assign_discord_award_role(
+        guild_id, member["id"], award["name"], int(award["role_color"]),
+    )
     settings = await state().cache.award_settings(guild_id)
     announcement_channel_id = settings.get("announcement_channel_id")
     if not announcement_channel_id:
@@ -1857,7 +1912,8 @@ async def grant_award_from_dashboard(guild_id: int, payload: AwardGrantRequest,
         announcement_channel_id = announcement["id"] if announcement else None
     await _send_award_announcement(
         announcement_channel_id,
-        f"🏆 <@{member['id']}> earned **{award['name']}** — {payload.citation.strip()}",
+        f"🏆 <@{member['id']}> earned **{award['name']}**\n"
+        f"**Award description:** {award['description']}",
     )
     return {"status": "granted", "member": member, "award": award["name"], "role_id": _snowflake(role_id)}
 
