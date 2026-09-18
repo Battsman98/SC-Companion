@@ -454,16 +454,18 @@ def test_activity_tracking_uses_message_and_voice_events() -> None:
 
 
 def test_activity_command_does_not_require_reputation() -> None:
-    from src.bot import activity_command
+    from src.bot import _sc_companion_progress_embed, activity_command
 
     source = inspect.getsource(activity_command.callback)
+    embed_source = inspect.getsource(_sc_companion_progress_embed)
     setup_source = inspect.getsource(GameAssistBot.setup_hook)
     assert "discord_monthly_activity" in source
     assert "reputation_progress" not in source
-    assert "target.joined_at" in source
-    assert 'name="Messages"' in source
-    assert 'name="Voice time"' in source
-    assert 'name="Active days"' in source
+    assert "member.joined_at" in embed_source
+    assert 'name="💬 Messages"' in embed_source
+    assert 'name="🎙️ Voice time"' in embed_source
+    assert 'name="📅 Active days"' in embed_source
+    assert "SC_COMPANION_EMBED_COLOR" in embed_source
     assert "self.tree.add_command(activity_command" in setup_source
 
 
@@ -471,6 +473,5 @@ def test_testing_guild_commands_pass_the_shared_bot_gate() -> None:
     source = inspect.getsource(GameAssistCommandTree.interaction_check)
 
     assert "testing_guild_utility" in source
-    assert 'command_name in {"activity", "progress"}' in source
-    assert 'command_name.startswith("rep ")' in source
+    assert 'command_name in {"activity", "rep", "rep-submit"}' in source
     assert 'command_name.startswith("award ")' in source

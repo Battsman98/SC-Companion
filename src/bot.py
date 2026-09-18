@@ -534,8 +534,7 @@ class GameAssistCommandTree(app_commands.CommandTree):
         testing_guild_utility = (
             interaction.guild_id == bot.settings.award_test_guild_id
             and (
-                command_name in {"activity", "progress"}
-                or command_name.startswith("rep ")
+                command_name in {"activity", "rep", "rep-submit"}
                 or command_name.startswith("award ")
             )
         )
@@ -1005,8 +1004,8 @@ class GameAssistBot(commands.Bot):
             self.tree.add_command(audit_group, guild=guild)
             if self.settings.award_test_guild_id == self.settings.discord_guild_id:
                 self.tree.add_command(award_group, guild=guild)
-                self.tree.add_command(reputation_group, guild=guild)
-                self.tree.add_command(progress_command, guild=guild)
+                self.tree.add_command(rep_command, guild=guild)
+                self.tree.add_command(reputation_submit_command, guild=guild)
                 self.tree.add_command(activity_command, guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced slash commands to guild %s", self.settings.discord_guild_id)
@@ -1015,8 +1014,8 @@ class GameAssistBot(commands.Bot):
             award_guild = discord.Object(id=self.settings.award_test_guild_id)
             self.tree.copy_global_to(guild=award_guild)
             self.tree.add_command(award_group, guild=award_guild)
-            self.tree.add_command(reputation_group, guild=award_guild)
-            self.tree.add_command(progress_command, guild=award_guild)
+            self.tree.add_command(rep_command, guild=award_guild)
+            self.tree.add_command(reputation_submit_command, guild=award_guild)
             self.tree.add_command(activity_command, guild=award_guild)
             await self.tree.sync(guild=award_guild)
             logging.info("Synced testing-only award commands to guild %s", self.settings.award_test_guild_id)
@@ -3736,28 +3735,28 @@ class GameAssistBot(commands.Bot):
         if activity_channel is None and legacy_progress is not None:
             activity_channel = await legacy_progress.edit(
                 name="activity", category=main_category,
-                topic="Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
+                topic="Use /activity for monthly Discord activity or /rep for activity plus approved reputation.",
                 reason="Replace unused reputation progress channel with SC Companion activity",
             )
         elif activity_channel is None:
             activity_channel = await guild.create_text_channel(
                 "activity", category=main_category,
-                topic="Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
+                topic="Use /activity for monthly Discord activity or /rep for activity plus approved reputation.",
                 reason="Create SC Companion activity channel",
             )
         else:
             await activity_channel.edit(
                 category=main_category,
-                topic="Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
+                topic="Use /activity for monthly Discord activity or /rep for activity plus approved reputation.",
                 reason="Repair SC Companion activity channel",
             )
         guide_embed = discord.Embed(
             title="How to submit reputation progress",
             description=(
-                "Use **`/rep submit`** anywhere in this server. Choose the reputation giver and your current "
+                "Use **`/rep-submit`** anywhere in this server. Choose the reputation giver and your current "
                 "level, then attach a clear screenshot showing that level.\n\n"
                 "SC Companion sends the application to a private reviewer-only text queue. When approved, your "
-                "saved rank is updated and appears the next time **`/progress`** is used."
+                "saved rank is updated and appears the next time **`/rep`** is used."
             ),
             color=discord.Color.gold(),
         )
@@ -3804,7 +3803,7 @@ class GameAssistBot(commands.Bot):
             title="SC Companion activity and reputation",
             description=(
                 "Use **`/activity`** in this channel for monthly Discord activity, even when no reputation has been "
-                "submitted. Use **`/progress`** for the combined activity and reputation card."
+                "submitted. Use **`/rep`** for the combined activity and reputation card."
             ),
             color=discord.Color.blurple(),
         )
@@ -3840,7 +3839,7 @@ class GameAssistBot(commands.Bot):
             )
         activity_channel = discord.utils.find(lambda item: item.name == "activity", guild.text_channels)
         legacy_progress = discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels)
-        topic = "Use /activity for monthly Discord activity or /progress for activity plus approved reputation."
+        topic = "Use /activity for monthly Discord activity or /rep for activity plus approved reputation."
         if activity_channel is None and legacy_progress is not None:
             activity_channel = await legacy_progress.edit(
                 name="activity", category=main_category, topic=topic,
@@ -3855,7 +3854,7 @@ class GameAssistBot(commands.Bot):
             title="SC Companion activity and reputation",
             description=(
                 "Use **`/activity`** in this channel for monthly Discord activity, even when no reputation has been "
-                "submitted. Use **`/progress`** for the combined activity and reputation card."
+                "submitted. Use **`/rep`** for the combined activity and reputation card."
             ),
             color=discord.Color.blurple(),
         )
@@ -8295,7 +8294,6 @@ async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
 
 
 award_group = app_commands.Group(name="award", description="Testing-server awards and contract tracking.")
-reputation_group = app_commands.Group(name="rep", description="Star Citizen reputation progress submissions.")
 
 
 def _reputation_settings_key(guild_id: int) -> str:
@@ -8340,7 +8338,7 @@ def _progress_card_image(member: discord.Member, avatar_bytes: bytes, activity: 
         draw.text((left + 18, 275), value, font=font(28, True), fill="#f8fafc")
 
     draw.text((60, 370), "APPROVED REPUTATION LADDERS", font=font(20, True), fill="#d5a94e")
-    rows = progress or [{"giver": "No approved reputation yet", "level": "Use /rep submit to apply"}]
+    rows = progress or [{"giver": "No approved reputation yet", "level": "Use /rep-submit to apply"}]
     for index, item in enumerate(rows):
         top = 410 + index * 54
         giver = str(item["giver"])
@@ -8357,9 +8355,58 @@ def _progress_card_image(member: discord.Member, avatar_bytes: bytes, activity: 
     return output
 
 
-@app_commands.command(name="progress", description="Display an on-demand reputation and monthly activity card.")
+SC_COMPANION_EMBED_COLOR = 0x38C8F4
+
+
+def _sc_companion_progress_embed(
+    member: discord.Member, activity: dict, progress: list[dict] | None = None
+) -> discord.Embed:
+    voice_seconds = int(activity["voice_seconds"])
+    voice_hours, remaining = divmod(voice_seconds, 3600)
+    voice_minutes = remaining // 60
+    joined_at = member.joined_at
+    if joined_at is not None:
+        joined_timestamp = int(joined_at.timestamp())
+        days_in_server = max(0, (discord.utils.utcnow() - joined_at).days)
+        membership = f"<t:{joined_timestamp}:D> (<t:{joined_timestamp}:R>)\n{days_in_server:,} days in this Discord"
+    else:
+        membership = "Join date unavailable"
+    month_label = datetime.strptime(str(activity["month"]), "%Y-%m").strftime("%B %Y")
+    includes_rep = progress is not None
+    embed = discord.Embed(
+        title=f"{member.display_name}'s {'Reputation & Activity' if includes_rep else 'Discord Activity'}",
+        description=f"**SC Companion** • {month_label} (UTC)",
+        color=SC_COMPANION_EMBED_COLOR,
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="💬 Messages", value=f"**{int(activity['message_count']):,}**", inline=True)
+    embed.add_field(name="🎙️ Voice time", value=f"**{voice_hours:,}h {voice_minutes:02d}m**", inline=True)
+    embed.add_field(name="📅 Active days", value=f"**{int(activity['active_days']):,}**", inline=True)
+    embed.add_field(name="Member since", value=membership, inline=False)
+    if includes_rep:
+        rows = progress or []
+        if not rows:
+            embed.add_field(
+                name="Approved reputation",
+                value="No approved reputation yet. Use the **Submit Reputation** application panel to apply.",
+                inline=False,
+            )
+        else:
+            lines = [f"🔹 **{item['giver']}** — {item['level']}" for item in rows]
+            for index in range(0, len(lines), 10):
+                embed.add_field(
+                    name="Approved reputation" if index == 0 else "Approved reputation (continued)",
+                    value="\n".join(lines[index:index + 10]),
+                    inline=False,
+                )
+    embed.set_footer(text="SC Companion • No message content or voice audio is stored.")
+    return embed
+
+
+@app_commands.command(name="rep", description="Show approved reputation and monthly Discord activity.")
 @app_commands.describe(member="Member to display; leave blank to show yourself")
-async def progress_command(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
+async def rep_command(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
     bot = interaction.client
     if not isinstance(bot, GameAssistBot) or not _award_test_guild(interaction, bot) or interaction.guild is None:
         await interaction.response.send_message("Progress tracking is limited to the SC Companion testing Discord.", ephemeral=True)
@@ -8371,9 +8418,7 @@ async def progress_command(interaction: discord.Interaction, member: discord.Mem
     await interaction.response.defer(thinking=True)
     activity = await bot.cache.discord_monthly_activity(interaction.guild.id, target.id)
     progress = await bot.cache.reputation_progress(interaction.guild.id, target.id)
-    avatar_bytes = await target.display_avatar.with_size(256).read()
-    card = _progress_card_image(target, avatar_bytes, activity, progress)
-    await interaction.followup.send(file=discord.File(card, filename=f"sc-progress-{target.id}.png"))
+    await interaction.followup.send(embed=_sc_companion_progress_embed(target, activity, progress))
 
 
 @app_commands.command(name="activity", description="Show monthly Discord message and voice activity.")
@@ -8389,33 +8434,10 @@ async def activity_command(interaction: discord.Interaction, member: discord.Mem
         return
     await interaction.response.defer(thinking=True)
     activity = await bot.cache.discord_monthly_activity(interaction.guild.id, target.id)
-    voice_seconds = int(activity["voice_seconds"])
-    voice_hours, remaining = divmod(voice_seconds, 3600)
-    voice_minutes = remaining // 60
-    joined_at = target.joined_at
-    if joined_at is not None:
-        joined_timestamp = int(joined_at.timestamp())
-        days_in_server = max(0, (discord.utils.utcnow() - joined_at).days)
-        membership = f"<t:{joined_timestamp}:D> (<t:{joined_timestamp}:R>)\n{days_in_server:,} days in this Discord"
-    else:
-        membership = "Join date unavailable"
-    month_label = datetime.strptime(str(activity["month"]), "%Y-%m").strftime("%B %Y")
-    embed = discord.Embed(
-        title=f"{target.display_name}'s Discord Activity",
-        description=f"Activity recorded for **{month_label}** (UTC).",
-        color=discord.Color.blurple(),
-        timestamp=discord.utils.utcnow(),
-    )
-    embed.set_thumbnail(url=target.display_avatar.url)
-    embed.add_field(name="Messages", value=f"{int(activity['message_count']):,}", inline=True)
-    embed.add_field(name="Voice time", value=f"{voice_hours:,}h {voice_minutes:02d}m", inline=True)
-    embed.add_field(name="Active days", value=f"{int(activity['active_days']):,}", inline=True)
-    embed.add_field(name="Member since", value=membership, inline=False)
-    embed.set_footer(text="Counts begin when SC Companion activity tracking is enabled; no message content or audio is stored.")
-    await interaction.followup.send(embed=embed)
+    await interaction.followup.send(embed=_sc_companion_progress_embed(target, activity))
 
 
-@reputation_group.command(name="submit", description="Submit a Star Citizen reputation level for review.")
+@app_commands.command(name="rep-submit", description="Submit a Star Citizen reputation level for review.")
 @app_commands.describe(rep_giver="Reputation giver, such as Head Hunters or Covalex",
                        level="Your current reputation level", screenshot="Screenshot showing the reputation status")
 async def reputation_submit_command(interaction: discord.Interaction, rep_giver: str, level: str,

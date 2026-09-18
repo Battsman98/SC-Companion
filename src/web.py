@@ -1627,7 +1627,7 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
     legacy_progress = next((item for item in channels if item["name"] == "rep-progress" and item["type"] == 0), None)
     activity_payload = {
         "name": "activity", "type": 0, "parent_id": str(main_category["id"]),
-        "topic": "Use /activity for monthly Discord activity or /progress for activity plus approved reputation.",
+        "topic": "Use /activity for monthly Discord activity or /rep for activity plus approved reputation.",
     }
     if activity is None and legacy_progress is not None:
         activity = await _discord_api(
@@ -1652,10 +1652,10 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
         "embeds": [{
             "title": "How to submit reputation progress",
             "description": (
-                "Use **`/rep submit`** anywhere in this server. Choose the reputation giver and your current "
+                "Use **`/rep-submit`** anywhere in this server. Choose the reputation giver and your current "
                 "level, then attach a clear screenshot showing that level.\n\n"
                 "SC Companion sends the application to a private reviewer-only text queue. When approved, your "
-                "saved rank is updated and appears the next time **`/progress`** is used."
+                "saved rank is updated and appears the next time **`/rep`** is used."
             ),
             "color": 15844367,
             "fields": [{
@@ -1729,7 +1729,7 @@ async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any
             "title": "SC Companion activity and reputation",
             "description": (
                 "Use **`/activity`** in this channel for monthly Discord activity, even when no reputation has been "
-                "submitted. Use **`/progress`** for the combined activity and reputation card."
+                "submitted. Use **`/rep`** for the combined activity and reputation card."
             ),
             "color": 5793266,
             "fields": [{

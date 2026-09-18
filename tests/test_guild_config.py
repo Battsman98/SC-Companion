@@ -89,11 +89,11 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "All enabled feature channels are being created or repaired" in javascript
     assert "without consuming Discord role slots" in javascript
     assert "all 32 current reputation ladders" in javascript
-    assert "stable two-color ribbons" in javascript
+    assert "matching SC Companion embed layout" in javascript
     assert "Create reviewer role" in javascript
     assert "Create manager role" in javascript
     assert "SC Companion creates or reuses the Award Manager role." in javascript
-    assert "Members submit proof with <code>/rep submit</code>" in javascript
+    assert "<code>/rep-submit</code>" in javascript
     assert "Only this role, server administrators, and SC Companion can see applications." in javascript
     assert "Private application queue configured." in javascript
     assert "reputation-reviewer-row" in javascript
@@ -144,7 +144,7 @@ def test_reputation_submissions_use_a_public_panel_and_private_review_queue() ->
     assert 'settings.pop("submission_forum_id", None)' in provision_source
     assert '"rep-submissions-archive"' in provision_source
     assert '"How to submit reputation progress"' in provision_source
-    assert "/rep submit" in provision_source
+    assert "/rep-submit" in provision_source
     assert 'item["name"] == "rep-progress"' in provision_source
     assert '"name": "activity"' in provision_source
     assert 'settings["activity_channel_id"]' in provision_source
