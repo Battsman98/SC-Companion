@@ -114,7 +114,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
 
 
 def test_reputation_submissions_use_a_public_panel_and_private_review_queue() -> None:
-    provision_source = inspect.getsource(web.create_reputation_channels)
+    provision_source = inspect.getsource(web._create_reputation_channels)
+    endpoint_source = inspect.getsource(web.create_reputation_channels)
 
     assert '("rep-submissions", 0,' in provision_source
     assert '"deny": str(1 << 10)' in provision_source
@@ -132,6 +133,8 @@ def test_reputation_submissions_use_a_public_panel_and_private_review_queue() ->
     assert '"name": "activity"' in provision_source
     assert 'settings["activity_channel_id"]' in provision_source
     assert '"SC Companion activity and reputation"' in provision_source
+    assert 'error.status_code != 502' in endpoint_source
+    assert '"status": "pending"' in endpoint_source
 
 
 def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
