@@ -71,6 +71,9 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Save Features" in javascript
     assert "Save Channels" in javascript
     assert "Add SC Companion to Discord" in javascript
+    assert "renderDiscordChannelPicker" in javascript
+    assert 'channel.type === 4' in javascript
+    assert 'class="discord-channel-category"' in javascript
     assert "Create an award" in javascript
     assert "Enable awards" not in javascript
     assert "Where should awards be announced?" in javascript
@@ -329,6 +332,41 @@ def test_award_settings_can_create_and_assign_a_manager_role(monkeypatch) -> Non
 def test_discord_ids_are_sent_to_browsers_without_number_rounding() -> None:
     discord_id = 1533026212463775754
     assert web._snowflake(discord_id) == "1533026212463775754"
+
+
+def test_channel_picker_preserves_category_relationships(monkeypatch) -> None:
+    async def scenario() -> None:
+        category_id = 1533026212463775754
+        channel_id = 1533026212463775755
+        cache = SimpleNamespace(
+            guild_bot_settings=AsyncMock(return_value=None),
+            award_settings=AsyncMock(return_value=None),
+            award_definitions=AsyncMock(return_value=[]),
+            pending_award_reports=AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr(web, "state", lambda: SimpleNamespace(
+            cache=cache,
+            settings=SimpleNamespace(
+                discord_guild_id=None,
+                award_test_guild_id=None,
+                trading_forum_channel_id=None,
+                public_discord_client_id=None,
+                discord_client_id=None,
+            ),
+        ))
+        monkeypatch.setattr(web, "_managed_guild", AsyncMock(return_value={"id": 123, "name": "Test", "icon_url": None}))
+        monkeypatch.setattr(web, "_discord_bot_guild", AsyncMock(return_value={"id": "123"}))
+        monkeypatch.setattr(web, "_discord_guild_channels", AsyncMock(return_value=[
+            {"id": category_id, "name": "Community", "type": 4, "parent_id": None},
+            {"id": channel_id, "name": "general", "type": 0, "parent_id": category_id},
+        ]))
+
+        result = await web.guild_bot_configuration(123, SimpleNamespace(id=99))
+
+        assert result["channels"][0]["id"] == str(category_id)
+        assert result["channels"][1]["parent_id"] == str(category_id)
+
+    asyncio.run(scenario())
 
 
 def test_existing_primary_mining_routes_are_discovered() -> None:
