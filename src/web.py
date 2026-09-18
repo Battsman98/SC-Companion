@@ -1266,7 +1266,12 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             "pending_reports": award_reports,
             "roles": [{**role, "id": _snowflake(role["id"])} for role in roles if not role["managed"]],
         } if awards_available else None,
-        "reputation": reputation_settings if awards_available else None,
+        "reputation": {
+            **reputation_settings,
+            "reviewer_role_id": _snowflake(reputation_settings.get("reviewer_role_id")),
+            "submission_channel_id": _snowflake(reputation_settings.get("submission_channel_id")),
+            "activity_channel_id": _snowflake(reputation_settings.get("activity_channel_id")),
+        } if reputation_settings is not None else None,
         "updated_at": stored.get("updated_at") if stored else None,
     }
 
@@ -1453,8 +1458,7 @@ async def save_reputation_settings(guild_id: int, payload: ReputationSettingsReq
     return {"status": "saved", **settings}
 
 
-@app.post("/api/bot-management/guilds/{guild_id}/reputation/channels")
-async def create_reputation_channels(guild_id: int, user=Depends(require_user)) -> dict[str, Any]:
+async def _create_reputation_channels(guild_id: int, user: Any) -> dict[str, Any]:
     await _award_dashboard_manager(guild_id, user)
     channels = await _discord_guild_channels(guild_id)
     category = next((item for item in channels if item["type"] == 4 and item["name"].casefold() == "📊 reputation progress".casefold()), None)
@@ -1688,6 +1692,23 @@ async def create_reputation_channels(guild_id: int, user=Depends(require_user)) 
         await state().cache.set(activity_key, int(activity_message["id"]), 315360000)
     await state().cache.set(f"guild:{guild_id}:reputation-settings", settings, 315360000)
     return {"status": "ready", "channel_id": _snowflake(review_queue["id"])}
+
+
+@app.post("/api/bot-management/guilds/{guild_id}/reputation/channels")
+async def create_reputation_channels(guild_id: int, user=Depends(require_user)) -> dict[str, Any]:
+    try:
+        return await _create_reputation_channels(guild_id, user)
+    except HTTPException as error:
+        if error.status_code != 502:
+            raise
+        # Saving the reviewer setting is the durable operation. The public bot
+        # also repairs this guild every minute, so a transient Discord API
+        # failure should not turn a valid save into a failed form submission.
+        logging.warning("Discord deferred reputation channel provisioning for guild %s", guild_id)
+        return {
+            "status": "pending",
+            "message": "Settings saved. SC Companion will retry the Discord channels automatically.",
+        }
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards")

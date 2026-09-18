@@ -2193,8 +2193,12 @@ async function saveReputationSettings(event) {
   try {
     const enabled = section.dataset.enabled === "true";
     const result = await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/settings`, { method: "PUT", body: { enabled, reviewer_role_id: form.elements.reviewer_role_id.value || null, auto_create_role: form.elements.auto_create_role.checked } });
-    if (enabled) await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/channels`, { method: "POST" });
-    status.textContent = result.reviewer_role_id ? "Progress Tracker saved and reviewer role assigned." : "Choose a reviewer role or let SC Companion create one.";
+    const provisioning = enabled
+      ? await api(`/api/bot-management/guilds/${encodeURIComponent(section.dataset.guildId)}/reputation/channels`, { method: "POST" })
+      : null;
+    status.textContent = provisioning?.status === "pending"
+      ? provisioning.message
+      : result.reviewer_role_id ? "Progress Tracker saved and Discord channels are ready." : "Choose a reviewer role or let SC Companion create one.";
     await loadGuildBotConfiguration(section.dataset.guildId);
   } catch (error) { status.textContent = error.message; }
 }
