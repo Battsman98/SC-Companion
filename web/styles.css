@@ -879,7 +879,54 @@ button:hover, .button-link:hover, .tabs button.active {
 
 .award-create-section {
   display: grid;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.award-create-disclosure > summary {
+  display: flex;
+  min-height: 68px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
+  padding: 12px 16px;
+}
+
+.award-create-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.award-create-disclosure[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.award-create-disclosure[open] .award-disclosure-chevron {
+  transform: rotate(180deg);
+}
+
+.award-create-summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.award-create-summary > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.award-create-summary strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.award-create-summary small {
+  color: var(--muted);
+  font-weight: 400;
 }
 
 .award-create-heading {
@@ -915,6 +962,7 @@ button:hover, .button-link:hover, .tabs button.active {
   grid-template-columns: minmax(0, 1fr) minmax(230px, 300px);
   gap: 18px;
   align-items: start;
+  padding: 18px;
 }
 
 .award-create-card {
@@ -994,6 +1042,15 @@ button:hover, .button-link:hover, .tabs button.active {
   gap: 8px;
 }
 
+.award-existing-section,
+.award-review-card,
+.award-grant-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 90%, black);
+}
+
 .award-edit-disclosure {
   margin: 0;
   padding: 0;
@@ -1047,6 +1104,7 @@ button:hover, .button-link:hover, .tabs button.active {
 }
 
 .award-existing-heading,
+.award-card-heading,
 .award-edit-heading {
   display: flex;
   justify-content: space-between;
@@ -1056,6 +1114,8 @@ button:hover, .button-link:hover, .tabs button.active {
 
 .award-existing-heading h4,
 .award-existing-heading p,
+.award-card-heading h4,
+.award-card-heading p,
 .award-edit-heading h5 {
   margin: 0;
 }
@@ -1063,6 +1123,34 @@ button:hover, .button-link:hover, .tabs button.active {
 .award-existing-heading > div {
   display: grid;
   gap: 3px;
+}
+
+.award-card-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.award-review-card {
+  display: grid;
+  gap: 12px;
+}
+
+.award-empty-state {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--control) 45%, transparent);
+}
+
+.award-grant-card {
+  max-width: 920px;
+  gap: 14px;
+}
+
+.award-grant-card textarea {
+  min-height: 82px;
 }
 
 .award-count-badge,
