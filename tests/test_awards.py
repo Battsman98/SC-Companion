@@ -15,6 +15,8 @@ from src.bot import (
     AwardRecommendationModal,
     AwardReportSelect,
     AwardReviewView,
+    AwardRoleColorSelect,
+    AwardRoleColorView,
     GameAssistBot,
     _award_list_embed,
     _award_requirements,
@@ -87,9 +89,14 @@ def test_award_nomination_uses_member_search_award_descriptions_and_pages() -> N
     modal = AwardRecommendationModal(awards[0], [object()])
     assert modal.reason.label == "Why do you recommend this award?"
 
-    creation = AwardCreationModal()
-    assert creation.role_color.label == "Discord role color (hex)"
-    assert creation.role_color.default == "#D5A94E"
+    colors = AwardRoleColorView(user_id=99)
+    color_select = next(item for item in colors.children if isinstance(item, AwardRoleColorSelect))
+    assert color_select.placeholder == "Choose the Discord role color"
+    assert {option.label for option in color_select.options} >= {"Gold", "Red", "Green", "Blue", "Purple"}
+    assert colors.continue_button.disabled is True
+
+    creation = AwardCreationModal(0x3498DB)
+    assert creation.role_color == 0x3498DB
 
 
 def test_award_review_notifications_are_role_private_and_announcements_use_description() -> None:

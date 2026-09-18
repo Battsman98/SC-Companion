@@ -78,6 +78,20 @@ FEEDBACK_TEMPLATE_CACHE_PREFIX = "discord:feedback-template-thread"
 VISITOR_ROLE_NAME = "Visitor"
 BOT_MANAGER_ROLE_NAME = "Bot Manager"
 DEFAULT_AWARD_ROLE_COLOR = 0xD5A94E
+AWARD_ROLE_COLOR_OPTIONS = (
+    ("Gold", 0xD5A94E, "🟡"),
+    ("Red", 0xE74C3C, "🔴"),
+    ("Orange", 0xE67E22, "🟠"),
+    ("Yellow", 0xF1C40F, "🟡"),
+    ("Green", 0x2ECC71, "🟢"),
+    ("Teal", 0x1ABC9C, "🟢"),
+    ("Blue", 0x3498DB, "🔵"),
+    ("Navy", 0x1F4E79, "🔵"),
+    ("Purple", 0x9B59B6, "🟣"),
+    ("Pink", 0xE91E63, "🩷"),
+    ("Silver", 0x95A5A6, "⚪"),
+    ("White", 0xFFFFFF, "⚪"),
+)
 SC_COMPANION_CATEGORY_NAME = "🚀 SC COMPANION"
 SC_COMPANION_CATEGORY_ALIASES = {SC_COMPANION_CATEGORY_NAME.casefold(), "sc companion"}
 VISITOR_CATEGORY_NAME = "SC Companion Hub"
@@ -7759,6 +7773,54 @@ class AwardBrowseView(discord.ui.View):
         )
 
 
+class AwardRoleColorSelect(discord.ui.Select):
+    def __init__(self) -> None:
+        super().__init__(
+            placeholder="Choose the Discord role color",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(label=name, value=str(value), emoji=emoji)
+                for name, value, emoji in AWARD_ROLE_COLOR_OPTIONS
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if not isinstance(view, AwardRoleColorView):
+            return
+        view.role_color = int(self.values[0])
+        view.continue_button.disabled = False
+        color_name = next(name for name, value, _emoji in AWARD_ROLE_COLOR_OPTIONS if value == view.role_color)
+        await interaction.response.edit_message(
+            content=f"Selected role color: **{color_name}**. Continue to enter the award details.",
+            view=view,
+        )
+
+
+class AwardRoleColorView(discord.ui.View):
+    def __init__(self, user_id: int) -> None:
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.role_color: int | None = None
+        self.add_item(AwardRoleColorSelect())
+        self.continue_button.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("Open the Award Panel to create your own award.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Continue", style=discord.ButtonStyle.success, row=1)
+    async def continue_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if self.role_color is None:
+            await interaction.response.send_message("Choose a role color first.", ephemeral=True)
+            return
+        await interaction.response.send_modal(AwardCreationModal(self.role_color))
+
+
 class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
     award_name = discord.ui.TextInput(label="Award title", max_length=AWARD_NAME_LIMIT)
     award_description = discord.ui.TextInput(
@@ -7768,10 +7830,10 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
         label="Requirements (optional, one per line)", style=discord.TextStyle.paragraph,
         required=False, max_length=2000,
     )
-    role_color = discord.ui.TextInput(
-        label="Discord role color (hex)", placeholder="#D5A94E", default="#D5A94E",
-        min_length=7, max_length=7,
-    )
+
+    def __init__(self, role_color: int) -> None:
+        super().__init__()
+        self.role_color = role_color
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         bot = interaction.client
@@ -7784,13 +7846,6 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
             await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
             return
         tasks = _award_requirements(str(self.requirements.value))
-        color_text = str(self.role_color.value).strip()
-        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color_text):
-            await interaction.response.send_message(
-                "Role color must be a hex value such as #D5A94E.", ephemeral=True,
-            )
-            return
-        role_color = int(color_text[1:], 16)
         error = _award_text_error(str(self.award_name.value), str(self.award_description.value), tasks)
         if error:
             await interaction.response.send_message(error, ephemeral=True)
@@ -7802,9 +7857,11 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
         award_id = await bot.cache.create_award_definition(
             interaction.guild.id, str(self.award_name.value).strip(),
             str(self.award_description.value).strip(), "tracker" if tasks else "custom",
-            tasks, interaction.user.id, auto_grant=False, role_color=role_color,
+            tasks, interaction.user.id, auto_grant=False, role_color=self.role_color,
         )
-        role = await _ensure_award_role(interaction.guild, str(self.award_name.value).strip(), role_color)
+        role = await _ensure_award_role(
+            interaction.guild, str(self.award_name.value).strip(), self.role_color,
+        )
         role_note = f" Discord role: {role.mention}." if role is not None else (
             " SC Companion needs Manage Roles permission to create the matching award role."
         )
@@ -8155,7 +8212,10 @@ class AwardPanelView(discord.ui.View):
         if not await _has_award_manager_role(interaction, bot):
             await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
             return
-        await interaction.response.send_modal(AwardCreationModal())
+        await interaction.response.send_message(
+            "Choose a color for the award's Discord role.",
+            view=AwardRoleColorView(interaction.user.id), ephemeral=True,
+        )
 
     @discord.ui.button(label="Review Awards", style=discord.ButtonStyle.secondary,
                        emoji="🔎", custom_id="sc-companion:awards:review")
@@ -8557,12 +8617,16 @@ async def award_configure_command(interaction: discord.Interaction, enabled: boo
 @app_commands.describe(name="Award name", description="What this award recognizes",
                        award_type="Tracked awards require reported tasks; custom awards are granted directly",
                        requirements="Tracked task/contract names separated by semicolons",
-                       role_color="Discord role color as a hex value, such as #D5A94E")
+                       role_color="Choose the Discord role color")
 @app_commands.choices(award_type=[app_commands.Choice(name="Tracked contracts/tasks", value="tracker"),
-                                  app_commands.Choice(name="Custom award", value="custom")])
+                                  app_commands.Choice(name="Custom award", value="custom")],
+                     role_color=[
+                         app_commands.Choice(name=name, value=str(value))
+                         for name, value, _emoji in AWARD_ROLE_COLOR_OPTIONS
+                     ])
 async def award_create_command(interaction: discord.Interaction, name: str, description: str,
                                award_type: app_commands.Choice[str], requirements: str | None = None,
-                               role_color: str = "#D5A94E") -> None:
+                               role_color: app_commands.Choice[str] | None = None) -> None:
     bot = interaction.client
     if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
         return
@@ -8570,10 +8634,7 @@ async def award_create_command(interaction: discord.Interaction, name: str, desc
         await interaction.response.send_message("Only the server owner or configured award role can create awards.", ephemeral=True)
         return
     tasks = _award_requirements(requirements)
-    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", role_color.strip()):
-        await interaction.response.send_message("Role color must be a hex value such as #D5A94E.", ephemeral=True)
-        return
-    color_value = int(role_color.strip()[1:], 16)
+    color_value = int(role_color.value) if role_color is not None else DEFAULT_AWARD_ROLE_COLOR
     error = _award_text_error(name, description, tasks)
     if error:
         await interaction.response.send_message(error, ephemeral=True)
