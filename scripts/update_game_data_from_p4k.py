@@ -17,7 +17,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator, TypeVar
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +26,7 @@ DEFAULT_TOOLS = PROJECT_ROOT / "tools" / "sc-game-data"
 DEFAULT_CACHE = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "StarCitizenCompanion" / "dataforge"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "blueprints_snapshot.json"
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+T = TypeVar("T")
 
 
 def run(command: list[str], cwd: Path, timeout: int) -> None:
@@ -118,6 +119,32 @@ def xml_files(path: Path) -> Iterable[Path]:
     return path.rglob("*.xml") if path.exists() else ()
 
 
+def tracked(items: Iterable[T], label: str) -> Iterator[T]:
+    """Yield items while displaying percentage progress in the console."""
+    rows = list(items)
+    total = len(rows)
+    if not total:
+        print(f"{label}: 100% (0/0)", flush=True)
+        return
+
+    last_percent = -1
+    print(f"{label}:   0% (0/{total:,})", end="", flush=True)
+    try:
+        for index, item in enumerate(rows, 1):
+            yield item
+            percent = index * 100 // total
+            if percent != last_percent:
+                print(
+                    f"\r{label}: {percent:3d}% ({index:,}/{total:,})",
+                    end="\n" if index == total else "",
+                    flush=True,
+                )
+                last_percent = percent
+    finally:
+        if last_percent < 100:
+            print(flush=True)
+
+
 def root_of(path: Path) -> ET.Element | None:
     try:
         return ET.parse(path).getroot()
@@ -141,27 +168,27 @@ def build_reference_names(records: Path, loc: dict[str, str]) -> dict[str, str]:
         records / "missiontype",
         records / "reputation" / "standings",
     )
-    for base in paths:
-        for path in xml_files(base):
-            root = root_of(path)
-            if root is None:
-                continue
-            ref = root.get("__ref")
-            if not ref:
-                continue
-            name = first_localized(
-                root,
-                loc,
-                "Name",
-                "displayName",
-                "name",
-                "LocalisedTypeName",
-                "IconName",
-            )
-            if not name and root.get("__type") == "MissionType":
-                name = root.tag.split(".", 1)[-1].replace("_", " ")
-            if name:
-                names[ref] = name
+    files = (path for base in paths for path in xml_files(base))
+    for path in tracked(files, "Indexing game records"):
+        root = root_of(path)
+        if root is None:
+            continue
+        ref = root.get("__ref")
+        if not ref:
+            continue
+        name = first_localized(
+            root,
+            loc,
+            "Name",
+            "displayName",
+            "name",
+            "LocalisedTypeName",
+            "IconName",
+        )
+        if not name and root.get("__type") == "MissionType":
+            name = root.tag.split(".", 1)[-1].replace("_", " ")
+        if name:
+            names[ref] = name
     return names
 
 
@@ -170,7 +197,7 @@ def resolve_material_names(records: Path, wanted: set[str], loc: dict[str, str],
     unresolved = wanted - resolved.keys()
     if not unresolved:
         return resolved
-    for path in xml_files(records / "entities" / "scitem"):
+    for path in tracked(xml_files(records / "entities" / "scitem"), "Resolving materials"):
         text = path.read_text(encoding="utf-8", errors="ignore")
         matches = [ref for ref in unresolved if ref in text]
         if not matches:
@@ -218,7 +245,7 @@ def parse_blueprints(records: Path, loc: dict[str, str], version: str) -> tuple[
     names = build_reference_names(records, loc)
     parsed: list[tuple[Path, ET.Element, str | None, set[str]]] = []
     material_refs: set[str] = set()
-    for path in xml_files(bp_dir):
+    for path in tracked(xml_files(bp_dir), "Reading blueprint files"):
         root = root_of(path)
         if root is None:
             continue
@@ -239,7 +266,7 @@ def parse_blueprints(records: Path, loc: dict[str, str], version: str) -> tuple[
     materials = resolve_material_names(records, material_refs, loc, names)
     items: list[dict] = []
     by_record: dict[str, dict] = {}
-    for index, (path, root, entity_ref, _) in enumerate(parsed, 1):
+    for index, (path, root, entity_ref, _) in enumerate(tracked(parsed, "Building blueprint recipes"), 1):
         blueprint_ref = root.get("__ref")
         name = names.get(entity_ref or "") or localized(
             next((elem.get("blueprintName") for elem in root.iter() if elem.get("blueprintName")), None),
@@ -364,7 +391,7 @@ def parse_missions(
     linked = 0
     missions: dict[tuple[str, str], dict] = {}
 
-    for path in xml_files(records / "missionbroker" / "pu_missions"):
+    for path in tracked(xml_files(records / "missionbroker" / "pu_missions"), "Reading mission files"):
         root = root_of(path)
         if root is None or root.get("notForRelease") == "1":
             continue
@@ -394,7 +421,7 @@ def parse_missions(
         missions[(mission_id, name)] = mission
 
     contract_dir = records / "contracts" / "contractgenerator"
-    for path in xml_files(contract_dir):
+    for path in tracked(xml_files(contract_dir), "Linking mission rewards"):
         root = root_of(path)
         if root is None:
             continue
