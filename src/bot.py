@@ -7789,37 +7789,20 @@ class AwardRoleColorSelect(discord.ui.Select):
         view = self.view
         if not isinstance(view, AwardRoleColorView):
             return
-        view.role_color = int(self.values[0])
-        view.continue_button.disabled = False
-        color_name = next(name for name, value, _emoji in AWARD_ROLE_COLOR_OPTIONS if value == view.role_color)
-        await interaction.response.edit_message(
-            content=f"Selected role color: **{color_name}**. Continue to enter the award details.",
-            view=view,
-        )
+        await interaction.response.send_modal(AwardCreationModal(int(self.values[0])))
 
 
 class AwardRoleColorView(discord.ui.View):
     def __init__(self, user_id: int) -> None:
         super().__init__(timeout=300)
         self.user_id = user_id
-        self.role_color: int | None = None
         self.add_item(AwardRoleColorSelect())
-        self.continue_button.disabled = True
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
             return True
         await interaction.response.send_message("Open the Award Panel to create your own award.", ephemeral=True)
         return False
-
-    @discord.ui.button(label="Continue", style=discord.ButtonStyle.success, row=1)
-    async def continue_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        del button
-        if self.role_color is None:
-            await interaction.response.send_message("Choose a role color first.", ephemeral=True)
-            return
-        await interaction.response.send_modal(AwardCreationModal(self.role_color))
-
 
 class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
     award_name = discord.ui.TextInput(label="Award title", max_length=AWARD_NAME_LIMIT)

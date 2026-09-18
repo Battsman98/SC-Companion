@@ -93,7 +93,7 @@ def test_award_nomination_uses_member_search_award_descriptions_and_pages() -> N
     color_select = next(item for item in colors.children if isinstance(item, AwardRoleColorSelect))
     assert color_select.placeholder == "Choose the Discord role color"
     assert {option.label for option in color_select.options} >= {"Gold", "Red", "Green", "Blue", "Purple"}
-    assert colors.continue_button.disabled is True
+    assert all(getattr(item, "label", None) != "Continue" for item in colors.children)
 
     creation = AwardCreationModal(0x3498DB)
     assert creation.role_color == 0x3498DB
