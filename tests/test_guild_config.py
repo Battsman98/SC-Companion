@@ -102,7 +102,8 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert 'award_type: requirements.length ? "tracker" : "custom"' in javascript
     assert "Automatically grant when complete" not in javascript
     assert "Members submit award requests from the Discord Award Panel." in javascript
-    assert 'class="tool-card award-form award-create-card award-edit-card"' in javascript
+    assert 'class="tool-card award-edit-disclosure"' in javascript
+    assert '<summary><span>${escapeHtml(award.name)}</span>' in javascript
     assert "award-status-badge" in javascript
     assert "form.elements.auto_grant" not in javascript
     assert 'data-award-review' in javascript
@@ -260,6 +261,33 @@ def test_award_channel_repair_deletes_only_retired_channels_in_awards_category(m
         assert len(renamed_calls) == 1
         assert renamed_calls[0].kwargs["json_payload"]["name"] == "award-panel"
         cache.save_award_settings.assert_awaited_once_with(123, True, 456, 99, 904)
+
+    asyncio.run(scenario())
+
+
+def test_award_role_is_created_reused_and_assigned(monkeypatch) -> None:
+    async def scenario() -> None:
+        roles = AsyncMock(return_value=[])
+        discord_api = AsyncMock(return_value={"id": "777", "name": "Service Award", "managed": False})
+        monkeypatch.setattr(web, "_discord_guild_roles", roles)
+        monkeypatch.setattr(web, "_discord_api", discord_api)
+        monkeypatch.setattr(web, "_public_bot_token", lambda: "public-token")
+
+        role_id = await web._assign_discord_award_role(123, 456, "Service Award")
+
+        assert role_id == 777
+        assert discord_api.await_args_list[0].args[:2] == ("POST", "/guilds/123/roles")
+        assert discord_api.await_args_list[0].kwargs["json_payload"] == {
+            "name": "Service Award", "mentionable": True,
+        }
+        assert discord_api.await_args_list[1].args[:2] == (
+            "PUT", "/guilds/123/members/456/roles/777",
+        )
+
+        roles.return_value = [{"id": 777, "name": "Service Award", "managed": False}]
+        discord_api.reset_mock()
+        assert (await web._ensure_discord_award_role(123, "service award"))["id"] == 777
+        discord_api.assert_not_awaited()
 
     asyncio.run(scenario())
 

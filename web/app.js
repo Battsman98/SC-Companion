@@ -2134,7 +2134,7 @@ function renderAwardManagement(config) {
       </div>
     </section>
     <section class="award-existing-section"><div class="award-existing-heading"><div><p class="guide-kicker">AWARDS / MANAGE</p><h4>Existing Awards</h4><p>Edit award details, requirements, and availability using the same layout as award creation.</p></div><span class="award-count-badge">${definitions.length}</span></div>
-      <div class="award-existing-list">${definitions.length ? definitions.map((award) => `<form data-award-edit-form data-award-id="${award.id}" class="tool-card award-form award-create-card award-edit-card">
+      <div class="award-existing-list">${definitions.length ? definitions.map((award) => `<details class="tool-card award-edit-disclosure"><summary><span>${escapeHtml(award.name)}</span><span class="award-disclosure-chevron" aria-hidden="true">⌄</span></summary><form data-award-edit-form data-award-id="${award.id}" class="award-form award-create-card award-edit-card">
         <div class="award-edit-heading"><div><span class="award-type-badge">${escapeHtml(award.award_type === "tracker" ? "Tracked award" : "Custom award")}</span><h5>#${award.id} · ${escapeHtml(award.name)}</h5></div><span class="award-status-badge ${award.active ? "is-active" : "is-inactive"}">${award.active ? "Active" : "Inactive"}</span></div>
         <label><span>Award title <b aria-hidden="true">*</b></span><input name="name" maxlength="80" value="${escapeAttribute(award.name)}" required><small>${award.name.length}/80 characters</small></label>
         <div class="award-create-divider"></div>
@@ -2143,7 +2143,7 @@ function renderAwardManagement(config) {
         <label class="award-toggle award-active-toggle"><input type="checkbox" name="active" ${award.active ? "checked" : ""}><span><strong>Available to members</strong><small>Inactive awards remain saved but cannot receive new submissions or grants.</small></span></label>
         <div class="award-create-divider"></div>
         <div class="award-form-actions award-create-actions"><button type="submit" class="award-create-primary">Save Award</button><span class="form-note" data-award-status></span></div>
-      </form>`).join("") : '<div class="state">No awards created yet.</div>'}</div>
+      </form></details>`).join("") : '<div class="state">No awards created yet.</div>'}</div>
     </section>
     <div class="tool-card award-card"><div class="award-card-heading"><div><h4>Completion reports</h4><p>Members submit award requests from the Discord Award Panel. Approve valid reports or reject submissions that do not meet the requirement.</p></div></div>${(awards.pending_reports || []).length ? awards.pending_reports.map((report) => `<div class="bot-management-actions"><span><strong>#${report.id} · ${escapeHtml(report.award_name)}</strong><br>${escapeHtml(report.user_name)} — ${escapeHtml(report.task_name)}<br><small>${escapeHtml(report.citation)}</small></span><button type="button" data-award-review data-report-id="${report.id}" data-decision="approved">Approve</button><button type="button" data-award-review data-report-id="${report.id}" data-decision="rejected">Reject</button></div>`).join("") : '<div class="state">No reports are waiting.</div>'}</div>
     <form data-award-grant-form class="tool-card award-form"><div class="award-card-heading"><div><h4>Grant an award</h4><p>Grant custom awards or tracked awards after all requirements have been approved.</p></div></div>

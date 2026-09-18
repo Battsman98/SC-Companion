@@ -3520,6 +3520,9 @@ class GameAssistBot(commands.Bot):
         """Publish the persistent, role-aware award workflow inside the Awards category."""
         if guild.me is None:
             return
+        if self._is_public_instance() and guild.me.guild_permissions.manage_roles:
+            for award in await self.cache.award_definitions(guild.id, active_only=False):
+                await _ensure_award_role(guild, award["name"])
         category = discord.utils.find(
             lambda item: item.name.casefold() in {
                 "🏆 awards".casefold(), "🏆 awards & progress".casefold(),
@@ -7720,8 +7723,12 @@ class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
             str(self.award_description.value).strip(), "tracker" if tasks else "custom",
             tasks, interaction.user.id, auto_grant=False,
         )
+        role = await _ensure_award_role(interaction.guild, str(self.award_name.value).strip())
+        role_note = f" Discord role: {role.mention}." if role is not None else (
+            " SC Companion needs Manage Roles permission to create the matching award role."
+        )
         await interaction.response.send_message(
-            f"Created **{str(self.award_name.value).strip()}** as award `#{award_id}`.", ephemeral=True,
+            f"Created **{str(self.award_name.value).strip()}** as award `#{award_id}`.{role_note}", ephemeral=True,
         )
 
 
@@ -8062,11 +8069,34 @@ class AwardPanelView(discord.ui.View):
         await interaction.response.send_message(content=view.summary(), view=view, ephemeral=True)
 
 
+async def _ensure_award_role(guild: discord.Guild, award_name: str) -> discord.Role | None:
+    role = discord.utils.find(
+        lambda item: item.name.casefold() == award_name.casefold() and not item.managed,
+        guild.roles,
+    )
+    if role is not None:
+        return role
+    if guild.me is None or not guild.me.guild_permissions.manage_roles:
+        return None
+    try:
+        return await guild.create_role(
+            name=award_name[:100], mentionable=True, reason="SC Companion award role",
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        logging.warning("Could not create award role %s in guild %s", award_name, guild.id)
+        return None
+
+
 async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
                           award_name: str, citation: str) -> bool:
     settings = await bot.cache.award_settings(guild_id)
     channel_id = settings.get("announcement_channel_id")
     channel = bot.get_channel(int(channel_id)) if channel_id else None
+    if not isinstance(channel, discord.TextChannel):
+        guild = bot.get_guild(guild_id)
+        channel = discord.utils.find(
+            lambda item: item.name == "award-announcements", guild.text_channels,
+        ) if guild is not None else None
     if not isinstance(channel, discord.TextChannel):
         return False
     embed = discord.Embed(
@@ -8353,7 +8383,11 @@ async def award_create_command(interaction: discord.Interaction, name: str, desc
         interaction.guild_id or 0, name.strip(), description.strip(), award_type.value, tasks, interaction.user.id,
         auto_grant=False,
     )
-    await interaction.response.send_message(f"Created **{name.strip()}** as award `#{award_id}`.", ephemeral=True)
+    role = await _ensure_award_role(interaction.guild, name.strip()) if interaction.guild else None
+    role_note = f" Discord role: {role.mention}." if role is not None else ""
+    await interaction.response.send_message(
+        f"Created **{name.strip()}** as award `#{award_id}`.{role_note}", ephemeral=True,
+    )
 
 
 @award_group.command(name="edit", description="Edit an award's name, description, requirements, or availability.")
@@ -8391,6 +8425,16 @@ async def award_edit_command(interaction: discord.Interaction, award_id: int, na
         requirements=tasks, active=award["active"] if active is None else active,
         auto_grant=False,
     )
+    if interaction.guild is not None and next_name.casefold() != award["name"].casefold():
+        old_role = discord.utils.find(
+            lambda item: item.name.casefold() == award["name"].casefold() and not item.managed,
+            interaction.guild.roles,
+        )
+        if old_role is not None:
+            with suppress(discord.Forbidden, discord.HTTPException):
+                await old_role.edit(name=next_name[:100], reason="SC Companion award renamed")
+        else:
+            await _ensure_award_role(interaction.guild, next_name)
     await interaction.response.send_message(f"Updated award `#{award_id}` — **{next_name}**.", ephemeral=True)
 
 
@@ -8502,6 +8546,12 @@ async def award_grant_command(interaction: discord.Interaction, member: discord.
     message = f"<@{member.id}> earned **{award['name']}** — {citation.strip()}" if granted else (
         f"<@{member.id}> already has **{award['name']}**."
     )
+    role = await _ensure_award_role(interaction.guild, award["name"]) if interaction.guild else None
+    if role is not None and role not in member.roles:
+        try:
+            await member.add_roles(role, reason=f"Granted SC Companion award: {award['name']}")
+        except (discord.Forbidden, discord.HTTPException):
+            logging.warning("Could not assign award role %s to member %s", role.id, member.id)
     if granted:
         await _announce_award(bot, interaction.guild_id or 0, member.id, award["name"], citation.strip())
     await interaction.response.send_message(message)
