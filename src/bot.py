@@ -1315,11 +1315,15 @@ class GameAssistBot(commands.Bot):
                     await self.sync_first_run_notice(guild)
                     await self.ensure_about_panel(guild)
                     if guild.id == self.settings.award_test_guild_id:
+                        needs_activity_channel_repair = (
+                            discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels) is not None
+                            or discord.utils.find(lambda item: item.name == "activity", guild.text_channels) is None
+                        )
+                        if needs_activity_channel_repair:
+                            await self.ensure_activity_progress_channel(guild)
                         needs_reputation_channel_repair = (
                             any(channel.name == "rep-submissions" for channel in guild.forums)
                             or discord.utils.find(lambda item: item.name == "rep-submissions", guild.text_channels) is None
-                            or discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels) is not None
-                            or discord.utils.find(lambda item: item.name == "activity", guild.text_channels) is None
                         )
                         if needs_reputation_channel_repair:
                             await self.ensure_reputation_submission_channels(guild)
@@ -3447,6 +3451,7 @@ class GameAssistBot(commands.Bot):
             await channel.delete(reason="Remove retired award category channel")
 
     async def ensure_reputation_submission_channels(self, guild: discord.Guild) -> None:
+        await self.ensure_activity_progress_channel(guild)
         settings_key = f"guild:{guild.id}:reputation-settings"
         settings = await self.cache.get(settings_key) or {}
         if not settings.get("enabled") or not settings.get("reviewer_role_id"):
@@ -3578,6 +3583,56 @@ class GameAssistBot(commands.Bot):
         settings["submission_channel_id"] = submission.id
         settings["activity_channel_id"] = activity_channel.id
         settings.pop("submission_forum_id", None)
+        await self.cache.set(settings_key, settings, 315360000)
+
+    async def ensure_activity_progress_channel(self, guild: discord.Guild) -> None:
+        main_category = discord.utils.find(
+            lambda item: item.name.casefold() in SC_COMPANION_CATEGORY_ALIASES, guild.categories
+        )
+        if main_category is None:
+            main_category = await guild.create_category(
+                SC_COMPANION_CATEGORY_NAME, reason="Set up SC Companion activity channel"
+            )
+        activity_channel = discord.utils.find(lambda item: item.name == "activity", guild.text_channels)
+        legacy_progress = discord.utils.find(lambda item: item.name == "rep-progress", guild.text_channels)
+        topic = "Use /progress to view monthly messages, voice activity, active days, and approved reputation."
+        if activity_channel is None and legacy_progress is not None:
+            activity_channel = await legacy_progress.edit(
+                name="activity", category=main_category, topic=topic,
+                reason="Replace unused reputation progress channel with SC Companion activity",
+            )
+        elif activity_channel is None:
+            activity_channel = await guild.create_text_channel(
+                "activity", category=main_category, topic=topic,
+                reason="Create SC Companion activity channel",
+            )
+        activity_embed = discord.Embed(
+            title="SC Companion activity and reputation",
+            description=(
+                "Use **`/progress`** in this channel to generate an activity card for yourself. You can optionally "
+                "choose another member to view their card."
+            ),
+            color=discord.Color.blurple(),
+        )
+        activity_embed.add_field(
+            name="The card includes",
+            value="Current-month messages, voice time, active days, and every approved reputation ladder.",
+            inline=False,
+        )
+        activity_key = f"guild:{guild.id}:activity-guide-message"
+        activity_message_id = await self.cache.get(activity_key)
+        activity_message = None
+        if activity_message_id:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                activity_message = await activity_channel.fetch_message(int(activity_message_id))
+        if activity_message is None:
+            activity_message = await activity_channel.send(embed=activity_embed)
+            await self.cache.set(activity_key, activity_message.id, 315360000)
+        else:
+            await activity_message.edit(embed=activity_embed)
+        settings_key = f"guild:{guild.id}:reputation-settings"
+        settings = await self.cache.get(settings_key) or {}
+        settings["activity_channel_id"] = activity_channel.id
         await self.cache.set(settings_key, settings, 315360000)
 
     async def ensure_bot_manager_role(self) -> None:

@@ -130,6 +130,7 @@ def test_reputation_submissions_use_a_private_application_queue() -> None:
 
 def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
     repair_source = inspect.getsource(GameAssistBot.ensure_reputation_submission_channels)
+    activity_source = inspect.getsource(GameAssistBot.ensure_activity_progress_channel)
     ready_source = inspect.getsource(GameAssistBot.on_ready)
     loop_source = inspect.getsource(GameAssistBot._guild_sync_loop)
 
@@ -144,8 +145,12 @@ def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
     assert 'title="SC Companion activity and reputation"' in repair_source
     assert '"repair reputation submission channels"' in ready_source
     assert 'needs_reputation_channel_repair' in loop_source
-    assert 'item.name == "rep-progress"' in loop_source
+    assert 'needs_activity_channel_repair' in loop_source
+    assert 'await self.ensure_activity_progress_channel(guild)' in loop_source
     assert 'await self.ensure_reputation_submission_channels(guild)' in loop_source
+    assert 'item.name == "rep-progress"' in activity_source
+    assert 'name="activity"' in activity_source
+    assert 'settings["activity_channel_id"]' in activity_source
 
 
 def test_award_channel_creation_associates_the_new_channel(monkeypatch) -> None:
