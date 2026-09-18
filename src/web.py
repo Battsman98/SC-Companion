@@ -1791,7 +1791,27 @@ async def review_award_from_dashboard(guild_id: int, report_id: int, payload: Aw
     result = await state().cache.review_award_report(guild_id, report_id, payload.decision, user.id)
     if result is None:
         raise HTTPException(status_code=409, detail="That pending report was not found or was already reviewed.")
-    return {"status": payload.decision, "award_granted": False}
+    granted = False
+    role_id = None
+    if payload.decision == "approved" and result.get("task_name", "").casefold() == "award nomination":
+        award = await state().cache.award_definition(guild_id, result["award_id"])
+        if award is not None and award["active"]:
+            granted = await state().cache.grant_award(
+                guild_id, award["id"], result["user_id"], result["user_name"], result["citation"], user.id,
+            )
+            role_id = await _assign_discord_award_role(guild_id, result["user_id"], award["name"])
+            if granted:
+                settings = await state().cache.award_settings(guild_id)
+                announcement_channel_id = settings.get("announcement_channel_id")
+                if not announcement_channel_id:
+                    channels = await _discord_guild_channels(guild_id)
+                    announcement = next((item for item in channels if item["name"] == "award-announcements"), None)
+                    announcement_channel_id = announcement["id"] if announcement else None
+                await _send_award_announcement(
+                    announcement_channel_id,
+                    f"🏆 <@{result['user_id']}> earned **{award['name']}** — {result['citation']}",
+                )
+    return {"status": payload.decision, "award_granted": granted, "role_id": _snowflake(role_id)}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards/grants")

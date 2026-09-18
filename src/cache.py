@@ -708,7 +708,7 @@ class SQLiteCache:
         if status not in {"approved", "rejected"}:
             raise ValueError("Unknown review status")
         row = self._connection.execute(
-            "SELECT award_id, user_id, user_name, citation FROM award_completion_reports "
+            "SELECT award_id, user_id, user_name, task_name, citation FROM award_completion_reports "
             "WHERE guild_id = ? AND id = ? AND status = 'pending'",
             (guild_id, report_id),
         ).fetchone()
@@ -721,7 +721,7 @@ class SQLiteCache:
         )
         self._connection.commit()
         return {"award_id": int(row[0]), "user_id": int(row[1]), "user_name": str(row[2]),
-                "citation": str(row[3]), "status": status}
+                "task_name": str(row[3]), "citation": str(row[4]), "status": status}
 
     async def approved_award_tasks(self, guild_id: int, award_id: int, user_id: int) -> set[str]:
         rows = self._connection.execute(

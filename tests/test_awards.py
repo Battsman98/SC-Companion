@@ -141,6 +141,7 @@ def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> No
 
         reviewed = await cache.review_award_report(guild_id, first, "approved", 1)
         assert reviewed is not None and reviewed["award_id"] == tracker_id
+        assert reviewed["task_name"] == "Community event"
         assert await cache.approved_award_tasks(guild_id, tracker_id, 99) == {"community event"}
         assert await cache.review_award_report(guild_id, second, "approved", 1)
         assert await cache.approved_award_tasks(guild_id, tracker_id, 99) == {

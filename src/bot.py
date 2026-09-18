@@ -7763,6 +7763,23 @@ class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
             )
             return
         mentions = ", ".join(nominee.mention for nominee in self.nominees)
+        settings = await bot.cache.award_settings(interaction.guild.id)
+        manager_role_id = settings.get("manager_role_id")
+        if manager_role_id and interaction.channel is not None:
+            try:
+                manager_role = interaction.guild.get_role(int(manager_role_id))
+                if (manager_role is not None and not manager_role.mentionable
+                        and interaction.guild.me is not None
+                        and interaction.guild.me.guild_permissions.manage_roles):
+                    await manager_role.edit(mentionable=True, reason="SC Companion award review notifications")
+                await interaction.channel.send(
+                    f"<@&{manager_role_id}> **{len(report_ids)} award recommendation(s) ready for review**\n"
+                    f"Award: **{self.award['name']}**\nRecipients: {mentions}"[:1900],
+                    allowed_mentions=discord.AllowedMentions(roles=True, users=False),
+                )
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                logging.warning("Could not notify award manager role %s in guild %s",
+                                manager_role_id, interaction.guild.id)
         await interaction.response.send_message(
             f"Submitted **{self.award['name']}** for {len(report_ids)} member(s): {mentions}"[:1900],
             ephemeral=True,
@@ -7975,6 +7992,14 @@ class AwardReviewView(discord.ui.View):
             notice = "That recommendation was already reviewed."
         else:
             notice = f"Recommendation `#{report['id']}` was **{decision}**."
+            if decision == "approved" and result.get("task_name", "").casefold() == "award nomination":
+                granted, role_assigned, announced = await _grant_approved_award_nomination(
+                    bot, interaction.guild, result, interaction.user.id,
+                )
+                if granted:
+                    notice += " The award was granted"
+                    notice += ", its Discord role was assigned" if role_assigned else ", but its role could not be assigned"
+                    notice += ", and the announcement was posted." if announced else ", but the announcement could not be posted."
         self.reports = await bot.cache.pending_award_reports(interaction.guild_id, 500)
         self.rebuild_report_select()
         await interaction.response.edit_message(content=self.summary(notice), view=self)
@@ -8084,6 +8109,38 @@ async def _ensure_award_role(guild: discord.Guild, award_name: str) -> discord.R
     except (discord.Forbidden, discord.HTTPException):
         logging.warning("Could not create award role %s in guild %s", award_name, guild.id)
         return None
+
+
+async def _grant_approved_award_nomination(bot: "GameAssistBot", guild: discord.Guild, result: dict,
+                                            reviewer_id: int) -> tuple[bool, bool, bool]:
+    """Grant an approved panel nomination and apply its Discord-facing effects."""
+    award = await bot.cache.award_definition(guild.id, int(result["award_id"]))
+    if award is None or not award.get("active", True):
+        return False, False, False
+    granted = await bot.cache.grant_award(
+        guild.id, int(award["id"]), int(result["user_id"]), str(result["user_name"]),
+        str(result["citation"]), reviewer_id,
+    )
+    role = await _ensure_award_role(guild, str(award["name"]))
+    member = guild.get_member(int(result["user_id"]))
+    if member is None:
+        with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+            member = await guild.fetch_member(int(result["user_id"]))
+    role_assigned = False
+    if role is not None and member is not None:
+        try:
+            if role not in member.roles:
+                await member.add_roles(role, reason=f"Award approved by {reviewer_id}")
+            role_assigned = True
+        except (discord.Forbidden, discord.HTTPException):
+            logging.warning("Could not assign award role %s to member %s in guild %s",
+                            role.id, result["user_id"], guild.id)
+    announced = False
+    if granted:
+        announced = await _announce_award(
+            bot, guild.id, int(result["user_id"]), str(award["name"]), str(result["citation"]),
+        )
+    return granted, role_assigned, announced
 
 
 async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,
