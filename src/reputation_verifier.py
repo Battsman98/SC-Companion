@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Callable
 
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 from src.reputation import REPUTATION_LADDERS
 
@@ -25,6 +25,25 @@ class ReputationVerification:
     detected_level: str | None
     confidence: float
     reason: str
+
+
+def reputation_verification_image_variant(image_bytes: bytes, attempt: int) -> bytes:
+    """Return progressively clearer OCR input while preserving progress-bar color."""
+    if attempt <= 1:
+        return image_bytes
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    if image.width > 8000 or image.height > 8000:
+        return image_bytes
+    scale = 1.25 if attempt == 2 else 1.5
+    image = image.resize(
+        (round(image.width * scale), round(image.height * scale)),
+        Image.Resampling.LANCZOS,
+    )
+    image = ImageEnhance.Contrast(image).enhance(1.15 if attempt == 2 else 1.3)
+    image = ImageEnhance.Sharpness(image).enhance(1.5 if attempt == 2 else 2.0)
+    output = io.BytesIO()
+    image.save(output, "PNG", optimize=True)
+    return output.getvalue()
 
 
 def _normalized(value: str) -> str:
@@ -169,7 +188,18 @@ def verify_reputation_screenshot(
     if requested_match is None:
         return ReputationVerification(False, requested_giver, None, giver_score, "The requested reputation level was not readable.")
     if _cyan_progress_pixels(image, requested_match[0]["box"]) < 12:
-        return ReputationVerification(False, requested_giver, None, min(giver_score, requested_match[1]), "The requested level does not show achieved progress.")
+        achieved_levels = [
+            level for level in ladder
+            if level in matches and _cyan_progress_pixels(image, matches[level][0]["box"]) >= 12
+        ]
+        detected_level = achieved_levels[-1] if achieved_levels else None
+        return ReputationVerification(
+            False,
+            requested_giver,
+            detected_level,
+            min(giver_score, requested_match[1]),
+            "The requested level does not show achieved progress.",
+        )
 
     next_level = ladder[requested_index + 1] if requested_index + 1 < len(ladder) else None
     if next_level is not None:

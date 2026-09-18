@@ -24,7 +24,10 @@ from src.reputation import (
     canonical_reputation_level,
     reputation_colors,
 )
-from src.reputation_verifier import verify_reputation_screenshot
+from src.reputation_verifier import (
+    reputation_verification_image_variant,
+    verify_reputation_screenshot,
+)
 from src.sources.base import (
     BlueprintIngredient,
     BlueprintMission,
@@ -3644,14 +3647,32 @@ class GameAssistBot(commands.Bot):
             return
 
         verification = None
+        attempts = 0
         if auto_verify and image_bytes:
             try:
-                verification = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        verify_reputation_screenshot, image_bytes, giver, level
-                    ),
-                    timeout=300,
-                )
+                async with asyncio.timeout(300):
+                    for attempts in range(1, 4):
+                        if attempts > 1:
+                            for index, field in enumerate(embed.fields):
+                                if field.name == "Automatic verification":
+                                    embed.remove_field(index)
+                                    break
+                            embed.description = "Automatic screenshot verification is retrying."
+                            embed.color = discord.Color.gold()
+                            embed.add_field(
+                                name="Automatic verification",
+                                value=f"Retrying automatically — attempt {attempts} of 3.",
+                                inline=False,
+                            )
+                            await message.edit(embed=embed, view=None)
+                        variant = await asyncio.to_thread(
+                            reputation_verification_image_variant, image_bytes, attempts
+                        )
+                        verification = await asyncio.to_thread(
+                            verify_reputation_screenshot, variant, giver, level
+                        )
+                        if verification.verified:
+                            break
             except Exception as exc:
                 logging.warning("Reputation screenshot verification failed: %s", exc)
 
@@ -3679,6 +3700,31 @@ class GameAssistBot(commands.Bot):
             )
             return
 
+        if (
+            attempts == 3
+            and verification is not None
+            and verification.detected_giver == giver
+            and verification.detected_level is not None
+            and verification.detected_level != level
+        ):
+            embed.description = "SC Companion automatically denied this reputation submission."
+            embed.color = discord.Color.red()
+            embed.add_field(
+                name="Automatic verification",
+                value=(
+                    f"Denied automatically after 3 attempts. The screenshot shows "
+                    f"**{verification.detected_level}**, not **{level}**."
+                ),
+                inline=False,
+            )
+            await message.edit(content=None, embed=embed, view=None)
+            await self.notify_reputation_applicant(
+                applicant_id,
+                f"❌ Your **{giver} — {level}** reputation submission was automatically denied after "
+                f"three verification attempts. The screenshot shows **{verification.detected_level}**.",
+            )
+            return
+
         reason = (
             verification.reason
             if verification is not None
@@ -3688,7 +3734,11 @@ class GameAssistBot(commands.Bot):
         embed.color = discord.Color.blurple()
         embed.add_field(
             name="Automatic verification",
-            value=f"Manual review required: {reason}",
+            value=(
+                f"Manual review required after {attempts} automatic attempts: {reason}"
+                if attempts
+                else f"Manual review required: {reason}"
+            ),
             inline=False,
         )
         await message.edit(embed=embed, view=ReputationApplicationReviewView())
@@ -3716,7 +3766,14 @@ class GameAssistBot(commands.Bot):
             applicant_match = re.fullmatch(r"<@(\d+)>", fields.get("Applicant", ""))
             giver = fields.get("Reputation giver", "").strip()
             level = fields.get("Current level", "").strip()
-            if not verification_state.startswith("Pending") or applicant_match is None or not giver or not level:
+            retryable_state = (
+                verification_state.startswith("Pending")
+                or (
+                    verification_state.startswith("Manual review required:")
+                    and "Review" not in fields
+                )
+            )
+            if not retryable_state or applicant_match is None or not giver or not level:
                 continue
             image_bytes = b""
             if message.attachments:

@@ -2,7 +2,10 @@ import io
 
 from PIL import Image, ImageDraw
 
-from src.reputation_verifier import verify_reputation_screenshot
+from src.reputation_verifier import (
+    reputation_verification_image_variant,
+    verify_reputation_screenshot,
+)
 
 
 def _ocr_item(text: str, left: int, top: int, right: int, bottom: int, confidence: float = 0.95):
@@ -49,9 +52,27 @@ def test_submission_below_highest_visible_tier_requires_manual_review() -> None:
     assert "higher achieved level" in result.reason
 
 
+def test_unachieved_requested_tier_reports_highest_achieved_level() -> None:
+    image, items = _intersec_screenshot(sr_progress=False)
+    result = verify_reputation_screenshot(
+        image, "InterSec Defense Solutions", "Sr. Contractor", ocr_items=items
+    )
+    assert result.verified is False
+    assert result.detected_level == "Contractor"
+    assert "does not show achieved progress" in result.reason
+
+
 def test_mismatched_giver_requires_manual_review() -> None:
     image, items = _intersec_screenshot()
     result = verify_reputation_screenshot(image, "Covalex", "Master", ocr_items=items)
     assert result.verified is False
     assert result.detected_giver is None
 
+
+def test_retry_variants_preserve_color_and_increase_resolution() -> None:
+    image, _items = _intersec_screenshot()
+    second = Image.open(io.BytesIO(reputation_verification_image_variant(image, 2)))
+    third = Image.open(io.BytesIO(reputation_verification_image_variant(image, 3)))
+    assert second.size == (3200, 1800)
+    assert third.size == (3840, 2160)
+    assert second.mode == third.mode == "RGB"

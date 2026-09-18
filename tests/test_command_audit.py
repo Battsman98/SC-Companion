@@ -459,6 +459,7 @@ def test_reputation_submission_can_auto_verify_or_fall_back_to_review() -> None:
     assert "ReputationApplicationReviewView()" in verifier_source
     assert "Manual review required" in verifier_source
     assert "notify_reputation_applicant" in verifier_source
+    assert "Denied automatically after 3 attempts" in verifier_source
 
 
 def test_pending_reputation_reviews_resume_after_restart() -> None:
