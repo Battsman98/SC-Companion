@@ -1,38 +1,69 @@
 """Star Citizen 4.10 reputation ladders and progress-card colors."""
 
+_CONTRACTOR = (
+    "Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor",
+    "Veteran Contractor", "Head Contractor", "Elite Contractor",
+)
+_SECURITY = (
+    "Applicant", "Security Trainee", "Jr. Security Contractor", "Security Contractor",
+    "Sr. Security Contractor", "Lead Security Contractor", "Elite Security Contractor",
+)
+_HAULING = ("Trainee", "Rookie", "Junior", "Member", "Experienced", "Senior", "Master")
+_TECHNICIAN = (
+    "Applicant", "Technician-in-Training", "Jr. Technician", "Technician",
+    "Sr. Technician", "Master Technician",
+)
+_BOUNTY_TRACKER = (
+    "Applicant", "Tracker Trainee", "Associate Tracker", "Tracker",
+    "Advanced Tracker", "Senior Tracker", "Master Tracker",
+)
+_HIRED_MUSCLE = ("Applicant", "Rank I", "Rank II", "Rank III", "Rank IV", "Rank V", "Rank VI")
+
+# One submission ladder per visible reputation contact. Affinity-only and
+# dossier-only contacts are deliberately excluded: the tracker follows the
+# primary rank progression that can be verified from the in-game Career view.
 REPUTATION_LADDERS: dict[str, tuple[str, ...]] = {
-    "Covalex": ("Trainee", "Rookie", "Junior", "Member", "Experienced", "Senior", "Master"),
-    "Headhunters": ("Applicant", "Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor", "Elite Contractor"),
-    "Red Wind Linehaul": ("Trainee", "Rookie", "Junior", "Member", "Experienced", "Senior", "Master"),
-    "Citizens For Prosperity": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "Foxwell Enforcement": ("Neutral", "Member", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "Shubin Interstellar": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "Vaughn": ("Under Review", "Assassin In Training", "Tracker Trainee", "Low Level Assassin", "Assassin", "High Value Assassin", "Elite Assassin", "Master Assassin"),
-    "United Wayfarers Club": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor", "Elite Contractor"),
-    "Eckhart Security": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor", "Elite Contractor"),
-    "Hurston Dynamics": ("Security Trainee", "Jr. Security Contractor", "Security Contractor", "Sr. Security Contractor", "Lead Security Contractor"),
-    "Adagio Holdings": ("Neutral", "Jr. Contractor", "Contractor"),
-    "Bit Zeros": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "microTech": ("Security Trainee", "Jr. Security Contractor", "Security Contractor", "Sr. Security Contractor", "Lead Security Contractor"),
-    "Bounty Hunters Guild": ("Applicant", "Probationary Guild Member", "Junior Guild Member", "Guild Member", "Senior Guild Member", "Veteran Guild Member", "Guild Steward"),
-    "Crusader Industries": ("Security Trainee", "Jr. Security Contractor", "Security Contractor", "Sr. Security Contractor", "Lead Security Contractor"),
-    "FTL Courier": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "Northrock Service Group": ("Applicant", "Neutral", "Senior Tracker", "Advanced Tracker"),
-    "Dead Saints": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "ArcCorp": ("Security Trainee", "Jr. Security Contractor", "Security Contractor", "Sr. Security Contractor", "Lead Security Contractor"),
-    "Ling Family Hauling": ("Trainee", "Rookie", "Junior", "Member", "Experienced", "Senior", "Master"),
-    "Hockrow Agency": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "Unified Distribution Management": ("Applicant", "Jr. Runner", "Runner"),
-    "Recco Battaglia": ("Prospective Associate", "Associate", "Trusted Associate", "Prestige 1", "Prestige 2", "Prestige 3"),
-    "InterSec Defense Solutions": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor", "Veteran Contractor", "Head Contractor"),
-    "Rayari Incorporated": ("Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor"),
-    "Ruto": ("Applicant", "Security Trainee", "Jr. Security Contractor", "Security Contractor"),
-    "Wildstar Racing": ("Racing Enthusiast", "Rookie Racer", "Racer", "Practiced Racer", "Experienced Racer", "Skilled Racer", "Dedicated Racer"),
-    "Civilian Defense Force": ("Not Eligible", "Neutral"),
-    "Covalex Independent Contractors": ("Neutral",),
-    "Wikelo Emporium": ("Very Good Customer", "Very Best Customer"),
-    "Highpoint Wilderness Specialists": ("Neutral",),
-    'Tecia "Twitch" Pacheco': ("Neutral",),
+    "Aciedo Communications": _TECHNICIAN,
+    "Adagio Holdings": _CONTRACTOR,
+    "ArcCorp": _SECURITY,
+    "Bit Zeros": _CONTRACTOR,
+    "Bounty Hunters Guild": (
+        "Applicant", "Probationary Guild Member", "Junior Guild Member", "Guild Member",
+        "Senior Guild Member", "Veteran Guild Member", "Guild Steward",
+    ),
+    "Citizens For Prosperity": _CONTRACTOR,
+    "Covalex": _HAULING,
+    "Crusader Industries": _SECURITY,
+    "Dead Saints": _CONTRACTOR,
+    "Eckhart Security": _CONTRACTOR,
+    "Foxwell Enforcement": _SECURITY,
+    "FTL Courier": _HAULING,
+    "Headhunters": _CONTRACTOR,
+    "Hockrow Agency": _CONTRACTOR,
+    "Hurston Dynamics": _SECURITY,
+    "InterSec Defense Solutions": _CONTRACTOR,
+    "Klescher Rehabilitation Facilities": _TECHNICIAN,
+    "Ling Family Hauling": _HAULING,
+    "microTech": _SECURITY,
+    "Northrock Service Group": _BOUNTY_TRACKER,
+    "Recco Battaglia": (
+        "Prospective Associate", "Associate", "Trusted Associate",
+        "Prestige 1", "Prestige 2", "Prestige 3",
+    ),
+    "Red Wind Linehaul": _HAULING,
+    "Shubin Interstellar": _CONTRACTOR,
+    "Tar Pits": _CONTRACTOR,
+    "Unified Distribution Management": _HAULING,
+    "Vaughn": (
+        "Under Review", "Assassin In Training", "Low Level Assassin", "Assassin",
+        "High Value Assassin", "Elite Assassin", "Master Assassin",
+    ),
+    "Wikelo Emporium": ("New Customer", "Very Good Customer", "Very Best Customer"),
+    "Wildstar Racing": (
+        "Racing Enthusiast", "Novice Racer", "Rookie Racer", "Racer",
+        "Practiced Racer", "Dedicated Racer", "Experienced Racer", "Skilled Racer",
+    ),
+    "XenoThreat": _HIRED_MUSCLE,
 }
 
 # Preserve progress approved before the catalog used the in-game faction name

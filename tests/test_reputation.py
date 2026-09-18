@@ -7,16 +7,35 @@ from src.reputation import (
 
 
 def test_reputation_catalog_contains_all_current_ladders() -> None:
-    assert len(REPUTATION_LADDERS) == 32
+    assert len(REPUTATION_LADDERS) == 29
     assert "Master" in REPUTATION_LADDERS["Covalex"]
     assert "Guild Steward" in REPUTATION_LADDERS["Bounty Hunters Guild"]
-    assert "Covalex Independent Contractors" in REPUTATION_LADDERS
-    assert "Highpoint Wilderness Specialists" in REPUTATION_LADDERS
-    assert 'Tecia "Twitch" Pacheco' in REPUTATION_LADDERS
+    assert "Master Technician" in REPUTATION_LADDERS["Aciedo Communications"]
+    assert "Elite Security Contractor" in REPUTATION_LADDERS["Foxwell Enforcement"]
+    assert "Master Tracker" in REPUTATION_LADDERS["Northrock Service Group"]
+    assert "Tar Pits" in REPUTATION_LADDERS
+    assert REPUTATION_LADDERS["XenoThreat"][-1] == "Rank VI"
     assert REPUTATION_LADDERS["Eckhart Security"] == (
         "Neutral", "Jr. Contractor", "Contractor", "Sr. Contractor",
         "Veteran Contractor", "Head Contractor", "Elite Contractor",
     )
+
+
+def test_affinity_and_dossier_only_contacts_are_not_submission_ladders() -> None:
+    excluded = {
+        "Civilian Defense Force", "Covalex Independent Contractors",
+        "Highpoint Wilderness Specialists", "Rayari Incorporated", "Ruto",
+        'Tecia "Twitch" Pacheco', "United Wayfarers Club",
+    }
+    assert excluded.isdisjoint(REPUTATION_LADDERS)
+
+
+def test_corrected_primary_ladders_do_not_mix_rank_families() -> None:
+    assert REPUTATION_LADDERS["Headhunters"] == REPUTATION_LADDERS["Eckhart Security"]
+    assert REPUTATION_LADDERS["Unified Distribution Management"] == REPUTATION_LADDERS["Covalex"]
+    assert "Tracker Trainee" not in REPUTATION_LADDERS["Vaughn"]
+    assert REPUTATION_LADDERS["Wildstar Racing"][-1] == "Skilled Racer"
+    assert REPUTATION_LADDERS["Wikelo Emporium"][0] == "New Customer"
 
 
 def test_retired_eckhart_labels_map_to_primary_in_game_ladder() -> None:
