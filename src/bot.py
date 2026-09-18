@@ -780,6 +780,54 @@ class ReputationApplicationReviewView(discord.ui.View):
             await bot.review_reputation_application(interaction, approved=False)
 
 
+class ReputationSubmissionModal(discord.ui.Modal, title="Submit reputation progress"):
+    giver = discord.ui.TextInput(
+        label="Reputation giver",
+        placeholder="Example: Covalex",
+        min_length=1,
+        max_length=80,
+    )
+    level = discord.ui.TextInput(
+        label="Current reputation level",
+        placeholder="Example: Master",
+        min_length=1,
+        max_length=80,
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.screenshot = discord.ui.FileUpload(required=True, min_values=1, max_values=1)
+        self.add_item(discord.ui.Label(
+            text="Verification screenshot",
+            description="Upload a clear image showing the giver and current reputation level.",
+            component=self.screenshot,
+        ))
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        attachment = self.screenshot.values[0]
+        await reputation_submit_command.callback(
+            interaction, str(self.giver).strip(), str(self.level).strip(), attachment
+        )
+
+
+class ReputationSubmissionPanelView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Submit Reputation",
+        style=discord.ButtonStyle.primary,
+        custom_id="reputation_application:start",
+        emoji="📈",
+    )
+    async def start_application(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Applications are only available inside the server.", ephemeral=True)
+            return
+        await interaction.response.send_modal(ReputationSubmissionModal())
+
+
 class GameAssistBot(commands.Bot):
     def __init__(self, settings: Settings, cache: SQLiteCache, sources: SourceRegistry) -> None:
         intents = discord.Intents.default()
@@ -835,6 +883,7 @@ class GameAssistBot(commands.Bot):
             self.add_view(FirstRunSetupView())
             self.add_view(ReputationApplicationReviewView())
             self.add_view(AwardPanelView())
+            self.add_view(ReputationSubmissionPanelView())
         else:
             self.add_view(MembershipApplicationPanelView())
             self.add_view(MembershipReviewView())
@@ -1339,6 +1388,7 @@ class GameAssistBot(commands.Bot):
                         needs_reputation_channel_repair = (
                             any(channel.name == "rep-submissions" for channel in guild.forums)
                             or discord.utils.find(lambda item: item.name == "rep-submissions", guild.text_channels) is None
+                            or discord.utils.find(lambda item: item.name == "rep-review-queue", guild.text_channels) is None
                         )
                         if needs_reputation_channel_repair:
                             await self.ensure_reputation_submission_channels(guild)
@@ -3544,22 +3594,45 @@ class GameAssistBot(commands.Bot):
                 overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=False)},
                 reason="Replace reputation submission forum with a private text queue",
             )
-        submission = discord.utils.find(
-            lambda item: item.name == "rep-submissions", guild.text_channels
-        )
-        if submission is None:
-            submission = await guild.create_text_channel(
-                "rep-submissions", category=category,
+        review_queue = discord.utils.find(lambda item: item.name == "rep-review-queue", guild.text_channels)
+        legacy_submission = discord.utils.find(lambda item: item.name == "rep-submissions", guild.text_channels)
+        if review_queue is None and legacy_submission is not None:
+            review_queue = await legacy_submission.edit(
+                name="rep-review-queue", category=category,
+                topic="Private reputation application queue for the configured reviewer role.",
+                overwrites=private_overwrites,
+                reason="Separate the private reputation queue from the public application panel",
+            )
+            legacy_submission = None
+        elif review_queue is None:
+            review_queue = await guild.create_text_channel(
+                "rep-review-queue", category=category,
                 topic="Private reputation application queue for the configured reviewer role.",
                 overwrites=private_overwrites,
                 reason="Create private reputation submission review queue",
             )
         else:
-            await submission.edit(
+            await review_queue.edit(
                 category=category,
                 topic="Private reputation application queue for the configured reviewer role.",
                 overwrites=private_overwrites,
                 reason="Repair private reputation submission review queue",
+            )
+        submission = legacy_submission or discord.utils.find(
+            lambda item: item.name == "rep-submissions", guild.text_channels
+        )
+        if submission is None:
+            submission = await guild.create_text_channel(
+                "rep-submissions", category=category,
+                topic="Open the private reputation progress application form.",
+                reason="Create public reputation application panel",
+            )
+        else:
+            await submission.edit(
+                category=category,
+                topic="Open the private reputation progress application form.",
+                overwrites={},
+                reason="Repair public reputation application panel",
             )
         guidelines = discord.utils.find(lambda item: item.name == "rep-guidelines", guild.text_channels)
         if guidelines is None:
@@ -3614,6 +3687,29 @@ class GameAssistBot(commands.Bot):
             await self.cache.set(guide_key, guide_message.id, 315360000)
         else:
             await guide_message.edit(embed=guide_embed)
+        panel_embed = discord.Embed(
+            title="Submit Reputation Progress",
+            description=(
+                "Submit your current Star Citizen reputation level for approval. Your answers, screenshot, "
+                "and Discord identity are sent privately to the configured reviewers."
+            ),
+            color=discord.Color.blurple(),
+        )
+        panel_embed.add_field(name="1", value="Which reputation giver are you submitting?", inline=False)
+        panel_embed.add_field(name="2", value="What is your current reputation level?", inline=False)
+        panel_embed.add_field(name="3", value="Upload a clear verification screenshot.", inline=False)
+        panel_embed.set_footer(text="Select Submit Reputation to begin. Your application is private.")
+        panel_key = f"guild:{guild.id}:reputation-submission-panel"
+        panel_message_id = await self.cache.get(panel_key)
+        panel_message = None
+        if panel_message_id:
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                panel_message = await submission.fetch_message(int(panel_message_id))
+        if panel_message is None:
+            panel_message = await submission.send(embed=panel_embed, view=ReputationSubmissionPanelView())
+            await self.cache.set(panel_key, panel_message.id, 315360000)
+        else:
+            await panel_message.edit(embed=panel_embed, view=ReputationSubmissionPanelView())
         activity_embed = discord.Embed(
             title="SC Companion activity and reputation",
             description=(
@@ -3638,7 +3734,7 @@ class GameAssistBot(commands.Bot):
             await self.cache.set(activity_key, activity_message.id, 315360000)
         else:
             await activity_message.edit(embed=activity_embed)
-        settings["submission_channel_id"] = submission.id
+        settings["submission_channel_id"] = review_queue.id
         settings["activity_channel_id"] = activity_channel.id
         settings.pop("submission_forum_id", None)
         await self.cache.set(settings_key, settings, 315360000)

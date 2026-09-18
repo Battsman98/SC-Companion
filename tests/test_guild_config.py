@@ -113,13 +113,17 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert '[["awards", "Awards"]]' in javascript
 
 
-def test_reputation_submissions_use_a_private_application_queue() -> None:
+def test_reputation_submissions_use_a_public_panel_and_private_review_queue() -> None:
     provision_source = inspect.getsource(web.create_reputation_channels)
 
     assert '("rep-submissions", 0,' in provision_source
     assert '"deny": str(1 << 10)' in provision_source
     assert 'str(reviewer_role_id)' in provision_source
     assert 'settings["submission_channel_id"]' in provision_source
+    assert '"name": "rep-review-queue"' in provision_source
+    assert '"title": "Submit Reputation Progress"' in provision_source
+    assert '"custom_id": "reputation_application:start"' in provision_source
+    assert "Your application is private." in provision_source
     assert 'settings.pop("submission_forum_id", None)' in provision_source
     assert '"rep-submissions-archive"' in provision_source
     assert '"How to submit reputation progress"' in provision_source
@@ -138,6 +142,9 @@ def test_bot_repairs_legacy_reputation_forum_on_startup() -> None:
 
     assert 'guild.forums if channel.name == "rep-submissions"' in repair_source
     assert 'name="rep-submissions-archive"' in repair_source
+    assert 'item.name == "rep-review-queue"' in repair_source
+    assert 'title="Submit Reputation Progress"' in repair_source
+    assert "ReputationSubmissionPanelView()" in repair_source
     assert 'await guild.create_text_channel(' in repair_source
     assert 'discord.PermissionOverwrite(view_channel=False)' in repair_source
     assert 'title="How to submit reputation progress"' in repair_source
