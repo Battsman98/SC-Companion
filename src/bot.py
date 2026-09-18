@@ -24,10 +24,6 @@ from src.reputation import (
     canonical_reputation_level,
     reputation_colors,
 )
-from src.reputation_verifier import (
-    reputation_verification_image_variant,
-    verify_reputation_screenshot,
-)
 from src.sources.base import (
     BlueprintIngredient,
     BlueprintMission,
@@ -962,8 +958,7 @@ class GameAssistBot(commands.Bot):
         self._guild_sync_task: asyncio.Task | None = None
         self._loot_review_task: asyncio.Task | None = None
         self._feedback_sync_task: asyncio.Task | None = None
-        self._reputation_verification_tasks: set[asyncio.Task] = set()
-        self._reputation_recovery_guilds: set[int] = set()
+        self._reputation_submission_tasks: set[asyncio.Task] = set()
         self._shared_setup_locks: dict[int, asyncio.Lock] = {}
         self._shared_recovery_tasks: dict[int, asyncio.Task] = {}
         self._hub_last_recovery_monotonic = 0.0
@@ -973,8 +968,8 @@ class GameAssistBot(commands.Bot):
             settings.discord_rate_limit_per_10_seconds, 10
         )
 
-    def finish_reputation_verification_task(self, task: asyncio.Task) -> None:
-        self._reputation_verification_tasks.discard(task)
+    def finish_reputation_submission_task(self, task: asyncio.Task) -> None:
+        self._reputation_submission_tasks.discard(task)
         if task.cancelled():
             return
         try:
@@ -982,10 +977,10 @@ class GameAssistBot(commands.Bot):
         except Exception:
             logging.exception("Background reputation submission processing failed")
 
-    def track_reputation_verification(self, coroutine) -> None:
+    def track_reputation_submission(self, coroutine) -> None:
         task = asyncio.create_task(coroutine)
-        self._reputation_verification_tasks.add(task)
-        task.add_done_callback(self.finish_reputation_verification_task)
+        self._reputation_submission_tasks.add(task)
+        task.add_done_callback(self.finish_reputation_submission_task)
 
     async def setup_hook(self) -> None:
         if self.settings.runtime_profile == "public":
@@ -3570,9 +3565,8 @@ class GameAssistBot(commands.Bot):
         giver: str,
         level: str,
         attachment: discord.Attachment,
-        auto_verify: bool,
     ) -> None:
-        """Post a queued application, then verify it without holding the interaction open."""
+        """Post a screenshot-backed application to the private reviewer queue."""
         guild = self.get_guild(guild_id)
         channel = guild.get_channel(channel_id) if guild else None
         if guild is None or not isinstance(channel, discord.TextChannel):
@@ -3587,16 +3581,16 @@ class GameAssistBot(commands.Bot):
         ) if image_bytes else None
         embed = discord.Embed(
             title="Reputation progress application",
-            description="Automatic screenshot verification is pending.",
-            color=discord.Color.gold(),
+            description="Waiting for a reputation reviewer.",
+            color=discord.Color.blurple(),
             timestamp=discord.utils.utcnow(),
         )
         embed.add_field(name="Applicant", value=f"<@{applicant_id}>", inline=False)
         embed.add_field(name="Reputation giver", value=giver, inline=True)
         embed.add_field(name="Current level", value=level, inline=True)
         embed.add_field(
-            name="Automatic verification",
-            value="Pending — this may take a few minutes.",
+            name="Review",
+            value="Pending reviewer decision.",
             inline=False,
         )
         if file is not None:
@@ -3604,31 +3598,21 @@ class GameAssistBot(commands.Bot):
         send_options = {
             "content": f"<@&{reviewer_role_id}>",
             "embed": embed,
+            "view": ReputationApplicationReviewView(),
             "allowed_mentions": discord.AllowedMentions(roles=True, users=False, everyone=False),
         }
         if file is not None:
             send_options["file"] = file
         message = await channel.send(**send_options)
         logging.info(
-            "Reputation verification queued submission=%s guild=%s applicant=%s giver=%r level=%r "
-            "auto_verify=%s image_bytes=%s",
+            "Reputation application queued for manual review submission=%s guild=%s applicant=%s "
+            "giver=%r level=%r image_bytes=%s",
             message.id,
             guild_id,
             applicant_id,
             giver,
             level,
-            auto_verify,
             len(image_bytes),
-        )
-
-        await self.verify_queued_reputation_submission(
-            message=message,
-            guild_id=guild_id,
-            applicant_id=applicant_id,
-            giver=giver,
-            level=level,
-            image_bytes=image_bytes,
-            auto_verify=auto_verify,
         )
 
     async def notify_reputation_applicant(self, applicant_id: int, text: str) -> None:
@@ -3640,240 +3624,6 @@ class GameAssistBot(commands.Bot):
             return
         with suppress(discord.Forbidden, discord.HTTPException):
             await user.send(text)
-
-    async def verify_queued_reputation_submission(
-        self,
-        *,
-        message: discord.Message,
-        guild_id: int,
-        applicant_id: int,
-        giver: str,
-        level: str,
-        image_bytes: bytes,
-        auto_verify: bool,
-    ) -> None:
-        """Finish OCR for a new or restart-recovered queue message."""
-        embed = message.embeds[0] if message.embeds else None
-        if embed is None:
-            return
-
-        verification_started = time.perf_counter()
-        logging.info(
-            "Reputation verification started submission=%s guild=%s applicant=%s giver=%r level=%r "
-            "auto_verify=%s image_bytes=%s",
-            message.id,
-            guild_id,
-            applicant_id,
-            giver,
-            level,
-            auto_verify,
-            len(image_bytes),
-        )
-        verification = None
-        attempts = 0
-        if auto_verify and image_bytes:
-            try:
-                async with asyncio.timeout(300):
-                    for attempts in range(1, 4):
-                        attempt_started = time.perf_counter()
-                        logging.info(
-                            "Reputation verification attempt started submission=%s attempt=%s/3 "
-                            "giver=%r level=%r",
-                            message.id,
-                            attempts,
-                            giver,
-                            level,
-                        )
-                        if attempts > 1:
-                            for index, field in enumerate(embed.fields):
-                                if field.name == "Automatic verification":
-                                    embed.remove_field(index)
-                                    break
-                            embed.description = "Automatic screenshot verification is retrying."
-                            embed.color = discord.Color.gold()
-                            embed.add_field(
-                                name="Automatic verification",
-                                value=f"Retrying automatically — attempt {attempts} of 3.",
-                                inline=False,
-                            )
-                            await message.edit(embed=embed, view=None)
-                        variant = await asyncio.to_thread(
-                            reputation_verification_image_variant, image_bytes, attempts
-                        )
-                        verification = await asyncio.to_thread(
-                            verify_reputation_screenshot, variant, giver, level
-                        )
-                        logging.info(
-                            "Reputation verification attempt finished submission=%s attempt=%s/3 "
-                            "elapsed=%.2fs verified=%s detected_giver=%r detected_level=%r "
-                            "confidence=%.3f reason=%r",
-                            message.id,
-                            attempts,
-                            time.perf_counter() - attempt_started,
-                            verification.verified,
-                            verification.detected_giver,
-                            verification.detected_level,
-                            verification.confidence,
-                            verification.reason,
-                        )
-                        if verification.verified:
-                            break
-            except Exception as exc:
-                logging.warning(
-                    "Reputation verification failed submission=%s attempt=%s elapsed=%.2fs error=%r",
-                    message.id,
-                    attempts,
-                    time.perf_counter() - verification_started,
-                    exc,
-                    exc_info=True,
-                )
-
-        for index, field in enumerate(embed.fields):
-            if field.name == "Automatic verification":
-                embed.remove_field(index)
-                break
-        if verification and verification.verified:
-            approver_id = self.user.id if self.user is not None else 0
-            await self.cache.save_reputation_progress(
-                guild_id, applicant_id, giver, level, approver_id
-            )
-            embed.description = "SC Companion automatically verified this reputation submission."
-            embed.color = discord.Color.green()
-            embed.add_field(
-                name="Automatic verification",
-                value=f"Approved automatically ({verification.confidence:.0%} confidence).",
-                inline=False,
-            )
-            embed.add_field(name="Saved progress", value=f"{giver} — {level}", inline=False)
-            await message.edit(content=None, embed=embed, view=None)
-            logging.info(
-                "Reputation verification approved submission=%s attempts=%s elapsed=%.2fs "
-                "giver=%r level=%r confidence=%.3f",
-                message.id,
-                attempts,
-                time.perf_counter() - verification_started,
-                giver,
-                level,
-                verification.confidence,
-            )
-            await self.notify_reputation_applicant(
-                applicant_id,
-                f"✅ Your **{giver} — {level}** reputation submission was automatically verified and approved.",
-            )
-            return
-
-        if (
-            attempts == 3
-            and verification is not None
-            and verification.detected_giver == giver
-            and verification.detected_level is not None
-            and verification.detected_level != level
-        ):
-            embed.description = "SC Companion automatically denied this reputation submission."
-            embed.color = discord.Color.red()
-            embed.add_field(
-                name="Automatic verification",
-                value=(
-                    f"Denied automatically after 3 attempts. The screenshot shows "
-                    f"**{verification.detected_level}**, not **{level}**."
-                ),
-                inline=False,
-            )
-            await message.edit(content=None, embed=embed, view=None)
-            logging.info(
-                "Reputation verification denied submission=%s attempts=%s elapsed=%.2fs "
-                "giver=%r requested_level=%r detected_level=%r confidence=%.3f",
-                message.id,
-                attempts,
-                time.perf_counter() - verification_started,
-                giver,
-                level,
-                verification.detected_level,
-                verification.confidence,
-            )
-            await self.notify_reputation_applicant(
-                applicant_id,
-                f"❌ Your **{giver} — {level}** reputation submission was automatically denied after "
-                f"three verification attempts. The screenshot shows **{verification.detected_level}**.",
-            )
-            return
-
-        reason = (
-            verification.reason
-            if verification is not None
-            else "Automatic verification was unavailable."
-        )
-        embed.description = "Automatic verification could not approve this submission; reviewer action is required."
-        embed.color = discord.Color.blurple()
-        embed.add_field(
-            name="Automatic verification",
-            value=(
-                f"Manual review required after {attempts} automatic attempts: {reason}"
-                if attempts
-                else f"Manual review required: {reason}"
-            ),
-            inline=False,
-        )
-        await message.edit(embed=embed, view=ReputationApplicationReviewView())
-        logging.info(
-            "Reputation verification needs manual review submission=%s attempts=%s elapsed=%.2fs "
-            "giver=%r level=%r detected_giver=%r detected_level=%r confidence=%.3f reason=%r",
-            message.id,
-            attempts,
-            time.perf_counter() - verification_started,
-            giver,
-            level,
-            verification.detected_giver if verification is not None else None,
-            verification.detected_level if verification is not None else None,
-            verification.confidence if verification is not None else 0.0,
-            reason,
-        )
-        await self.notify_reputation_applicant(
-            applicant_id,
-            f"👀 SC Companion could not automatically verify your **{giver} — {level}** submission. "
-            "It is now waiting for a reviewer; this is not a denial.",
-        )
-
-    async def restore_pending_reputation_reviews(
-        self, guild: discord.Guild, review_queue: discord.TextChannel
-    ) -> None:
-        """Resume queue items left pending by a worker restart."""
-        if guild.id in self._reputation_recovery_guilds:
-            return
-        self._reputation_recovery_guilds.add(guild.id)
-        if self.user is None:
-            return
-        async for message in review_queue.history(limit=100):
-            if message.author.id != self.user.id or not message.embeds:
-                continue
-            embed = message.embeds[0]
-            fields = {field.name: field.value for field in embed.fields}
-            verification_state = fields.get("Automatic verification", "")
-            applicant_match = re.fullmatch(r"<@(\d+)>", fields.get("Applicant", ""))
-            giver = fields.get("Reputation giver", "").strip()
-            level = fields.get("Current level", "").strip()
-            retryable_state = (
-                verification_state.startswith("Pending")
-                or (
-                    verification_state.startswith("Manual review required:")
-                    and "Review" not in fields
-                )
-            )
-            if not retryable_state or applicant_match is None or not giver or not level:
-                continue
-            image_bytes = b""
-            if message.attachments:
-                with suppress(discord.NotFound, discord.HTTPException, OSError):
-                    image_bytes = await message.attachments[0].read(use_cached=True)
-            self.track_reputation_verification(self.verify_queued_reputation_submission(
-                message=message,
-                guild_id=guild.id,
-                applicant_id=int(applicant_match.group(1)),
-                giver=giver,
-                level=level,
-                image_bytes=image_bytes,
-                auto_verify=True,
-            ))
 
     async def review_reputation_application(
         self, interaction: discord.Interaction, approved: bool
@@ -3917,6 +3667,10 @@ class GameAssistBot(commands.Bot):
             )
         status = "Approved" if approved else "Denied"
         embed.color = discord.Color.green() if approved else discord.Color.red()
+        for index, field in enumerate(embed.fields):
+            if field.name == "Review":
+                embed.remove_field(index)
+                break
         embed.add_field(name="Review", value=f"{status} by {interaction.user.mention}", inline=False)
         if approved:
             embed.add_field(name="Saved progress", value=f"{giver} — {level}", inline=False)
@@ -4131,11 +3885,8 @@ class GameAssistBot(commands.Bot):
             inline=False,
         )
         panel_embed.add_field(
-            name="Automatic verification",
-            value=(
-                "When enabled by the server manager, SC Companion checks that the screenshot giver and highest "
-                "achieved level exactly match the application. Unclear results go to reviewers."
-            ),
+            name="Private reviewer approval",
+            value="The configured reviewer role checks every screenshot and approves or denies the application.",
             inline=False,
         )
         panel_embed.set_footer(text="Select Submit Reputation to begin. Your application is private.")
@@ -4180,7 +3931,6 @@ class GameAssistBot(commands.Bot):
         settings.pop("guidelines_channel_id", None)
         settings.pop("submission_forum_id", None)
         await self.cache.set(settings_key, settings, 315360000)
-        await self.restore_pending_reputation_reviews(guild, review_queue)
 
     async def ensure_activity_progress_channel(self, guild: discord.Guild) -> None:
         main_category = discord.utils.find(
@@ -8898,16 +8648,12 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
     if not reviewer_role_id:
         await interaction.response.send_message("No reputation reviewer role is configured.", ephemeral=True)
         return
-    auto_verify = bool(settings.get(
-        "auto_verify", interaction.guild.id == bot.settings.award_test_guild_id
-    ))
     await interaction.response.send_message(
-        "Your reputation application was submitted. It will appear in the private review queue while "
-        + ("SC Companion verifies the screenshot; this may take a few minutes."
-           if auto_verify else "a reviewer checks it."),
+        "Your reputation application was submitted to the private review queue. "
+        "You will receive a DM after a reviewer approves or denies it.",
         ephemeral=True,
     )
-    bot.track_reputation_verification(bot.process_reputation_submission(
+    bot.track_reputation_submission(bot.process_reputation_submission(
         guild_id=interaction.guild.id,
         applicant_id=interaction.user.id,
         channel_id=channel.id,
@@ -8915,7 +8661,6 @@ async def reputation_submit_command(interaction: discord.Interaction, rep_giver:
         giver=giver,
         level=rep_level,
         attachment=screenshot,
-        auto_verify=auto_verify,
     ))
 
 

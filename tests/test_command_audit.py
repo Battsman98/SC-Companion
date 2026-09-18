@@ -444,37 +444,18 @@ def test_reputation_panel_uses_dependent_giver_and_level_selects() -> None:
     assert "discord.ui.TextInput" not in modal_source
 
 
-def test_reputation_submission_can_auto_verify_or_fall_back_to_review() -> None:
+def test_reputation_submission_goes_directly_to_private_review() -> None:
     from src.bot import GameAssistBot, reputation_submit_command
 
     source = inspect.getsource(reputation_submit_command.callback)
-    assert '"auto_verify"' in source
     assert "process_reputation_submission" in source
+    assert "track_reputation_submission" in source
+    assert "auto_verify" not in source
     worker_source = inspect.getsource(GameAssistBot.process_reputation_submission)
-    assert "Automatic screenshot verification is pending" in worker_source
-    verifier_source = inspect.getsource(GameAssistBot.verify_queued_reputation_submission)
-    assert "verify_reputation_screenshot" in verifier_source
-    assert "ReputationApplicationReviewView" in verifier_source
-    assert "save_reputation_progress" in verifier_source
-    assert "ReputationApplicationReviewView()" in verifier_source
-    assert "Manual review required" in verifier_source
-    assert "notify_reputation_applicant" in verifier_source
-    assert "Denied automatically after 3 attempts" in verifier_source
-    assert "Reputation verification attempt started" in verifier_source
-    assert "Reputation verification attempt finished" in verifier_source
-    assert "detected_giver=%r detected_level=%r" in verifier_source
-    assert "Reputation verification approved" in verifier_source
-    assert "Reputation verification denied" in verifier_source
-    assert "Reputation verification needs manual review" in verifier_source
-
-
-def test_pending_reputation_reviews_resume_after_restart() -> None:
-    from src.bot import GameAssistBot
-
-    source = inspect.getsource(GameAssistBot.restore_pending_reputation_reviews)
-    assert 'history(limit=100)' in source
-    assert 'verification_state.startswith("Pending")' in source
-    assert "verify_queued_reputation_submission" in source
+    assert "Waiting for a reputation reviewer" in worker_source
+    assert "Pending reviewer decision" in worker_source
+    assert "ReputationApplicationReviewView()" in worker_source
+    assert "verify_reputation_screenshot" not in worker_source
 
 
 def test_activity_tracking_uses_message_and_voice_events() -> None:
