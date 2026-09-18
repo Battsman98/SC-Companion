@@ -100,9 +100,9 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "data-award-description-count" in javascript
     assert "data-award-create-cancel" in javascript
     assert 'award_type: requirements.length ? "tracker" : "custom"' in javascript
-    assert "Automatically grant when complete" in javascript
+    assert "Automatically grant when complete" not in javascript
     assert "Members submit progress in Discord with <code>/award report</code>." in javascript
-    assert "auto_grant: Boolean(requirements.length && form.elements.auto_grant.checked)" in javascript
+    assert "form.elements.auto_grant" not in javascript
     assert 'data-award-review' in javascript
     assert 'data-bot-management-tab="${key}"' in javascript
     assert '["setup", "Setup"]' in javascript

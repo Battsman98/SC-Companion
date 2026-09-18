@@ -538,6 +538,7 @@ class SQLiteCache:
         cls._ensure_column(connection, "guild_bot_settings", "channel_setup_mode", "TEXT NOT NULL DEFAULT 'manual'")
         cls._ensure_column(connection, "award_guild_settings", "announcement_channel_id", "INTEGER")
         cls._ensure_column(connection, "award_definitions", "auto_grant", "INTEGER NOT NULL DEFAULT 0")
+        connection.execute("UPDATE award_definitions SET auto_grant = 0 WHERE auto_grant <> 0")
         cls._backfill_audit_action_types(connection)
         # Scanner diagnostics are transient. PostgreSQL TRUNCATE releases the
         # legacy image/TOAST allocation without needing the free space that a
@@ -601,6 +602,7 @@ class SQLiteCache:
 
     async def create_award_definition(self, guild_id: int, name: str, description: str, award_type: str,
                                       requirements: list[str], created_by: int, auto_grant: bool = False) -> int:
+        del auto_grant  # Retained in the signature for compatibility with older callers.
         if award_type not in {"tracker", "custom"}:
             raise ValueError("Unknown award type")
         now = int(time.time())
@@ -608,7 +610,7 @@ class SQLiteCache:
             """INSERT INTO award_definitions
                (guild_id, name, description, award_type, requirements_json, auto_grant, created_by, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (guild_id, name, description, award_type, json.dumps(requirements), int(auto_grant), created_by, now, now),
+            (guild_id, name, description, award_type, json.dumps(requirements), 0, created_by, now, now),
         )
         self._connection.commit()
         return int(cursor.lastrowid)
@@ -644,10 +646,11 @@ class SQLiteCache:
     async def update_award_definition(self, guild_id: int, award_id: int, *, name: str,
                                       description: str, requirements: list[str], active: bool,
                                       auto_grant: bool = False) -> bool:
+        del auto_grant  # Automatic granting has been retired.
         cursor = self._connection.execute(
             """UPDATE award_definitions SET name = ?, description = ?, requirements_json = ?, auto_grant = ?, active = ?, updated_at = ?
                WHERE guild_id = ? AND id = ?""",
-            (name, description, json.dumps(requirements), int(auto_grant), int(active), int(time.time()), guild_id, award_id),
+            (name, description, json.dumps(requirements), 0, int(active), int(time.time()), guild_id, award_id),
         )
         self._connection.commit()
         return bool(cursor.rowcount)

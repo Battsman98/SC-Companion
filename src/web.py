@@ -390,7 +390,6 @@ class AwardDefinitionRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     award_type: str = Field(pattern="^(tracker|custom)$")
     requirements: list[str] = Field(default_factory=list, max_length=20)
-    auto_grant: bool = False
 
 
 class AwardDefinitionUpdateRequest(BaseModel):
@@ -398,7 +397,6 @@ class AwardDefinitionUpdateRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     requirements: list[str] = Field(default_factory=list, max_length=20)
     active: bool = True
-    auto_grant: bool = False
 
 
 class AwardReviewRequest(BaseModel):
@@ -1626,7 +1624,7 @@ async def create_award_from_dashboard(guild_id: int, payload: AwardDefinitionReq
         raise HTTPException(status_code=409, detail="An award with that name already exists.")
     award_id = await state().cache.create_award_definition(
         guild_id, payload.name.strip(), payload.description.strip(), payload.award_type, requirements, user.id,
-        auto_grant=payload.auto_grant and bool(requirements),
+        auto_grant=False,
     )
     return {"status": "created", "award_id": award_id}
 
@@ -1646,7 +1644,7 @@ async def update_award_from_dashboard(guild_id: int, award_id: int, payload: Awa
     await state().cache.update_award_definition(
         guild_id, award_id, name=payload.name.strip(), description=payload.description.strip(),
         requirements=requirements, active=payload.active,
-        auto_grant=payload.auto_grant and bool(requirements),
+        auto_grant=False,
     )
     return {"status": "saved"}
 
@@ -1658,21 +1656,7 @@ async def review_award_from_dashboard(guild_id: int, report_id: int, payload: Aw
     result = await state().cache.review_award_report(guild_id, report_id, payload.decision, user.id)
     if result is None:
         raise HTTPException(status_code=409, detail="That pending report was not found or was already reviewed.")
-    awarded = False
-    if payload.decision == "approved":
-        award = await state().cache.award_definition(guild_id, result["award_id"])
-        approved = await state().cache.approved_award_tasks(guild_id, result["award_id"], result["user_id"])
-        if award and award["auto_grant"] and all(task.casefold() in approved for task in award["requirements"]):
-            awarded = await state().cache.grant_award(
-                guild_id, award["id"], result["user_id"], result["user_name"], result["citation"], user.id
-            )
-            if awarded:
-                settings = await state().cache.award_settings(guild_id)
-                await _send_award_announcement(
-                    settings.get("announcement_channel_id"),
-                    f"🏆 <@{result['user_id']}> earned **{award['name']}** — {result['citation']}",
-                )
-    return {"status": payload.decision, "award_granted": awarded}
+    return {"status": payload.decision, "award_granted": False}
 
 
 @app.post("/api/bot-management/guilds/{guild_id}/awards/grants")
