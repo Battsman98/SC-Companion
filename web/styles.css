@@ -584,6 +584,83 @@ button:hover, .button-link:hover, .tabs button.active {
   opacity: 0.55;
 }
 
+.control-disabled .discord-channel-picker {
+  pointer-events: none;
+}
+
+.discord-channel-picker {
+  position: relative;
+  margin-top: 6px;
+}
+
+.discord-channel-picker > summary {
+  min-height: 42px;
+  padding: 10px 36px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, black);
+  cursor: pointer;
+  list-style: none;
+}
+
+.discord-channel-picker > summary::-webkit-details-marker { display: none; }
+
+.discord-channel-picker > summary::after {
+  content: "\2304";
+  position: absolute;
+  top: 9px;
+  right: 13px;
+  color: var(--muted);
+}
+
+.discord-channel-menu {
+  width: min(100%, 390px);
+  max-height: 320px;
+  margin-top: 6px;
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 96%, black);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+}
+
+.discord-channel-category > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.discord-channel-category > summary small { color: inherit; }
+.discord-channel-category-items { display: grid; gap: 2px; padding: 0 0 6px 10px; }
+
+.discord-channel-choice {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.discord-channel-choice:hover,
+.discord-channel-choice.selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}
+
+.discord-channel-choice span { margin-right: 7px; opacity: 0.65; }
+.discord-channel-empty { padding: 6px 10px; color: var(--muted); font-size: 0.8rem; }
+.discord-channel-native { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
 .bot-module-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr);
