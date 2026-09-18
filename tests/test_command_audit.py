@@ -454,18 +454,21 @@ def test_activity_tracking_uses_message_and_voice_events() -> None:
 
 
 def test_activity_command_does_not_require_reputation() -> None:
-    from src.bot import _sc_companion_progress_embed, activity_command
+    from src.bot import _progress_card_image, activity_command, rep_command
 
     source = inspect.getsource(activity_command.callback)
-    embed_source = inspect.getsource(_sc_companion_progress_embed)
+    rep_source = inspect.getsource(rep_command.callback)
+    card_source = inspect.getsource(_progress_card_image)
     setup_source = inspect.getsource(GameAssistBot.setup_hook)
     assert "discord_monthly_activity" in source
     assert "reputation_progress" not in source
-    assert "member.joined_at" in embed_source
-    assert 'name="💬 Messages"' in embed_source
-    assert 'name="🎙️ Voice time"' in embed_source
-    assert 'name="📅 Active days"' in embed_source
-    assert "SC_COMPANION_EMBED_COLOR" in embed_source
+    assert "_progress_card_image" in source
+    assert "_progress_card_image" in rep_source
+    assert "member.joined_at" in card_source
+    assert '"MESSAGES"' in card_source
+    assert '"VOICE"' in card_source
+    assert '"ACTIVE DAYS"' in card_source
+    assert 'accent = "#38c8f4"' in card_source
     assert "self.tree.add_command(activity_command" in setup_source
 
 

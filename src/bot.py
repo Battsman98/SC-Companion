@@ -8343,7 +8343,12 @@ def _reputation_settings_key(guild_id: int) -> str:
     return f"guild:{guild_id}:reputation-settings"
 
 
-def _progress_card_image(member: discord.Member, avatar_bytes: bytes, activity: dict, progress: list[dict]) -> io.BytesIO:
+def _progress_card_image(
+    member: discord.Member,
+    avatar_bytes: bytes,
+    activity: dict,
+    progress: list[dict] | None = None,
+) -> io.BytesIO:
     from PIL import Image, ImageDraw, ImageFont, ImageOps
 
     def font(size: int, bold: bool = False):
@@ -8354,11 +8359,13 @@ def _progress_card_image(member: discord.Member, avatar_bytes: bytes, activity: 
         return ImageFont.load_default()
 
     width = 1000
-    row_count = max(1, len(progress))
-    height = 470 + row_count * 54
+    includes_rep = progress is not None
+    rows = (progress or [{"giver": "No approved reputation yet", "level": "Use /rep-submit to apply"}]) if includes_rep else []
+    height = 470 + len(rows) * 54 if includes_rep else 500
     image = Image.new("RGB", (width, height), "#090c13")
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((20, 20, width - 20, height - 20), radius=30, fill="#111827", outline="#d5a94e", width=3)
+    accent = "#38c8f4"
+    draw.rounded_rectangle((20, 20, width - 20, height - 20), radius=30, fill="#111827", outline=accent, width=3)
     avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGB").resize((128, 128))
     mask = Image.new("L", avatar.size, 0)
     ImageDraw.Draw(mask).ellipse((0, 0, 127, 127), fill=255)
@@ -8366,85 +8373,50 @@ def _progress_card_image(member: discord.Member, avatar_bytes: bytes, activity: 
     image.paste(avatar, (60, 58), mask)
     draw.text((220, 66), member.display_name[:32], font=font(42, True), fill="#f8fafc")
     month = datetime.strptime(str(activity["month"]), "%Y-%m").strftime("%B %Y")
-    draw.text((220, 124), f"SC Companion Progress  |  {month} (UTC)", font=font(22), fill="#94a3b8")
+    card_name = "Reputation & Activity" if includes_rep else "Discord Activity"
+    draw.text((220, 124), f"SC Companion {card_name}  |  {month} (UTC)", font=font(22), fill="#94a3b8")
+
+    joined_at = member.joined_at
+    days_in_server = max(0, (discord.utils.utcnow() - joined_at).days) if joined_at is not None else None
 
     stats = (
         ("MESSAGES", f"{int(activity['message_count']):,}"),
         ("VOICE", f"{int(activity['voice_seconds']) / 3600:.1f} hrs"),
         ("ACTIVE DAYS", str(activity["active_days"])),
-        ("REP GIVERS", str(len(progress))),
+        ("REP GIVERS", str(len(progress or []))) if includes_rep
+        else ("MEMBER FOR", f"{days_in_server:,} days" if days_in_server is not None else "Unknown"),
     )
     for index, (label, value) in enumerate(stats):
         left = 60 + index * 225
         draw.rounded_rectangle((left, 220, left + 205, 330), radius=16, fill="#1e293b")
-        draw.text((left + 18, 240), label, font=font(16, True), fill="#d5a94e")
+        draw.text((left + 18, 240), label, font=font(16, True), fill=accent)
         draw.text((left + 18, 275), value, font=font(28, True), fill="#f8fafc")
 
-    draw.text((60, 370), "APPROVED REPUTATION LADDERS", font=font(20, True), fill="#d5a94e")
-    rows = progress or [{"giver": "No approved reputation yet", "level": "Use /rep-submit to apply"}]
-    for index, item in enumerate(rows):
-        top = 410 + index * 54
-        giver = str(item["giver"])
-        first, second = reputation_colors(giver)
-        draw.rounded_rectangle((50, top - 8, width - 50, top + 40), radius=10, fill="#172033", outline=first, width=2)
-        draw.rectangle((50, top - 8, 62, top + 16), fill=first)
-        draw.rectangle((50, top + 16, 62, top + 40), fill=second)
-        draw.polygon(((62, top - 8), (78, top + 16), (62, top + 40)), fill=second)
-        draw.text((88, top), giver[:40], font=font(19, True), fill="#e2e8f0")
-        draw.text((600, top), str(item["level"])[:32], font=font(19), fill="#f4cf70")
+    if includes_rep:
+        draw.text((60, 370), "APPROVED REPUTATION LADDERS", font=font(20, True), fill=accent)
+        for index, item in enumerate(rows):
+            top = 410 + index * 54
+            giver = str(item["giver"])
+            first, second = reputation_colors(giver)
+            draw.rounded_rectangle((50, top - 8, width - 50, top + 40), radius=10, fill="#172033", outline=first, width=2)
+            draw.rectangle((50, top - 8, 62, top + 16), fill=first)
+            draw.rectangle((50, top + 16, 62, top + 40), fill=second)
+            draw.polygon(((62, top - 8), (78, top + 16), (62, top + 40)), fill=second)
+            draw.text((88, top), giver[:40], font=font(19, True), fill="#e2e8f0")
+            draw.text((600, top), str(item["level"])[:32], font=font(19), fill="#f4cf70")
+    else:
+        draw.text((60, 370), "MEMBER SINCE", font=font(20, True), fill=accent)
+        membership = (
+            f"{joined_at.strftime('%B')} {joined_at.day}, {joined_at.year}  |  {days_in_server:,} days in this Discord"
+            if joined_at is not None and days_in_server is not None
+            else "Discord join date unavailable"
+        )
+        draw.rounded_rectangle((50, 402, width - 50, 454), radius=10, fill="#172033")
+        draw.text((72, 414), membership, font=font(20), fill="#e2e8f0")
     output = io.BytesIO()
     image.save(output, "PNG", optimize=True)
     output.seek(0)
     return output
-
-
-SC_COMPANION_EMBED_COLOR = 0x38C8F4
-
-
-def _sc_companion_progress_embed(
-    member: discord.Member, activity: dict, progress: list[dict] | None = None
-) -> discord.Embed:
-    voice_seconds = int(activity["voice_seconds"])
-    voice_hours, remaining = divmod(voice_seconds, 3600)
-    voice_minutes = remaining // 60
-    joined_at = member.joined_at
-    if joined_at is not None:
-        joined_timestamp = int(joined_at.timestamp())
-        days_in_server = max(0, (discord.utils.utcnow() - joined_at).days)
-        membership = f"<t:{joined_timestamp}:D> (<t:{joined_timestamp}:R>)\n{days_in_server:,} days in this Discord"
-    else:
-        membership = "Join date unavailable"
-    month_label = datetime.strptime(str(activity["month"]), "%Y-%m").strftime("%B %Y")
-    includes_rep = progress is not None
-    embed = discord.Embed(
-        title=f"{member.display_name}'s {'Reputation & Activity' if includes_rep else 'Discord Activity'}",
-        description=f"**SC Companion** • {month_label} (UTC)",
-        color=SC_COMPANION_EMBED_COLOR,
-        timestamp=discord.utils.utcnow(),
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="💬 Messages", value=f"**{int(activity['message_count']):,}**", inline=True)
-    embed.add_field(name="🎙️ Voice time", value=f"**{voice_hours:,}h {voice_minutes:02d}m**", inline=True)
-    embed.add_field(name="📅 Active days", value=f"**{int(activity['active_days']):,}**", inline=True)
-    embed.add_field(name="Member since", value=membership, inline=False)
-    if includes_rep:
-        rows = progress or []
-        if not rows:
-            embed.add_field(
-                name="Approved reputation",
-                value="No approved reputation yet. Use the **Submit Reputation** application panel to apply.",
-                inline=False,
-            )
-        else:
-            lines = [f"🔹 **{item['giver']}** — {item['level']}" for item in rows]
-            for index in range(0, len(lines), 10):
-                embed.add_field(
-                    name="Approved reputation" if index == 0 else "Approved reputation (continued)",
-                    value="\n".join(lines[index:index + 10]),
-                    inline=False,
-                )
-    embed.set_footer(text="SC Companion • No message content or voice audio is stored.")
-    return embed
 
 
 @app_commands.command(name="rep", description="Show approved reputation and monthly Discord activity.")
@@ -8461,7 +8433,9 @@ async def rep_command(interaction: discord.Interaction, member: discord.Member |
     await interaction.response.defer(thinking=True)
     activity = await bot.cache.discord_monthly_activity(interaction.guild.id, target.id)
     progress = await bot.cache.reputation_progress(interaction.guild.id, target.id)
-    await interaction.followup.send(embed=_sc_companion_progress_embed(target, activity, progress))
+    avatar_bytes = await target.display_avatar.with_size(256).read()
+    card = _progress_card_image(target, avatar_bytes, activity, progress)
+    await interaction.followup.send(file=discord.File(card, filename=f"sc-rep-{target.id}.png"))
 
 
 @app_commands.command(name="activity", description="Show monthly Discord message and voice activity.")
@@ -8477,7 +8451,9 @@ async def activity_command(interaction: discord.Interaction, member: discord.Mem
         return
     await interaction.response.defer(thinking=True)
     activity = await bot.cache.discord_monthly_activity(interaction.guild.id, target.id)
-    await interaction.followup.send(embed=_sc_companion_progress_embed(target, activity))
+    avatar_bytes = await target.display_avatar.with_size(256).read()
+    card = _progress_card_image(target, avatar_bytes, activity)
+    await interaction.followup.send(file=discord.File(card, filename=f"sc-activity-{target.id}.png"))
 
 
 @app_commands.command(name="rep-submit", description="Submit a Star Citizen reputation level for review.")
