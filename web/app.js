@@ -1218,10 +1218,10 @@ function renderFeatureAssignmentsByCategory(config) {
   const reputationSettings = config.awards_available ? (config.reputation || {}) : null;
   const specialCategoryId = (channelId) => channelById.get(String(channelId || ""))?.parent_id;
   const namedCategoryId = (name) => categories.find((category) => category.name.toLowerCase().includes(name))?.id;
-  const awardCategoryId = awardSettings ? (specialCategoryId(awardSettings.announcement_channel_id) || namedCategoryId("awards")) : null;
-  const reputationCategoryId = reputationSettings ? (specialCategoryId(reputationSettings.application_channel_id) || namedCategoryId("reputation progress")) : null;
-  const awardRow = () => `<div class="bot-module-row special-feature-assignment" data-award-channel-assignment><div class="bot-module-copy"><span><strong>Awards</strong><small>Contract and custom award announcements.</small></span></div><div><label>Announcement channel${renderDiscordChannelPicker(channels, awardSettings?.announcement_channel_id, { attribute: "data-award-assignment-channel" })}</label></div></div>`;
-  const reputationRow = () => `<div class="bot-module-row special-feature-assignment" data-reputation-channel-assignment><div class="bot-module-copy"><span><strong>Reputation Progress</strong><small>Member applications and activity/progress cards.</small></span></div><div><label>Application channel${renderDiscordChannelPicker(channels, reputationSettings?.application_channel_id, { attribute: "data-reputation-application-channel" })}</label><label>Activity channel${renderDiscordChannelPicker(channels, reputationSettings?.activity_channel_id, { attribute: "data-reputation-activity-channel" })}</label></div></div>`;
+  const awardCategoryId = awardSettings ? (specialCategoryId(awardSettings.panel_channel_id) || specialCategoryId(awardSettings.announcement_channel_id) || namedCategoryId("awards")) : null;
+  const reputationCategoryId = reputationSettings ? (specialCategoryId(reputationSettings.guidelines_channel_id) || specialCategoryId(reputationSettings.application_channel_id) || namedCategoryId("reputation progress")) : null;
+  const awardRow = () => `<div class="bot-module-row special-feature-assignment" data-award-channel-assignment><div class="bot-module-copy"><span><strong>Awards</strong><small>Panel access and recipient announcements.</small></span></div><div><label>Award panel${renderDiscordChannelPicker(channels, awardSettings?.panel_channel_id, { attribute: "data-award-panel-channel" })}</label><label>Announcement channel${renderDiscordChannelPicker(channels, awardSettings?.announcement_channel_id, { attribute: "data-award-assignment-channel" })}</label></div></div>`;
+  const reputationRow = () => `<div class="bot-module-row special-feature-assignment" data-reputation-channel-assignment><div class="bot-module-copy"><span><strong>Reputation Progress</strong><small>Guidance, applications, private review, and activity/progress cards.</small></span></div><div><label>Guidelines channel${renderDiscordChannelPicker(channels, reputationSettings?.guidelines_channel_id, { attribute: "data-reputation-guidelines-channel" })}</label><label>Application channel${renderDiscordChannelPicker(channels, reputationSettings?.application_channel_id, { attribute: "data-reputation-application-channel" })}</label><label>Private review queue${renderDiscordChannelPicker(channels, reputationSettings?.submission_channel_id, { attribute: "data-reputation-submission-channel" })}</label><label>Activity channel${renderDiscordChannelPicker(channels, reputationSettings?.activity_channel_id, { attribute: "data-reputation-activity-channel" })}</label></div></div>`;
   const categoryRows = categories.map((category) => {
     const assignments = modules.filter((module) => assignedCategoryId(module) === String(category.id));
     const specials = [];
@@ -1450,6 +1450,7 @@ async function saveGuildBotConfiguration(event) {
         body: {
           enabled: awardFeature.querySelector("[data-award-feature-enabled]").checked,
           manager_role_id: awardFeature.dataset.managerRoleId || null,
+          panel_channel_id: form.querySelector("[data-award-panel-channel]")?.value || null,
           announcement_channel_id: assignmentChannel?.value || awardFeature.dataset.announcementChannelId || null,
         },
       });
@@ -1460,7 +1461,9 @@ async function saveGuildBotConfiguration(event) {
         method: "PUT",
         body: { enabled: reputationFeature.querySelector("[data-reputation-feature-enabled]").checked,
           reviewer_role_id: reputationFeature.dataset.reviewerRoleId || null,
+          guidelines_channel_id: form.querySelector("[data-reputation-guidelines-channel]")?.value || null,
           application_channel_id: form.querySelector("[data-reputation-application-channel]")?.value || null,
+          submission_channel_id: form.querySelector("[data-reputation-submission-channel]")?.value || null,
           activity_channel_id: form.querySelector("[data-reputation-activity-channel]")?.value || null,
           auto_create_role: false },
       });

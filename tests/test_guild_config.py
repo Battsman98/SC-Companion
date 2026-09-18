@@ -79,7 +79,10 @@ def test_management_panel_is_available_to_discord_server_managers() -> None:
     assert "Feature Assignments by Category" in javascript
     assert "No SC Companion features are currently assigned to this category." in javascript
     assert "data-award-assignment-channel" in javascript
+    assert "data-award-panel-channel" in javascript
+    assert "data-reputation-guidelines-channel" in javascript
     assert "data-reputation-application-channel" in javascript
+    assert "data-reputation-submission-channel" in javascript
     assert "data-reputation-activity-channel" in javascript
     assert "Create an award" in javascript
     assert "Enable awards" not in javascript
