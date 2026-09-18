@@ -168,6 +168,7 @@ MEMBER_ROLE_ID = 1409117152795168799
 MEMBER_ROLE_NAME = "Members"
 ANNIVERSARY_ROLE_NAME = "1 Year Member"
 ANNIVERSARY_CHANNEL_NAME = "welcome"
+WELCOME_CHANNEL_NAME = "welcome"
 ANNIVERSARY_AGE = timedelta(days=365)
 ANNIVERSARY_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 APPLICATION_REVIEW_CHANNEL_NAME = "membership-application-reviews"
@@ -2041,18 +2042,57 @@ class GameAssistBot(commands.Bot):
             logging.exception("Discord startup step failed: %s", label)
 
     async def on_member_join(self, member: discord.Member) -> None:
-        """Give new humans only the Visitor role after membership screening."""
-        if member.bot or member.guild.id != self.settings.discord_guild_id:
+        """Give screened humans Visitor access and welcome them to Peep's server."""
+        if (
+            self.settings.runtime_profile != "peep"
+            or member.bot
+            or member.guild.id != self.settings.discord_guild_id
+        ):
             return
         if member.pending:
             return
         await self._assign_new_visitor(member)
+        await self._send_member_welcome(member)
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        if after.bot or after.guild.id != self.settings.discord_guild_id:
+        if (
+            self.settings.runtime_profile != "peep"
+            or after.bot
+            or after.guild.id != self.settings.discord_guild_id
+        ):
             return
         if before.pending and not after.pending:
             await self._assign_new_visitor(after)
+            await self._send_member_welcome(after)
+
+    async def _send_member_welcome(self, member: discord.Member) -> None:
+        channel = discord.utils.find(
+            lambda item: item.name.casefold() == WELCOME_CHANNEL_NAME.casefold(),
+            member.guild.text_channels,
+        )
+        if channel is None:
+            logging.error("Could not welcome member %s: #%s is missing", member.id, WELCOME_CHANNEL_NAME)
+            return
+
+        embed = discord.Embed(
+            title=f"{member.display_name} just joined the crew",
+            description=(
+                "Welcome to **For The Peeps, By The Peeps** — a community for people who enjoy "
+                "Star Citizen. Be respectful, be kind, and make yourself at home.\n\n"
+                "We're glad you're here and look forward to getting to know you. Enjoy your stay!"
+            ),
+            color=discord.Color.from_rgb(255, 111, 111),
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text=f"Crew member #{member.guild.member_count or len(member.guild.members)}")
+        try:
+            await channel.send(
+                content=f"Welcome aboard, {member.mention}!",
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            logging.exception("Could not welcome member %s in channel %s", member.id, channel.id)
 
     async def _assign_new_visitor(self, member: discord.Member) -> None:
         role = discord.utils.find(
