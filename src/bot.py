@@ -7727,10 +7727,10 @@ class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
         max_length=AWARD_CITATION_LIMIT,
     )
 
-    def __init__(self, award: dict, nominee: discord.Member | discord.User) -> None:
+    def __init__(self, award: dict, nominees: list[discord.Member | discord.User]) -> None:
         super().__init__()
         self.award = award
-        self.nominee = nominee
+        self.nominees = nominees
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         bot = interaction.client
@@ -7739,32 +7739,35 @@ class AwardRecommendationModal(discord.ui.Modal, title="Recommend an Award"):
             return
         if await _enabled_award_settings(interaction, bot) is None:
             return
-        report_id = await bot.cache.submit_award_nomination(
-            interaction.guild.id, int(self.award["id"]), self.nominee.id, str(self.nominee),
+        report_ids = await bot.cache.submit_award_nominations(
+            interaction.guild.id, int(self.award["id"]),
+            [(nominee.id, str(nominee)) for nominee in self.nominees],
             str(self.reason.value).strip(),
         )
-        if report_id is None:
+        if report_ids is None:
             await interaction.response.send_message(
-                f"{self.nominee.mention} already has an award recommendation awaiting review. "
-                "A manager must approve or reject it before another can be submitted.",
+                "At least one selected member already has 20 award recommendations awaiting review. "
+                "A manager must resolve one before another can be submitted for that member.",
                 ephemeral=True,
             )
             return
+        mentions = ", ".join(nominee.mention for nominee in self.nominees)
         await interaction.response.send_message(
-            f"Recommendation `#{report_id}` submitted: {self.nominee.mention} for **{self.award['name']}**.",
+            f"Submitted **{self.award['name']}** for {len(report_ids)} member(s): {mentions}"[:1900],
             ephemeral=True,
         )
 
 
 class AwardNomineeSelect(discord.ui.UserSelect):
     def __init__(self) -> None:
-        super().__init__(placeholder="Who is the award for? Search for a member", min_values=1, max_values=1, row=0)
+        super().__init__(placeholder="Who is the award for? Add up to 25 at a time", min_values=1, max_values=25, row=0)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view = self.view
         if not isinstance(view, AwardNominationView):
             return
-        view.nominee = self.values[0]
+        known_ids = {nominee.id for nominee in view.nominees}
+        view.nominees.extend(nominee for nominee in self.values if nominee.id not in known_ids)
         await interaction.response.edit_message(content=view.summary(), view=view)
 
 
@@ -7798,7 +7801,7 @@ class AwardNominationView(discord.ui.View):
         self.awards = awards
         self.user_id = user_id
         self.page = page
-        self.nominee: discord.Member | discord.User | None = None
+        self.nominees: list[discord.Member | discord.User] = []
         self.award_id: int | None = None
         self.add_item(AwardNomineeSelect())
         self.add_item(AwardChoiceSelect(awards, page))
@@ -7815,12 +7818,13 @@ class AwardNominationView(discord.ui.View):
         return next((award for award in self.awards if award["id"] == self.award_id), None)
 
     def summary(self) -> str:
-        nominee = self.nominee.mention if self.nominee is not None else "Not selected"
+        nominees = ", ".join(nominee.mention for nominee in self.nominees) if self.nominees else "Not selected"
         award = self.selected_award()
         award_text = f"**{award['name']}** — {award['description']}" if award else "Not selected"
         return (
             "Select the member and award, then continue.\n"
-            f"**Who is the award for?** {nominee}\n"
+            f"**Who is the award for?** {nominees}\n"
+            f"**Recipients selected:** {len(self.nominees)}\n"
             f"**Selected award:** {award_text}"
         )[:1900]
 
@@ -7846,14 +7850,20 @@ class AwardNominationView(discord.ui.View):
         self.rebuild_award_select()
         await interaction.response.edit_message(content=self.summary(), view=self)
 
+    @discord.ui.button(label="Clear members", style=discord.ButtonStyle.secondary, row=2)
+    async def clear_members(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        self.nominees.clear()
+        await interaction.response.edit_message(content=self.summary(), view=self)
+
     @discord.ui.button(label="Continue", style=discord.ButtonStyle.success, row=3)
     async def continue_submission(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         award = self.selected_award()
-        if self.nominee is None or award is None:
-            await interaction.response.send_message("Select both a member and an award first.", ephemeral=True)
+        if not self.nominees or award is None:
+            await interaction.response.send_message("Select at least one member and one award first.", ephemeral=True)
             return
-        await interaction.response.send_modal(AwardRecommendationModal(award, self.nominee))
+        await interaction.response.send_modal(AwardRecommendationModal(award, self.nominees))
 
 
 class AwardPanelView(discord.ui.View):

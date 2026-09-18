@@ -666,20 +666,31 @@ class SQLiteCache:
         self._connection.commit()
         return int(cursor.lastrowid)
 
-    async def submit_award_nomination(self, guild_id: int, award_id: int, user_id: int,
-                                      user_name: str, citation: str) -> int | None:
-        """Create one nomination per recipient while an earlier nomination is pending."""
-        existing = self._connection.execute(
-            """SELECT id FROM award_completion_reports
-               WHERE guild_id = ? AND user_id = ? AND status = 'pending'
-               AND LOWER(task_name) = 'award nomination' LIMIT 1""",
-            (guild_id, user_id),
-        ).fetchone()
-        if existing is not None:
-            return None
-        return await self.submit_award_report(
-            guild_id, award_id, user_id, user_name, "Award nomination", citation,
-        )
+    async def submit_award_nominations(self, guild_id: int, award_id: int,
+                                       recipients: list[tuple[int, str]], citation: str,
+                                       max_pending_per_recipient: int = 20) -> list[int] | None:
+        """Submit one award for several recipients without exceeding each member's queue limit."""
+        for user_id, _user_name in recipients:
+            row = self._connection.execute(
+                """SELECT COUNT(*) FROM award_completion_reports
+                   WHERE guild_id = ? AND user_id = ? AND status = 'pending'
+                   AND LOWER(task_name) = 'award nomination'""",
+                (guild_id, user_id),
+            ).fetchone()
+            if row is not None and int(row[0]) >= max_pending_per_recipient:
+                return None
+        report_ids: list[int] = []
+        now = int(time.time())
+        for user_id, user_name in recipients:
+            cursor = self._connection.execute(
+                """INSERT INTO award_completion_reports
+                   (guild_id, award_id, user_id, user_name, task_name, citation, created_at)
+                   VALUES (?, ?, ?, ?, 'Award nomination', ?, ?)""",
+                (guild_id, award_id, user_id, user_name, citation, now),
+            )
+            report_ids.append(int(cursor.lastrowid))
+        self._connection.commit()
+        return report_ids
 
     async def pending_award_reports(self, guild_id: int, limit: int = 20) -> list[dict[str, Any]]:
         rows = self._connection.execute(
