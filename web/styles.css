@@ -828,6 +828,74 @@ button:hover, .button-link:hover, .tabs button.active {
   color: var(--text);
 }
 
+.award-existing-section,
+.award-existing-list {
+  display: grid;
+  gap: 16px;
+}
+
+.award-existing-heading,
+.award-edit-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+
+.award-existing-heading h4,
+.award-existing-heading p,
+.award-edit-heading h5 {
+  margin: 0;
+}
+
+.award-existing-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.award-count-badge,
+.award-type-badge,
+.award-status-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: color-mix(in srgb, var(--control) 78%, transparent);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.award-count-badge {
+  min-width: 34px;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.award-edit-heading > div {
+  display: grid;
+  gap: 8px;
+}
+
+.award-edit-heading h5 {
+  font-size: 1.12rem;
+}
+
+.award-status-badge.is-active {
+  border-color: color-mix(in srgb, #57d68d 55%, var(--line));
+  color: #77e7a6;
+}
+
+.award-status-badge.is-inactive {
+  color: var(--muted);
+}
+
+.award-active-toggle {
+  background: color-mix(in srgb, var(--control) 72%, transparent);
+}
+
 .reputation-settings-form {
   max-width: 780px;
   gap: 12px;

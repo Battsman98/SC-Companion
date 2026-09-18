@@ -826,6 +826,7 @@ class GameAssistBot(commands.Bot):
             self.add_view(CZTimerDashboardView())
             self.add_view(FirstRunSetupView())
             self.add_view(ReputationApplicationReviewView())
+            self.add_view(AwardPanelView())
         else:
             self.add_view(MembershipApplicationPanelView())
             self.add_view(MembershipReviewView())
@@ -955,6 +956,10 @@ class GameAssistBot(commands.Bot):
                 await self._run_startup_step(
                     "repair reputation submission channels",
                     lambda: self.ensure_reputation_submission_channels(reputation_guild),
+                )
+                await self._run_startup_step(
+                    "publish award panel",
+                    lambda: self.ensure_award_panel(reputation_guild),
                 )
         await self._run_startup_step("assign one-year member roles", self.sync_anniversary_roles)
         self._commands_reference_synced = True
@@ -1329,6 +1334,7 @@ class GameAssistBot(commands.Bot):
                         )
                         if needs_reputation_channel_repair:
                             await self.ensure_reputation_submission_channels(guild)
+                        await self.ensure_award_panel(guild)
             await asyncio.sleep(60)
 
     async def ensure_about_panel(self, guild: discord.Guild) -> None:
@@ -3451,6 +3457,48 @@ class GameAssistBot(commands.Bot):
             if item.name in {"award-guidelines", "award-progress-tracker"}
         ]:
             await channel.delete(reason="Remove retired award category channel")
+
+    async def ensure_award_panel(self, guild: discord.Guild) -> None:
+        """Publish the persistent, role-aware award workflow inside the Awards category."""
+        if guild.me is None:
+            return
+        category = discord.utils.find(
+            lambda item: item.name.casefold() in {
+                "🏆 awards".casefold(), "🏆 awards & progress".casefold(),
+            },
+            guild.categories,
+        )
+        if category is None:
+            return
+        channel = discord.utils.find(
+            lambda item: item.name == "award-list-criteria" and item.category_id == category.id,
+            guild.text_channels,
+        )
+        if channel is None or not channel.permissions_for(guild.me).send_messages:
+            return
+        cache_key = f"guild:{guild.id}:award-panel-message"
+        message_id = await self.cache.get(cache_key)
+        message = None
+        if isinstance(message_id, int):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                message = await channel.fetch_message(message_id)
+        embed = discord.Embed(
+            title="SC Companion Award Panel",
+            description=("Browse available awards or submit an award request for manager review. "
+                         "Award managers can also create awards here without using the website."),
+            color=discord.Color.gold(),
+        )
+        embed.add_field(name="For everyone", value="Use **Browse Awards** or **Submit Award**.", inline=False)
+        embed.add_field(name="For award managers", value="Use **Create Award** to add a new award.", inline=False)
+        if message is None:
+            message = await self.find_recent_embed_message(channel, embed.title or "")
+        if message is None:
+            message = await channel.send(embed=embed, view=AwardPanelView())
+        elif self.user is not None and message.author.id == self.user.id:
+            await message.edit(content=None, embed=embed, view=AwardPanelView())
+        else:
+            message = await channel.send(embed=embed, view=AwardPanelView())
+        await self.cache.set(cache_key, message.id, 315360000)
 
     async def ensure_reputation_submission_channels(self, guild: discord.Guild) -> None:
         await self.ensure_activity_progress_channel(guild)
@@ -7056,6 +7104,7 @@ class AwardAdminView(discord.ui.View):
         await bot.cache.save_award_settings(
             interaction.guild.id, settings["enabled"], settings.get("manager_role_id"), interaction.user.id, channel.id
         )
+        await bot.ensure_award_panel(interaction.guild)
         await interaction.response.send_message(
             f"Created or repaired {category.name} and set announcements to {channel.mention}.", ephemeral=True
         )
@@ -7448,6 +7497,189 @@ async def _enabled_award_settings(interaction: discord.Interaction, bot: "GameAs
         await interaction.response.send_message("The optional award system is not enabled in this server.", ephemeral=True)
         return None
     return settings
+
+
+AWARDS_PER_DISCORD_PAGE = 5
+
+
+def _award_list_embed(awards: list[dict], page: int) -> discord.Embed:
+    total_pages = max(1, (len(awards) + AWARDS_PER_DISCORD_PAGE - 1) // AWARDS_PER_DISCORD_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    embed = discord.Embed(title="Available Awards", color=discord.Color.blurple())
+    if not awards:
+        embed.description = "No awards have been created yet."
+    start = page * AWARDS_PER_DISCORD_PAGE
+    for award in awards[start:start + AWARDS_PER_DISCORD_PAGE]:
+        requirements = "\n".join(f"• {item}" for item in award["requirements"])
+        kind = "Tracked" if award["award_type"] == "tracker" else "Custom"
+        value = f"{award['description']}\n**Type:** {kind}"
+        if requirements:
+            value += f"\n**Requirements:**\n{requirements}"
+        embed.add_field(name=f"#{award['id']} · {award['name']}", value=value[:1024], inline=False)
+    embed.set_footer(text=f"Page {page + 1} of {total_pages} · Submit from the Award Panel")
+    return embed
+
+
+class AwardBrowseView(discord.ui.View):
+    def __init__(self, awards: list[dict], user_id: int, page: int = 0) -> None:
+        super().__init__(timeout=300)
+        self.awards = awards
+        self.user_id = user_id
+        self.page = page
+        self.total_pages = max(1, (len(awards) + AWARDS_PER_DISCORD_PAGE - 1) // AWARDS_PER_DISCORD_PAGE)
+        self.previous.disabled = page <= 0
+        self.next.disabled = page >= self.total_pages - 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("Open the Award Panel to browse your own pages.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        self.page = max(0, self.page - 1)
+        await interaction.response.edit_message(
+            embed=_award_list_embed(self.awards, self.page),
+            view=AwardBrowseView(self.awards, self.user_id, self.page),
+        )
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        self.page = min(self.total_pages - 1, self.page + 1)
+        await interaction.response.edit_message(
+            embed=_award_list_embed(self.awards, self.page),
+            view=AwardBrowseView(self.awards, self.user_id, self.page),
+        )
+
+
+class AwardCreationModal(discord.ui.Modal, title="Create an Award"):
+    award_name = discord.ui.TextInput(label="Award title", max_length=AWARD_NAME_LIMIT)
+    award_description = discord.ui.TextInput(
+        label="Description", style=discord.TextStyle.paragraph, max_length=AWARD_DESCRIPTION_LIMIT,
+    )
+    requirements = discord.ui.TextInput(
+        label="Requirements (optional, one per line)", style=discord.TextStyle.paragraph,
+        required=False, max_length=2000,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None:
+            await interaction.response.send_message("Award creation is unavailable here.", ephemeral=True)
+            return
+        if await _enabled_award_settings(interaction, bot) is None:
+            return
+        if not await _can_manage_awards(interaction, bot):
+            await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
+            return
+        tasks = _award_requirements(str(self.requirements.value))
+        error = _award_text_error(str(self.award_name.value), str(self.award_description.value), tasks)
+        if error:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        existing = await bot.cache.award_definitions(interaction.guild.id, active_only=False)
+        if any(item["name"].casefold() == str(self.award_name.value).strip().casefold() for item in existing):
+            await interaction.response.send_message("An award with that title already exists.", ephemeral=True)
+            return
+        award_id = await bot.cache.create_award_definition(
+            interaction.guild.id, str(self.award_name.value).strip(),
+            str(self.award_description.value).strip(), "tracker" if tasks else "custom",
+            tasks, interaction.user.id, auto_grant=False,
+        )
+        await interaction.response.send_message(
+            f"Created **{str(self.award_name.value).strip()}** as award `#{award_id}`.", ephemeral=True,
+        )
+
+
+class AwardSubmissionModal(discord.ui.Modal, title="Submit an Award Request"):
+    award_id = discord.ui.TextInput(label="Award number", placeholder="Example: 3", max_length=10)
+    requirement = discord.ui.TextInput(
+        label="Completed requirement (tracked awards)", required=False, max_length=AWARD_TASK_LIMIT,
+    )
+    citation = discord.ui.TextInput(
+        label="Citation or supporting details", style=discord.TextStyle.paragraph,
+        max_length=AWARD_CITATION_LIMIT,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None:
+            await interaction.response.send_message("Award submissions are unavailable here.", ephemeral=True)
+            return
+        if await _enabled_award_settings(interaction, bot) is None:
+            return
+        try:
+            award_number = int(str(self.award_id.value).strip())
+        except ValueError:
+            await interaction.response.send_message("Enter the numeric award number shown in Browse Awards.", ephemeral=True)
+            return
+        award = await bot.cache.award_definition(interaction.guild.id, award_number)
+        if award is None or not award["active"]:
+            await interaction.response.send_message("That active award was not found.", ephemeral=True)
+            return
+        task_name = "Nomination"
+        if award["requirements"]:
+            task_name = next(
+                (item for item in award["requirements"]
+                 if item.casefold() == str(self.requirement.value).strip().casefold()),
+                "",
+            )
+            if not task_name:
+                choices = ", ".join(award["requirements"])
+                await interaction.response.send_message(
+                    f"Enter one exact requirement: {choices}"[:1900], ephemeral=True,
+                )
+                return
+        report_id = await bot.cache.submit_award_report(
+            interaction.guild.id, award_number, interaction.user.id, str(interaction.user),
+            task_name, str(self.citation.value).strip(),
+        )
+        await interaction.response.send_message(
+            f"Award request `#{report_id}` was submitted for **{award['name']}**.", ephemeral=True,
+        )
+
+
+class AwardPanelView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Browse Awards", style=discord.ButtonStyle.primary,
+                       emoji="🏆", custom_id="sc-companion:awards:browse")
+    async def browse(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
+            return
+        awards = await bot.cache.award_definitions(interaction.guild_id or 0)
+        view = AwardBrowseView(awards, interaction.user.id) if len(awards) > AWARDS_PER_DISCORD_PAGE else None
+        await interaction.response.send_message(embed=_award_list_embed(awards, 0), view=view, ephemeral=True)
+
+    @discord.ui.button(label="Submit Award", style=discord.ButtonStyle.success,
+                       emoji="📝", custom_id="sc-companion:awards:submit")
+    async def submit(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or await _enabled_award_settings(interaction, bot) is None:
+            return
+        await interaction.response.send_modal(AwardSubmissionModal())
+
+    @discord.ui.button(label="Create Award", style=discord.ButtonStyle.secondary,
+                       emoji="➕", custom_id="sc-companion:awards:create")
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        bot = interaction.client
+        if not isinstance(bot, GameAssistBot) or interaction.guild is None:
+            await interaction.response.send_message("Award creation is unavailable here.", ephemeral=True)
+            return
+        if await _enabled_award_settings(interaction, bot) is None:
+            return
+        if not await _can_manage_awards(interaction, bot):
+            await interaction.response.send_message("Only the configured Award Manager role can create awards.", ephemeral=True)
+            return
+        await interaction.response.send_modal(AwardCreationModal())
 
 
 async def _announce_award(bot: "GameAssistBot", guild_id: int, user_id: int,

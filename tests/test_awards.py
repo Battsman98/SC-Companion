@@ -7,7 +7,10 @@ from src.bot import (
     AWARD_MAX_REQUIREMENTS,
     AWARD_NAME_LIMIT,
     AWARD_TASK_LIMIT,
+    AWARDS_PER_DISCORD_PAGE,
+    AwardPanelView,
     GameAssistBot,
+    _award_list_embed,
     _award_requirements,
     _award_text_error,
     award_group,
@@ -33,6 +36,27 @@ def test_award_commands_are_only_registered_to_the_configured_testing_guild() ->
     assert {command.name for command in award_group.commands} == {
         "configure", "create", "edit", "report", "queue", "review", "grant", "list", "profile",
     }
+
+
+def test_award_panel_is_persistent_and_lists_awards_in_pages() -> None:
+    view = AwardPanelView()
+    assert view.timeout is None
+    assert {item.custom_id for item in view.children} == {
+        "sc-companion:awards:browse",
+        "sc-companion:awards:submit",
+        "sc-companion:awards:create",
+    }
+    awards = [
+        {"id": index, "name": f"Award {index}", "description": "Recognition",
+         "award_type": "custom", "requirements": []}
+        for index in range(1, AWARDS_PER_DISCORD_PAGE + 2)
+    ]
+    first = _award_list_embed(awards, 0)
+    second = _award_list_embed(awards, 1)
+    assert len(first.fields) == AWARDS_PER_DISCORD_PAGE
+    assert len(second.fields) == 1
+    assert "Page 1 of 2" in (first.footer.text or "")
+    assert "Page 2 of 2" in (second.footer.text or "")
 
 
 def test_tracked_award_report_review_and_custom_grant_round_trip(tmp_path) -> None:
