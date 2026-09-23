@@ -103,7 +103,7 @@ def test_about_panel_recovers_existing_message_and_removes_duplicates() -> None:
     assert "channel.history(limit=250)" in source
     assert "candidate.author.id != self.user.id" in source
     assert "min(existing, key=lambda candidate: candidate.id)" in source
-    assert 'duplicate.delete(reason="Remove duplicate SC Companion About panel")' in source
+    assert "await duplicate.delete()" in source
     assert "will retry without posting a replacement" in source
 
 

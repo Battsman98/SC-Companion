@@ -1463,7 +1463,7 @@ class GameAssistBot(commands.Bot):
             if duplicate.id == message.id:
                 continue
             with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                await duplicate.delete(reason="Remove duplicate SC Companion About panel")
+                await duplicate.delete()
                 logging.info(
                     "Deleted duplicate SC Companion About panel %s in channel %s",
                     duplicate.id,
