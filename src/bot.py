@@ -1576,15 +1576,57 @@ class GameAssistBot(commands.Bot):
                 await duplicate.delete(reason="Remove duplicate SC Companion About channel")
         cache_key = f"guild:{guild.id}:about-panel-message"
         message_id = await self.cache.get(cache_key)
+        embed = build_about_bot_embed(guild)
         message = None
         if message_id:
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+            try:
                 message = await channel.fetch_message(int(message_id))
+            except discord.NotFound:
+                message = None
+            except (discord.Forbidden, discord.HTTPException):
+                logging.warning(
+                    "Could not fetch the saved About panel in channel %s; will retry without posting a replacement",
+                    channel.id,
+                )
+                return
+
+        # The cache is an optimization, not the identity of the permanent panel.
+        # Recover the oldest bot-owned copy after a cache reset, then remove any
+        # newer copies left by an earlier restart.
+        title = embed.title or ""
+        try:
+            existing = []
+            async for candidate in channel.history(limit=250):
+                if self.user is not None and candidate.author.id != self.user.id:
+                    continue
+                if any(candidate_embed.title == title for candidate_embed in candidate.embeds):
+                    existing.append(candidate)
+        except (discord.Forbidden, discord.HTTPException):
+            logging.warning(
+                "Could not scan channel %s for an existing About panel; will retry without posting a replacement",
+                channel.id,
+            )
+            return
+
+        if message is not None and self.user is not None and message.author.id != self.user.id:
+            message = None
+        if message is None and existing:
+            message = min(existing, key=lambda candidate: candidate.id)
         if message is None:
-            message = await channel.send(embed=build_about_bot_embed(guild))
-            await self.cache.set(cache_key, message.id, 315360000)
+            message = await channel.send(embed=embed)
         else:
-            await message.edit(embed=build_about_bot_embed(guild))
+            await message.edit(embed=embed)
+        await self.cache.set(cache_key, message.id, 315360000)
+        for duplicate in existing:
+            if duplicate.id == message.id:
+                continue
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await duplicate.delete(reason="Remove duplicate SC Companion About panel")
+                logging.info(
+                    "Deleted duplicate SC Companion About panel %s in channel %s",
+                    duplicate.id,
+                    channel.id,
+                )
         await self.cache.set(f"guild:{guild.id}:about-channel", channel.id, 315360000)
         await self.ensure_guild_feedback_forum(guild, category)
         await self._ensure_automatic_module_channels(guild)
