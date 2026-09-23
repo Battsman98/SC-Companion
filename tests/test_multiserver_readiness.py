@@ -97,6 +97,16 @@ def test_shared_channels_wait_for_setup_and_use_sc_companion_category() -> None:
     assert "category=category" in feedback_source
 
 
+def test_about_panel_recovers_existing_message_and_removes_duplicates() -> None:
+    source = inspect.getsource(GameAssistBot._ensure_about_panel)
+
+    assert "channel.history(limit=250)" in source
+    assert "candidate.author.id != self.user.id" in source
+    assert "min(existing, key=lambda candidate: candidate.id)" in source
+    assert 'duplicate.delete(reason="Remove duplicate SC Companion About panel")' in source
+    assert "will retry without posting a replacement" in source
+
+
 def test_manual_setup_has_an_explicit_next_step_for_each_enabled_feature() -> None:
     modules = {
         key: {"enabled": key in {"ship_search", "trade_tools"}, "channel_id": None, "resource_channel_id": None}
