@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
 from src.bot import (
+    MARKETPLACE_SHEET_SAMPLE_FILENAME,
+    MARKETPLACE_SHEET_SAMPLE_PATH,
     TRADING_FORUM_TAGS,
     TRADING_GUIDE_TAG,
     VISITOR_COMMAND_CHANNELS,
@@ -30,6 +32,12 @@ def test_marketplace_guide_explains_every_required_tag() -> None:
     assert "/trade store-refresh" in store_text
     assert "Inventory Scanner Excel" in store_text
     assert "STORE" in store_text
+    assert "Anyone with the link" in store_text
+    assert "**Required:** `Item Name`" in store_text
+    assert store.image.url == f"attachment://{MARKETPLACE_SHEET_SAMPLE_FILENAME}"
+    assert MARKETPLACE_SHEET_SAMPLE_PATH.is_file()
+    for optional_column in ("Price", "Quantity", "Quality", "Notes", "Location", "Category"):
+        assert optional_column in store_text
 
 
 def test_trade_listing_command_is_routed_to_trade_tools() -> None:

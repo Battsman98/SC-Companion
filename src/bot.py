@@ -159,6 +159,8 @@ TRADING_FORUM_TAGS = ("WTS", "WTB", "WTT")
 TRADING_GUIDE_TAG = "GUIDE"
 TRADING_STORE_TAG = "STORE"
 TRADE_STORE_SYNC_INTERVAL_SECONDS = 24 * 60 * 60
+MARKETPLACE_SHEET_SAMPLE_FILENAME = "marketplace-google-sheet-sample.png"
+MARKETPLACE_SHEET_SAMPLE_PATH = Path(__file__).with_name("assets") / MARKETPLACE_SHEET_SAMPLE_FILENAME
 HUB_PROTECTED_ROLE_NAMES = {VISITOR_ROLE_NAME, BOT_MANAGER_ROLE_NAME}
 HUB_RECOVERY_COOLDOWN_SECONDS = 10
 HUB_PERMANENT_MESSAGE_PREFIXES = (
@@ -418,10 +420,27 @@ def build_marketplace_store_guide_embed(command_channel_id: int | None = None) -
         color=discord.Color.from_rgb(155, 89, 182),
     )
     embed.add_field(
-        name="Google Sheets",
-        value=("• Add a view-only Google Sheets link in `sheet_url`.\n"
-               "• The bot checks the sheet for changes once per day.\n"
-               "• Use `/trade store-refresh` for an immediate update."),
+        name="Google Sheet — required setup",
+        value=("1. Put column names in the **first row** of the inventory tab.\n"
+               "2. Add at least one item under **Item Name**.\n"
+               "3. In Google Sheets, select **Share → General access → Anyone with the link → Viewer**.\n"
+               "4. Copy the link while the inventory tab is open and add it to `sheet_url`."),
+        inline=False,
+    )
+    embed.add_field(
+        name="Google Sheet — columns",
+        value=("**Required:** `Item Name`\n"
+               "**Optional:** `Price`, `Quantity`, `Quality`, `Notes`, `Location`, `Category`\n"
+               "Use one item per row. Blank rows are ignored. The sheet can contain up to 500 item rows and must "
+               "be under 2 MB."),
+        inline=False,
+    )
+    embed.add_field(
+        name="Google Sheet — example",
+        value=("`Item Name | Price | Quantity | Quality | Notes | Location | Category`\n"
+               "`FS-9 LMG | 500000 | 2 | 100% | Includes ammo | Area18 | Weapons`\n\n"
+               "Only **Item Name** is required; leave any optional cells blank. The live sheet is checked once per "
+               "day, or use `/trade store-refresh` to update it immediately."),
         inline=False,
     )
     embed.add_field(
@@ -440,6 +459,7 @@ def build_marketplace_store_guide_embed(command_channel_id: int | None = None) -
                "and attaches the uploaded workbook when one is used."),
         inline=False,
     )
+    embed.set_image(url=f"attachment://{MARKETPLACE_SHEET_SAMPLE_FILENAME}")
     return embed
 
 
@@ -2981,10 +3001,28 @@ class GameAssistBot(commands.Bot):
                 store_message = await thread.fetch_message(store_message_id)
         store_embed = build_marketplace_store_guide_embed(command_channel_id)
         if store_message is None:
-            store_message = await thread.send(embed=store_embed)
+            store_message = await thread.send(
+                embed=store_embed,
+                file=discord.File(MARKETPLACE_SHEET_SAMPLE_PATH, filename=MARKETPLACE_SHEET_SAMPLE_FILENAME),
+            )
             await self.cache.set(store_cache_key, store_message.id, 315360000)
         else:
-            await store_message.edit(embed=store_embed)
+            has_sample_image = any(
+                attachment.filename == MARKETPLACE_SHEET_SAMPLE_FILENAME
+                for attachment in store_message.attachments
+            )
+            if has_sample_image:
+                await store_message.edit(embed=store_embed)
+            else:
+                await store_message.edit(
+                    embed=store_embed,
+                    attachments=[
+                        discord.File(
+                            MARKETPLACE_SHEET_SAMPLE_PATH,
+                            filename=MARKETPLACE_SHEET_SAMPLE_FILENAME,
+                        )
+                    ],
+                )
         with suppress(discord.Forbidden, discord.HTTPException):
             await thread.edit(pinned=True, reason="Keep the marketplace guide visible")
 
