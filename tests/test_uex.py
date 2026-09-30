@@ -1312,6 +1312,28 @@ def test_item_category_is_supported_for_buyable_locator_categories() -> None:
     )
 
 
+def test_buyable_items_restore_ordnance_missing_from_cached_categories() -> None:
+    source = UEXSource.__new__(UEXSource)
+    source._buyable_items = None
+    source._get_item_categories = AsyncMock(return_value=[])
+    source._fetch_all_item_prices = AsyncMock(return_value=[
+        {"id_item": 100, "price_buy": 50},
+        {"id_item": 200, "price_buy": 75},
+    ])
+    ordnance = {
+        33: [{"id": 100, "name": "MSD-221 Missile Rack", "category": "Missile Racks"}],
+        34: [],
+        70: [{"id": 200, "name": "Colossus Bomb", "category": "Bombs"}],
+        90: [],
+    }
+    source._fetch_items_by_category = AsyncMock(side_effect=lambda category_id: ordnance[category_id])
+
+    results = asyncio.run(source._get_buyable_items())
+
+    assert [item["name"] for item in results] == ["Colossus Bomb", "MSD-221 Missile Rack"]
+    assert [call.args[0] for call in source._fetch_items_by_category.await_args_list] == [33, 34, 70, 90]
+
+
 def test_item_category_autocomplete_keeps_undersuits_in_default_choices() -> None:
     source = UEXSource.__new__(UEXSource)
     source._buyable_items = [
