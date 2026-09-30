@@ -6,6 +6,7 @@ from src.bot import (
     TRADING_FORUM_TAGS,
     TRADING_GUIDE_TAG,
     VISITOR_COMMAND_CHANNELS,
+    _is_marketplace_store_guide_message,
     _trade_listing_content,
     _trade_seller_terms,
     build_marketplace_guide_embed,
@@ -42,6 +43,25 @@ def test_marketplace_guide_explains_every_required_tag() -> None:
 
 def test_trade_listing_command_is_routed_to_trade_tools() -> None:
     assert VISITOR_COMMAND_CHANNELS["trade listing"] == "trade-tools"
+
+
+def test_store_guide_recovery_only_matches_bot_owned_messages() -> None:
+    bot_guide = SimpleNamespace(
+        author=SimpleNamespace(id=123),
+        embeds=[SimpleNamespace(title="Listing a player store")],
+    )
+    user_copy = SimpleNamespace(
+        author=SimpleNamespace(id=456),
+        embeds=[SimpleNamespace(title="Listing a player store")],
+    )
+    unrelated_bot_message = SimpleNamespace(
+        author=SimpleNamespace(id=123),
+        embeds=[SimpleNamespace(title="Another guide")],
+    )
+
+    assert _is_marketplace_store_guide_message(bot_guide, 123)
+    assert not _is_marketplace_store_guide_message(user_copy, 123)
+    assert not _is_marketplace_store_guide_message(unrelated_bot_message, 123)
 
 
 def test_trade_item_embed_includes_catalog_details_and_image() -> None:
