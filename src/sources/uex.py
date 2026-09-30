@@ -26,6 +26,12 @@ class UEXSource:
     name = "UEX"
     base_url = "https://api.uexcorp.uk/2.0"
     wiki_api_url = "https://api.star-citizen.wiki/api"
+    _ordnance_categories = (
+        {"id": 33, "section": "Vehicle Weapons", "name": "Missile Racks", "is_game_related": 1},
+        {"id": 34, "section": "Vehicle Weapons", "name": "Missiles", "is_game_related": 1},
+        {"id": 70, "section": "Vehicle Weapons", "name": "Bombs", "is_game_related": 1},
+        {"id": 90, "section": "Vehicle Weapons", "name": "Bomb Racks", "is_game_related": 1},
+    )
     # Patch 4.10 scan values verified against STARVEIN's in-game signature
     # reference. Ship-mined materials have a unique base signature. Ground
     # deposits use a size signature (3,000 FPS, 4,000 ROC).
@@ -784,6 +790,12 @@ class UEXSource:
             for row in await self._get_item_categories()
             if self._item_category_is_supported(row)
         ]
+        category_ids = {self._int_or_none(row.get("id")) for row in categories}
+        categories.extend(
+            dict(row)
+            for row in self._ordnance_categories
+            if self._int_or_none(row.get("id")) not in category_ids
+        )
         prices = await self._fetch_all_item_prices()
         buyable_ids = {
             self._int_or_none(row.get("id_item"))
