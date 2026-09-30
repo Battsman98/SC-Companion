@@ -3011,7 +3011,9 @@ class GameAssistBot(commands.Bot):
             if duplicate.id == store_message.id:
                 continue
             try:
-                await duplicate.delete(reason="Remove duplicate marketplace store guide")
+                # Thread history can yield PartialMessage objects, whose delete
+                # method does not accept an audit-log reason.
+                await duplicate.delete()
                 duplicate_count += 1
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 logging.warning("Could not remove duplicate marketplace store guide %s", duplicate.id)
