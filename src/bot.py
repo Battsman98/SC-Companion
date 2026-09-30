@@ -463,6 +463,16 @@ def build_marketplace_store_guide_embed(command_channel_id: int | None = None) -
     return embed
 
 
+def _is_marketplace_store_guide_message(message: object, bot_user_id: int | None) -> bool:
+    """Recognize only bot-owned store guide messages so recovery cannot remove user posts."""
+    if bot_user_id is None or getattr(getattr(message, "author", None), "id", None) != bot_user_id:
+        return False
+    return any(
+        getattr(embed, "title", None) == "Listing a player store"
+        for embed in getattr(message, "embeds", [])
+    )
+
+
 def build_trade_store_content(store: dict) -> str:
     uploaded = store.get("source_type") == "inventory_workbook"
     inventory_label = "Download the uploaded inventory workbook" if uploaded else "Open the live Google Sheet"
@@ -2999,13 +3009,29 @@ class GameAssistBot(commands.Bot):
         if isinstance(store_message_id, int):
             with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
                 store_message = await thread.fetch_message(store_message_id)
+        if store_message is not None and not _is_marketplace_store_guide_message(
+            store_message,
+            self.user.id if self.user is not None else None,
+        ):
+            store_message = None
+        store_messages = []
+        try:
+            async for candidate in thread.history(limit=None, oldest_first=True):
+                if _is_marketplace_store_guide_message(
+                    candidate,
+                    self.user.id if self.user is not None else None,
+                ):
+                    store_messages.append(candidate)
+        except (discord.Forbidden, discord.HTTPException):
+            logging.warning("Could not inspect marketplace store guides in thread %s", thread.id)
+        if store_messages:
+            store_message = min(store_messages, key=lambda candidate: candidate.id)
         store_embed = build_marketplace_store_guide_embed(command_channel_id)
         if store_message is None:
             store_message = await thread.send(
                 embed=store_embed,
                 file=discord.File(MARKETPLACE_SHEET_SAMPLE_PATH, filename=MARKETPLACE_SHEET_SAMPLE_FILENAME),
             )
-            await self.cache.set(store_cache_key, store_message.id, 315360000)
         else:
             has_sample_image = any(
                 attachment.filename == MARKETPLACE_SHEET_SAMPLE_FILENAME
@@ -3023,6 +3049,12 @@ class GameAssistBot(commands.Bot):
                         )
                     ],
                 )
+        await self.cache.set(store_cache_key, store_message.id, 315360000)
+        for duplicate in store_messages:
+            if duplicate.id == store_message.id:
+                continue
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await duplicate.delete(reason="Remove duplicate marketplace store guide")
         with suppress(discord.Forbidden, discord.HTTPException):
             await thread.edit(pinned=True, reason="Keep the marketplace guide visible")
 
