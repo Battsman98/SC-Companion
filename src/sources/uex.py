@@ -1573,6 +1573,7 @@ class UEXSource:
         return aliases.get(normalized_query, [normalized_query])
 
     def _item_category_label(self, value: object) -> str | None:
+        """Present ordnance and its mounting racks as one searchable category."""
         category = self._string_or_none(value)
         if category is None:
             return None
