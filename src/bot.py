@@ -1561,7 +1561,10 @@ class GameAssistBot(commands.Bot):
                 await channel.delete(reason="Remove retired SC Companion public-bot channel from Peep")
             await retired.delete(reason="Remove retired SC Companion public-bot category from Peep")
         # Peep owns all home-server resources. The public worker must never
-        # recreate channels or categories in this Discord after cleanup.
+        # recreate channels or categories in this Discord after cleanup. It
+        # does, however, remain responsible for maintaining messages that it
+        # authored in Peep's existing marketplace guide thread.
+        await self.sync_support_marketplace_store_guide(guild)
         return
 
     async def _ensure_about_panel(self, guild: discord.Guild) -> None:
@@ -2911,6 +2914,117 @@ class GameAssistBot(commands.Bot):
         if isinstance(forum, discord.ForumChannel):
             await self.configure_marketplace_forum(forum, int(trade["channel_id"]) if trade.get("channel_id") else None)
 
+    async def sync_support_marketplace_store_guide(self, guild: discord.Guild) -> None:
+        """Refresh only public-bot-owned store instructions in Peep's guide thread."""
+        configured = await self.cache.guild_bot_settings(guild.id)
+        if configured is None:
+            return
+        trade = normalize_module_settings(configured.get("modules")).get("trade_tools")
+        if not trade or not trade.get("enabled") or not trade.get("resource_channel_id"):
+            return
+        forum = guild.get_channel(int(trade["resource_channel_id"]))
+        if not isinstance(forum, discord.ForumChannel):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                fetched = await self.fetch_channel(int(trade["resource_channel_id"]))
+                forum = fetched if isinstance(fetched, discord.ForumChannel) else None
+        if not isinstance(forum, discord.ForumChannel):
+            return
+
+        guide_cache_key = f"guild:{guild.id}:marketplace-guide"
+        thread = None
+        thread_id = await self.cache.get(guide_cache_key)
+        if isinstance(thread_id, int):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                candidate = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
+                thread = candidate if isinstance(candidate, discord.Thread) else None
+        if thread is None:
+            thread = next(
+                (candidate for candidate in forum.threads if candidate.name == "How to Use the Trading Forum"),
+                None,
+            )
+        if thread is None:
+            logging.warning("Could not find Peep marketplace guide thread in forum %s", forum.id)
+            return
+
+        command_channel_id = int(trade["channel_id"]) if trade.get("channel_id") else None
+        await self.sync_marketplace_store_guide_message(
+            thread,
+            command_channel_id,
+            f"guild:{guild.id}:marketplace-guide:public-store-instructions",
+        )
+
+    async def sync_marketplace_store_guide_message(
+        self,
+        thread: discord.Thread,
+        command_channel_id: int | None,
+        store_cache_key: str,
+    ) -> None:
+        """Update one canonical store guide and remove this bot's duplicate copies."""
+        store_message_id = await self.cache.get(store_cache_key)
+        store_message = None
+        if isinstance(store_message_id, int):
+            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
+                store_message = await thread.fetch_message(store_message_id)
+        if store_message is not None and not _is_marketplace_store_guide_message(
+            store_message,
+            self.user.id if self.user is not None else None,
+        ):
+            store_message = None
+        store_messages = []
+        try:
+            async for candidate in thread.history(limit=None, oldest_first=True):
+                if _is_marketplace_store_guide_message(
+                    candidate,
+                    self.user.id if self.user is not None else None,
+                ):
+                    store_messages.append(candidate)
+        except (discord.Forbidden, discord.HTTPException):
+            logging.warning("Could not inspect marketplace store guides in thread %s", thread.id)
+        if store_messages:
+            store_message = min(store_messages, key=lambda candidate: candidate.id)
+        store_embed = build_marketplace_store_guide_embed(command_channel_id)
+        if store_message is None:
+            store_message = await thread.send(
+                embed=store_embed,
+                file=discord.File(MARKETPLACE_SHEET_SAMPLE_PATH, filename=MARKETPLACE_SHEET_SAMPLE_FILENAME),
+            )
+        else:
+            has_sample_image = any(
+                attachment.filename == MARKETPLACE_SHEET_SAMPLE_FILENAME
+                for attachment in store_message.attachments
+            )
+            if has_sample_image:
+                await store_message.edit(embed=store_embed)
+            else:
+                await store_message.edit(
+                    embed=store_embed,
+                    attachments=[
+                        discord.File(
+                            MARKETPLACE_SHEET_SAMPLE_PATH,
+                            filename=MARKETPLACE_SHEET_SAMPLE_FILENAME,
+                        )
+                    ],
+                )
+        await self.cache.set(store_cache_key, store_message.id, 315360000)
+        duplicate_count = 0
+        for duplicate in store_messages:
+            if duplicate.id == store_message.id:
+                continue
+            try:
+                await duplicate.delete(reason="Remove duplicate marketplace store guide")
+                duplicate_count += 1
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logging.warning("Could not remove duplicate marketplace store guide %s", duplicate.id)
+        with suppress(discord.Forbidden, discord.HTTPException):
+            await thread.edit(pinned=True, reason="Keep the marketplace guide visible")
+        logging.info(
+            "Updated marketplace store guide %s in guild %s thread %s; removed %s duplicate(s)",
+            store_message.id,
+            thread.guild.id,
+            thread.id,
+            duplicate_count,
+        )
+
     async def configure_marketplace_forum(
         self,
         channel: discord.ForumChannel,
@@ -3003,60 +3117,11 @@ class GameAssistBot(commands.Bot):
                 )
             starter = await thread.fetch_message(thread.id)
             await starter.edit(embed=embed)
-        store_cache_key = f"{cache_key}:store-instructions"
-        store_message_id = await self.cache.get(store_cache_key)
-        store_message = None
-        if isinstance(store_message_id, int):
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                store_message = await thread.fetch_message(store_message_id)
-        if store_message is not None and not _is_marketplace_store_guide_message(
-            store_message,
-            self.user.id if self.user is not None else None,
-        ):
-            store_message = None
-        store_messages = []
-        try:
-            async for candidate in thread.history(limit=None, oldest_first=True):
-                if _is_marketplace_store_guide_message(
-                    candidate,
-                    self.user.id if self.user is not None else None,
-                ):
-                    store_messages.append(candidate)
-        except (discord.Forbidden, discord.HTTPException):
-            logging.warning("Could not inspect marketplace store guides in thread %s", thread.id)
-        if store_messages:
-            store_message = min(store_messages, key=lambda candidate: candidate.id)
-        store_embed = build_marketplace_store_guide_embed(command_channel_id)
-        if store_message is None:
-            store_message = await thread.send(
-                embed=store_embed,
-                file=discord.File(MARKETPLACE_SHEET_SAMPLE_PATH, filename=MARKETPLACE_SHEET_SAMPLE_FILENAME),
-            )
-        else:
-            has_sample_image = any(
-                attachment.filename == MARKETPLACE_SHEET_SAMPLE_FILENAME
-                for attachment in store_message.attachments
-            )
-            if has_sample_image:
-                await store_message.edit(embed=store_embed)
-            else:
-                await store_message.edit(
-                    embed=store_embed,
-                    attachments=[
-                        discord.File(
-                            MARKETPLACE_SHEET_SAMPLE_PATH,
-                            filename=MARKETPLACE_SHEET_SAMPLE_FILENAME,
-                        )
-                    ],
-                )
-        await self.cache.set(store_cache_key, store_message.id, 315360000)
-        for duplicate in store_messages:
-            if duplicate.id == store_message.id:
-                continue
-            with suppress(discord.NotFound, discord.Forbidden, discord.HTTPException):
-                await duplicate.delete(reason="Remove duplicate marketplace store guide")
-        with suppress(discord.Forbidden, discord.HTTPException):
-            await thread.edit(pinned=True, reason="Keep the marketplace guide visible")
+        await self.sync_marketplace_store_guide_message(
+            thread,
+            command_channel_id,
+            f"{cache_key}:store-instructions",
+        )
 
     async def enrich_trading_post(self, thread: discord.Thread) -> None:
         if self.user is not None and thread.owner_id == self.user.id:
