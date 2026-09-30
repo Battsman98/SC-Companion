@@ -335,6 +335,8 @@ class UEXSource:
         values = []
         for row in items:
             value = self._string_or_none(row.get(key))
+            if filter_name == "category":
+                value = self._item_category_label(value)
             if value and value not in values:
                 values.append(value)
         values.sort(key=str.lower)
@@ -1549,7 +1551,9 @@ class UEXSource:
                 for query in normalized_queries
             ):
                 continue
-            if normalized_category and self._normalize(item.get("category")) != normalized_category:
+            if normalized_category and self._normalize(
+                self._item_category_label(item.get("category"))
+            ) != normalized_category:
                 continue
             if normalized_section and self._normalize(item.get("section")) != normalized_section:
                 continue
@@ -1568,6 +1572,15 @@ class UEXSource:
         }
         return aliases.get(normalized_query, [normalized_query])
 
+    def _item_category_label(self, value: object) -> str | None:
+        category = self._string_or_none(value)
+        if category is None:
+            return None
+        return {
+            "missile racks": "Missiles",
+            "bomb racks": "Bombs",
+        }.get(self._normalize(category), category)
+
     def _item_result(self, row: dict, purchases: list[ItemPurchaseLocation]) -> ItemLocatorResult:
         item_id = self._int_or_none(row.get("id")) or 0
         slug = self._string_or_none(row.get("slug")) or str(item_id)
@@ -1575,7 +1588,7 @@ class UEXSource:
             id=item_id,
             name=str(row.get("name") or "Unknown item"),
             section=self._string_or_none(row.get("section")),
-            category=self._string_or_none(row.get("category")),
+            category=self._item_category_label(row.get("category")),
             company_name=self._string_or_none(row.get("company_name")),
             size=self._string_or_none(row.get("size")),
             wiki_url=self._string_or_none(row.get("wiki")),

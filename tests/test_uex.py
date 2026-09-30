@@ -1328,6 +1328,19 @@ def test_item_category_autocomplete_keeps_undersuits_in_default_choices() -> Non
     ]
 
 
+def test_item_category_autocomplete_merges_ordnance_racks() -> None:
+    source = UEXSource.__new__(UEXSource)
+    source._buyable_items = [
+        {"category": "Missiles"},
+        {"category": "Missile Racks"},
+        {"category": "Bombs"},
+        {"category": "Bomb Racks"},
+    ]
+
+    assert asyncio.run(source.autocomplete_item_filter("category", "miss", limit=25)) == ["Missiles"]
+    assert asyncio.run(source.autocomplete_item_filter("category", "bomb", limit=25)) == ["Bombs"]
+
+
 def test_filter_items_matches_query_category_section_and_size() -> None:
     source = UEXSource.__new__(UEXSource)
     items = [
@@ -1350,6 +1363,21 @@ def test_filter_items_matches_query_category_section_and_size() -> None:
     assert source._filter_items(items, query="atlas", category="Quantum Drives", section="Systems", size="1") == [
         items[0]
     ]
+
+
+def test_filter_items_includes_ordnance_racks_in_parent_categories() -> None:
+    source = UEXSource.__new__(UEXSource)
+    items = [
+        {"name": "Arrow I", "category": "Missiles"},
+        {"name": "S1 MSD-221", "category": "Missile Racks"},
+        {"name": "Colossus", "category": "Bombs"},
+        {"name": "A2 Bomb Rack", "category": "Bomb Racks"},
+    ]
+
+    assert source._filter_items(items, category="Missiles") == items[:2]
+    assert source._filter_items(items, category="Bombs") == items[2:]
+    assert source._item_result(items[1], []).category == "Missiles"
+    assert source._item_result(items[3], []).category == "Bombs"
 
 
 def test_lookup_items_includes_purchase_locations() -> None:
