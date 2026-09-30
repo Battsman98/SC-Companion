@@ -634,7 +634,9 @@ class UEXSource:
         if category_id in self._items_by_category:
             return self._items_by_category[category_id]
 
-        cache_key = f"uex:items:category:{category_id}:v1"
+        ordnance_ids = {int(row["id"]) for row in self._ordnance_categories}
+        cache_version = "v2" if category_id in ordnance_ids else "v1"
+        cache_key = f"uex:items:category:{category_id}:{cache_version}"
         cached = await self._cache.get(cache_key)
         if isinstance(cached, list):
             self._items_by_category[category_id] = [row for row in cached if isinstance(row, dict)]

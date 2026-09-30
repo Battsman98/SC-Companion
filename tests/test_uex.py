@@ -1334,6 +1334,20 @@ def test_buyable_items_restore_ordnance_missing_from_cached_categories() -> None
     assert [call.args[0] for call in source._fetch_items_by_category.await_args_list] == [33, 34, 70, 90]
 
 
+def test_ordnance_item_categories_bypass_legacy_empty_caches() -> None:
+    source = UEXSource.__new__(UEXSource)
+    source._items_by_category = {}
+    source._cache = AsyncMock()
+    source._cache.get.return_value = None
+    source._fetch_json = AsyncMock(return_value={"data": []})
+
+    asyncio.run(source._fetch_items_by_category(33))
+    asyncio.run(source._fetch_items_by_category(1))
+
+    assert source._cache.get.await_args_list[0].args[0] == "uex:items:category:33:v2"
+    assert source._cache.get.await_args_list[1].args[0] == "uex:items:category:1:v1"
+
+
 def test_item_category_autocomplete_keeps_undersuits_in_default_choices() -> None:
     source = UEXSource.__new__(UEXSource)
     source._buyable_items = [
