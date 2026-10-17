@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 from pathlib import Path
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -34,8 +35,20 @@ def test_only_user_request_failures_trigger_hotfix_animation() -> None:
     application = (WEB_DIR / "app.js").read_text(encoding="utf-8")
     overlay = (WEB_DIR / "hotfix-overlay.js").read_text(encoding="utf-8")
 
-    assert 'src="/assets/app.js?v=20260917-reputation-save-v1-award-roles-v1-award-delete-v1-all-special-channels-v5-award-selection-v2-rep-panel-guide-v1-awards-layout-v3-rep-auto-v1"' in html
-    assert 'href="/assets/styles.css?v=20260917-all-special-channels-v5-awards-layout-v2"' in html
+    class ScriptSources(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sources: list[str] = []
+
+        def handle_starttag(self, tag, attrs) -> None:
+            if tag == "script":
+                self.sources.append(dict(attrs).get("src", ""))
+
+    scripts = ScriptSources()
+    scripts.feed(html)
+    # Cache versions change independently of hotfix behavior.
+    assert any(source.startswith("/assets/app.js?v=") and source.split("?v=", 1)[1]
+               for source in scripts.sources)
     assert 'function errorMessage(message) {\n  return `<div class="error">' in application
     assert 'function errorMessage(message) {\n  notifyPotentialHotfix();' not in application
     assert 'if (connectorCompleted)' in application
