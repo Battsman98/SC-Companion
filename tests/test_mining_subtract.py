@@ -7,9 +7,21 @@ import pytest
 
 from src import bot, web
 from src.cache import SQLiteCache
+from src import shared
+from src.sources.base import MiningLocationResult, MiningSystemLocations
 
 
 ENTRY = {"material": "Borase", "system": "Stanton", "location_type": "moons", "location": "Aberdeen"}
+
+
+def mining_result(material="Borase", locations=()):
+    return MiningLocationResult(
+        material_name=material, code="BORA", kind=None, refined_sell_price=None, raw_sell_price=None,
+        is_harvestable=False, is_volatile_qt=False, is_volatile_time=False, is_explosive=False,
+        systems=["Stanton"], lagrange_points=list(locations), planets=[], moons=[], points_of_interest=[],
+        source_url="https://example.com", source_name="UEX",
+        location_groups=[MiningSystemLocations("Stanton", list(locations), [], [], [])],
+    )
 
 
 def interaction_for(cache, *, authority=False, owner=True):
@@ -18,7 +30,7 @@ def interaction_for(cache, *, authority=False, owner=True):
     client.settings = SimpleNamespace(
         approval_authority=authority, bot_admin_user_ids=(42,) if owner else (), discord_guild_id=123,
     )
-    client.sources = SimpleNamespace(lookup_mining_material=AsyncMock(return_value=SimpleNamespace(material_name="Borase")))
+    client.sources = SimpleNamespace(lookup_mining_material=AsyncMock(return_value=mining_result()))
     client.log_audit_event = AsyncMock()
     return SimpleNamespace(
         client=client, user=SimpleNamespace(id=42), guild_id=123, channel_id=456,
@@ -124,6 +136,100 @@ def test_review_removes_only_on_approval(tmp_path, monkeypatch, interface, decis
             saved = await bot._community_mining_entries(cache)
             assert bool(saved) is (decision == "rejected")
             assert await cache.pending_review_requests() == []
+        finally:
+            await cache.close()
+    asyncio.run(run())
+
+
+def test_imported_location_correction_persists_without_mutating_source(tmp_path):
+    async def run():
+        path = str(tmp_path / "cache.sqlite")
+        cache = await SQLiteCache.create(path)
+        source = mining_result(locations=["MIC L3", "HUR L3"])
+        entry = {**ENTRY, "location_type": "lagrange_points", "location": "micl3"}
+        assert shared.find_mining_location(source, entry) == "MIC L3"
+        assert shared.find_mining_location(source, {**entry, "system": "Pyro"}) is None
+        assert shared.find_mining_location(source, {**entry, "location_type": "moons"}) is None
+        assert await shared.remove_mining_location(cache, entry)
+        assert not await shared.remove_mining_location(cache, entry)
+        await cache.close()
+        cache = await SQLiteCache.create(path)
+        try:
+            for apply in (bot.apply_community_mining_locations, web.apply_community_mining_locations):
+                corrected = await apply(cache, source)
+                assert corrected.lagrange_points == ["HUR L3"]
+                assert corrected.location_groups[0].lagrange_points == ["HUR L3"]
+            assert source.lagrange_points == ["MIC L3", "HUR L3"]
+            assert source.location_groups[0].lagrange_points == ["MIC L3", "HUR L3"]
+            gold = await bot.apply_community_mining_locations(cache, mining_result("Gold", ["MIC L3"]))
+            assert gold.lagrange_points == ["MIC L3"]
+            await bot.add_community_mining_location(cache, {**entry, "location": "MIC-L3"})
+            restored = await bot.apply_community_mining_locations(cache, source)
+            assert "MIC L3" in restored.lagrange_points
+            assert await shared._mining_exclusions(cache) == []
+        finally:
+            await cache.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("interface", ["discord", "website"])
+@pytest.mark.parametrize("decision", ["approved", "rejected"])
+def test_imported_location_command_queues_canonical_name_and_review_applies(tmp_path, monkeypatch, interface, decision):
+    monkeypatch.setattr(bot, "_can_manage_change_commands", lambda *_: True)
+    async def run():
+        cache = await SQLiteCache.create(str(tmp_path / "cache.sqlite"))
+        try:
+            source = mining_result(locations=["MIC L3", "HUR L3"])
+            interaction = interaction_for(cache)
+            interaction.client.sources.lookup_mining_material.return_value = source
+            await bot.miningsubtract_command.callback(
+                interaction, "BORA", "Stanton", discord.app_commands.Choice(name="Lagrange Point", value="lagrange_points"), "micl3",
+            )
+            review = (await cache.pending_review_requests())[0]
+            assert review["payload"]["location"] == "MIC L3"
+            assert await shared._mining_exclusions(cache) == []
+            if interface == "discord":
+                await bot.admin_review_command.callback(interaction, review["id"], discord.app_commands.Choice(name=decision, value=decision))
+            else:
+                monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache, settings=interaction.client.settings))
+                monkeypatch.setattr(web, "current_user_from_request", lambda *_: SimpleNamespace(id=42, username="Owner", display_name="Owner"))
+                await web.decide_global_review(review["id"], web.ReviewDecisionRequest(decision=decision), Mock())
+            corrected = await bot.apply_community_mining_locations(cache, source)
+            assert ("MIC L3" in corrected.lagrange_points) is (decision == "rejected")
+        finally:
+            await cache.close()
+    asyncio.run(run())
+
+
+def test_correction_keeps_same_named_location_in_other_system(tmp_path):
+    async def run():
+        cache = await SQLiteCache.create(str(tmp_path / "cache.sqlite"))
+        try:
+            source = mining_result(locations=["MIC L3"])
+            source.systems.append("Pyro")
+            source.location_groups.append(MiningSystemLocations("Pyro", ["MIC L3"], [], [], []))
+            await shared.remove_mining_location(cache, {**ENTRY, "location_type": "lagrange_points", "location": "MIC-L3"})
+            corrected = await shared.apply_community_mining_locations(cache, source)
+            assert corrected.systems == ["Pyro"]
+            assert corrected.lagrange_points == ["MIC L3"]
+            assert [group.system for group in corrected.location_groups] == ["Pyro"]
+        finally:
+            await cache.close()
+    asyncio.run(run())
+
+
+def test_website_multi_material_locations_respect_corrections(tmp_path, monkeypatch):
+    async def run():
+        cache = await SQLiteCache.create(str(tmp_path / "cache.sqlite"))
+        try:
+            await shared.remove_mining_location(cache, {**ENTRY, "location_type": "lagrange_points", "location": "MIC L3"})
+            source = SimpleNamespace(lookup_mining_material=AsyncMock(side_effect=[
+                mining_result("Borase", ["MIC L3", "HUR L3"]), mining_result("Gold", ["MIC L3"]),
+            ]))
+            monkeypatch.setattr(web, "state", lambda: SimpleNamespace(cache=cache, sources=source))
+            result = await web.multi_mining_signature_payload("Borase, Gold", ["Borase", "Gold"])
+            mic = next(item for item in result["ranked_locations"] if item["location"] == "MIC L3")
+            assert mic["materials"] == ["Gold"]
         finally:
             await cache.close()
     asyncio.run(run())

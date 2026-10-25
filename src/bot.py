@@ -16,7 +16,11 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
-from src.shared import _same_community_mining_location, remove_community_mining_location
+from src.shared import (
+    _same_community_mining_location, remove_community_mining_location,
+    add_community_mining_location, apply_community_mining_locations,
+    find_mining_location, remove_mining_location,
+)
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.reputation import (
@@ -5487,10 +5491,10 @@ async def miningadd_system_autocomplete(
     return await commodity_system_autocomplete(interaction, current)
 
 
-@app_commands.command(name="miningsubtract", description="Remove an incorrect community-reported mining location.")
+@app_commands.command(name="miningsubtract", description="Remove an incorrect mining location, including imported source locations.")
 @app_commands.describe(
     material="Mineable material name or code.",
-    system="Star system of the community report.",
+    system="Star system containing the incorrect location.",
     location_type="Type of location to remove.",
     location="Exact location name to remove, without the (Community) label.",
 )
@@ -5529,17 +5533,16 @@ async def miningsubtract_command(
         "location": location.strip(),
         "reported_by": str(interaction.user),
     }
-    entries = await _community_mining_entries(bot.cache)
-    if not any(
-        _same_community_mining_location(existing, entry)
-        for existing in entries.get(_normalize_text(result.material_name), [])
-    ):
+    result = await apply_community_mining_locations(bot.cache, result)
+    matched_location = find_mining_location(result, entry)
+    if matched_location is None:
         await interaction.followup.send(
-            "No matching community mining location was found. Check the material, system, location type, "
-            "and exact location name. This command removes locations added with `/miningadd`.",
+            "No matching mining location was found. Check the material, system, location type, "
+            "and location shown in `/mining` (for example, MIC L3).",
             ephemeral=True,
         )
         return
+    entry["location"] = matched_location
     if not bot.settings.approval_authority or interaction.user.id not in bot.settings.bot_admin_user_ids:
         review_id = await bot.cache.submit_review_request(
             "mining_subtract", entry, submitted_by=interaction.user.id, submitted_by_name=str(interaction.user),
@@ -5549,9 +5552,9 @@ async def miningsubtract_command(
             f"Mining removal request #{review_id} was sent to the central review queue.", ephemeral=True,
         )
         return
-    removed = await remove_community_mining_location(bot.cache, entry)
+    removed = await remove_mining_location(bot.cache, entry)
     if not removed:
-        await interaction.followup.send("That community mining location has already been removed.", ephemeral=True)
+        await interaction.followup.send("That mining location has already been removed.", ephemeral=True)
         return
     await bot.log_audit_event(
         "Mining Location Removed",
@@ -5566,7 +5569,7 @@ async def miningsubtract_command(
         color=discord.Color.orange(),
     )
     await interaction.followup.send(
-        f"Removed `{location.strip()}` from `{result.material_name}` community mining locations in `{system.strip()}`.",
+        f"Removed `{matched_location}` from `{result.material_name}` mining locations in `{system.strip()}`.",
         ephemeral=True,
     )
 
@@ -7912,7 +7915,7 @@ async def admin_review_command(interaction: discord.Interaction, request_id: int
     elif decision.value == "approved" and review["review_type"] == "mining":
         await add_community_mining_location(bot.cache, review["payload"])
     elif decision.value == "approved" and review["review_type"] == "mining_subtract":
-        await remove_community_mining_location(bot.cache, review["payload"])
+        await remove_mining_location(bot.cache, review["payload"])
     changed = await bot.cache.review_request(request_id, decision.value, interaction.user.id, str(interaction.user))
     await bot.log_audit_event("Central Review Completed", {"Request": request_id, "Decision": decision.name,
                                                              "Reviewer": _audit_user(interaction.user)})
@@ -9466,7 +9469,7 @@ def build_visitor_command_example_embeds() -> dict[str, discord.Embed]:
             "Example /mining Response",
             "/mining material: Quantanium",
             "Type `/mining`, select the `material` option, enter or choose `Quantanium`, then submit. Optional `system` and `planet` options narrow the results.",
-            (("Best locations", "Lyria · Aaron Halo · microTech moon belts"), ("Scan signature", "High-value volatile mineral; confirm cluster composition before extraction"), ("Handling", "Transport promptly after collection and monitor instability"), ("Community data", "Type `/miningadd`, then fill `material`, `system`, `location_type`, and `location` to submit a verified location. Use `/miningsubtract` with the same fields to remove an incorrect community report."), ("Industry tools", "Use `/industry split` for crew payouts, `/industry refinery` for completion times, or `/industry brief` for an operation brief.")),
+            (("Best locations", "Lyria · Aaron Halo · microTech moon belts"), ("Scan signature", "High-value volatile mineral; confirm cluster composition before extraction"), ("Handling", "Transport promptly after collection and monitor instability"), ("Community data", "Type `/miningadd`, then fill `material`, `system`, `location_type`, and `location` to submit a verified location. Use `/miningsubtract` with the same fields to remove an incorrect location, including imported data."), ("Industry tools", "Use `/industry split` for crew payouts, `/industry refinery` for completion times, or `/industry brief` for an operation brief.")),
         ),
         "blueprints": _visitor_example_embed(
             "Example Blueprint Response",
@@ -10958,99 +10961,6 @@ def _unique_preserve_order(values: list[str]) -> list[str]:
         seen.add(key)
         unique.append(value)
     return unique
-
-
-async def add_community_mining_location(cache: SQLiteCache, entry: dict) -> None:
-    entries = await _community_mining_entries(cache)
-    key = _normalize_text(entry.get("material"))
-    material_entries = entries.setdefault(key, [])
-    new_entry = {
-        "material": str(entry.get("material") or "").strip(),
-        "system": str(entry.get("system") or "").strip(),
-        "location_type": str(entry.get("location_type") or "").strip(),
-        "location": str(entry.get("location") or "").strip(),
-        "reported_by": str(entry.get("reported_by") or "").strip(),
-    }
-    duplicate = any(
-        _normalize_text(existing.get("system")) == _normalize_text(new_entry["system"])
-        and _normalize_text(existing.get("location_type")) == _normalize_text(new_entry["location_type"])
-        and _normalize_text(existing.get("location")) == _normalize_text(new_entry["location"])
-        for existing in material_entries
-        if isinstance(existing, dict)
-    )
-    if not duplicate:
-        material_entries.append(new_entry)
-    await cache.set(MINING_COMMUNITY_LOCATIONS_CACHE_KEY, entries, 315360000)
-
-
-async def apply_community_mining_locations(
-    cache: SQLiteCache,
-    result: MiningLocationResult,
-) -> MiningLocationResult:
-    entries = await _community_mining_entries(cache)
-    material_entries = entries.get(_normalize_text(result.material_name), [])
-    if not material_entries:
-        return result
-
-    groups_by_system: dict[str, MiningSystemLocations] = {
-        _normalize_text(group.system): group
-        for group in result.location_groups or []
-    }
-    groups = list(result.location_groups or [])
-    systems = list(result.systems)
-    lagrange_points = list(result.lagrange_points)
-    planets = list(result.planets)
-    moons = list(result.moons)
-    points_of_interest = list(result.points_of_interest)
-
-    for entry in material_entries:
-        if not isinstance(entry, dict):
-            continue
-        system = str(entry.get("system") or "").strip()
-        location_type = str(entry.get("location_type") or "").strip()
-        location = str(entry.get("location") or "").strip()
-        if not system or location_type not in _mining_location_type_labels() or not location:
-            continue
-
-        system_key = _normalize_text(system)
-        if system_key not in groups_by_system:
-            group = MiningSystemLocations(system=system, lagrange_points=[], planets=[], moons=[], points_of_interest=[])
-            groups_by_system[system_key] = group
-            groups.append(group)
-        group = groups_by_system[system_key]
-        _append_unique(getattr(group, location_type), f"{location} (Community)")
-        _append_unique(systems, system)
-        _append_unique(
-            {
-                "lagrange_points": lagrange_points,
-                "planets": planets,
-                "moons": moons,
-                "points_of_interest": points_of_interest,
-            }[location_type],
-            f"{location} (Community)",
-        )
-
-    return MiningLocationResult(
-        material_name=result.material_name,
-        code=result.code,
-        kind=result.kind,
-        refined_sell_price=result.refined_sell_price,
-        raw_sell_price=result.raw_sell_price,
-        is_harvestable=result.is_harvestable,
-        is_volatile_qt=result.is_volatile_qt,
-        is_volatile_time=result.is_volatile_time,
-        is_explosive=result.is_explosive,
-        systems=systems,
-        lagrange_points=lagrange_points,
-        planets=planets,
-        moons=moons,
-        points_of_interest=points_of_interest,
-        source_url=result.source_url,
-        source_name=result.source_name,
-        location_basis=result.location_basis,
-        rock_signatures=result.rock_signatures or [],
-        location_groups=groups,
-    )
 
 
 async def _community_mining_entries(cache: SQLiteCache) -> dict:

@@ -209,14 +209,15 @@ Example:
 
 ## `/miningsubtract`
 
-Removes an incorrect community location added through `/miningadd`. This command belongs to SC Companion's Mining Tools module and uses the same permissions and private replies as `/miningadd`.
+Removes an incorrect mining location, including imported UEX/Wiki locations and community reports. This command belongs to SC Companion's Mining Tools module and uses the same permissions and private replies as `/miningadd`.
 
-Provide `material`, `system`, `location_type`, and the exact `location` name, without the `(Community)` label. Matching ignores capitalization and surrounding spaces. Only that material/location combination is removed; imported source locations are unaffected.
+Provide `material`, `system`, `location_type`, and the `location` name. Matching ignores capitalization, spaces, punctuation, and the `(Community)` label: `micl3`, `MIC-L3`, and `MIC L3` match the same location. Only that material, system, and location type combination is hidden. Corrections persist across source refreshes and apply to both Discord and website results. Use `/miningadd` with the same fields to restore a location.
 
 Requests go to the central review queue unless the caller is a configured bot administrator on an approval-authority runtime. Approve or reject removal requests through the existing central review controls. A missing match leaves the data unchanged.
 
 ```text
 /miningsubtract material:Borase system:Stanton location_type:Moon location:Aberdeen
+/miningsubtract material:Borase system:Stanton location_type:Lagrange Point location:MIC L3
 ```
 
 ## `/blueprint`

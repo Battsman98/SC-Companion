@@ -34,7 +34,7 @@ from src.shared import (
     _shared_mining_signatures,
     _unique_preserve_order,
     add_community_mining_location,
-    remove_community_mining_location,
+    remove_mining_location,
     apply_community_mining_locations,
     get_cz_dashboard_timers,
 )
@@ -1981,7 +1981,7 @@ async def decide_global_review(review_id: int, payload: ReviewDecisionRequest, r
     if payload.decision == "approved" and review["review_type"] == "mining":
         await add_community_mining_location(state().cache, review["payload"])
     elif payload.decision == "approved" and review["review_type"] == "mining_subtract":
-        await remove_community_mining_location(state().cache, review["payload"])
+        await remove_mining_location(state().cache, review["payload"])
     elif payload.decision == "approved" and review["review_type"] == "timer":
         guild_id = review.get("origin_guild_id")
         key = f"{EXEC_OVERRIDE_CACHE_KEY}:guild:{guild_id}" if guild_id else EXEC_OVERRIDE_CACHE_KEY
@@ -3420,6 +3420,7 @@ async def multi_mining_signature_payload(query: str, terms: list[str]) -> dict[s
         if result is None:
             missing.append(term)
             continue
+        result = await apply_community_mining_locations(state().cache, result)
         results.append(
             {
                 "term": term,

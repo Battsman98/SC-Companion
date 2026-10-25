@@ -7,6 +7,8 @@ deploy without loading the other application's runtime.
 from __future__ import annotations
 
 import re
+from copy import deepcopy
+from dataclasses import replace
 
 from src.cache import SQLiteCache
 from src.sources.base import MiningLocationResult, MiningSystemLocations
@@ -15,6 +17,8 @@ from src.sources.base import MiningLocationResult, MiningSystemLocations
 CZ_TIMERS_CACHE_KEY = "cz:dashboard:timers"
 EXEC_OVERRIDE_CACHE_KEY = "exec:cycle-start-override"
 MINING_COMMUNITY_LOCATIONS_CACHE_KEY = "mining:community-locations:v1"
+MINING_EXCLUDED_LOCATIONS_CACHE_KEY = "mining:excluded-locations:v1"
+MINING_LOCATION_TYPES = ("lagrange_points", "planets", "moons", "points_of_interest")
 CZ_TIMER_DEFINITIONS = {
     "blue_keycard": ("Blue Keycards", 15 * 60),
     "compboard": ("Compboards / Tablets", 30 * 60),
@@ -88,6 +92,11 @@ async def _community_mining_entries(cache: SQLiteCache) -> dict:
 
 
 async def add_community_mining_location(cache: SQLiteCache, entry: dict) -> None:
+    # Adding a corrected report explicitly restores a previously hidden location.
+    exclusions = await _mining_exclusions(cache)
+    remaining = [item for item in exclusions if not _same_community_mining_location(item, entry)]
+    if len(remaining) != len(exclusions):
+        await cache.set(MINING_EXCLUDED_LOCATIONS_CACHE_KEY, remaining, 315360000)
     entries = await _community_mining_entries(cache)
     material_entries = entries.setdefault(_normalize_text(entry.get("material")), [])
     new_entry = {
@@ -107,8 +116,83 @@ async def add_community_mining_location(cache: SQLiteCache, entry: dict) -> None
 def _same_community_mining_location(existing: object, entry: dict) -> bool:
     return isinstance(existing, dict) and all(
         _normalize_text(existing.get(field)) == _normalize_text(entry.get(field))
-        for field in ("material", "system", "location_type", "location")
-    )
+        for field in ("material", "system", "location_type")
+    ) and _mining_location_key(existing.get("location")) == _mining_location_key(entry.get("location"))
+
+
+def _mining_location_key(value: object) -> str:
+    text = re.sub(r"\s*\(Community\)\s*$", "", str(value or ""), flags=re.IGNORECASE)
+    return re.sub(r"[^a-z0-9]", "", text.casefold())
+
+
+def find_mining_location(result: MiningLocationResult, entry: dict) -> str | None:
+    kind = entry.get("location_type")
+    if kind not in MINING_LOCATION_TYPES:
+        return None
+    groups = result.location_groups or []
+    locations = [location for group in groups
+                 if _normalize_text(group.system) == _normalize_text(entry.get("system"))
+                 for location in getattr(group, kind)]
+    if not groups and len(result.systems) == 1 and _normalize_text(result.systems[0]) == _normalize_text(entry.get("system")):
+        locations = getattr(result, kind)
+    for location in locations:
+        if _mining_location_key(location) == _mining_location_key(entry.get("location")):
+            return re.sub(r"\s*\(Community\)\s*$", "", location, flags=re.IGNORECASE).strip()
+    return None
+
+
+async def _mining_exclusions(cache: SQLiteCache) -> list[dict]:
+    entries = await cache.get(MINING_EXCLUDED_LOCATIONS_CACHE_KEY)
+    return [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+
+
+async def remove_mining_location(cache: SQLiteCache, entry: dict) -> bool:
+    """Persist a correction so upstream refreshes cannot reintroduce the location."""
+    if entry.get("location_type") not in MINING_LOCATION_TYPES or not all(
+        str(entry.get(field) or "").strip() for field in ("material", "system", "location")
+    ):
+        raise ValueError("A material, system, location type, and location are required.")
+    exclusions = await _mining_exclusions(cache)
+    added = not any(_same_community_mining_location(item, entry) for item in exclusions)
+    if added:
+        exclusions.append(dict(entry))
+        await cache.set(MINING_EXCLUDED_LOCATIONS_CACHE_KEY, exclusions, 315360000)
+    removed = await remove_community_mining_location(cache, entry)
+    return added or removed
+
+
+async def _apply_mining_exclusions(cache: SQLiteCache, result: MiningLocationResult) -> MiningLocationResult:
+    exclusions = [entry for entry in await _mining_exclusions(cache)
+                  if _normalize_text(entry.get("material")) == _normalize_text(result.material_name)]
+    if not exclusions:
+        return result
+    result = deepcopy(result)
+    groups = list(result.location_groups or [])
+    if not groups and len(result.systems) == 1:
+        groups = [MiningSystemLocations(system=result.systems[0], **{
+            kind: list(getattr(result, kind)) for kind in MINING_LOCATION_TYPES
+        })]
+    for entry in exclusions:
+        kind = entry.get("location_type")
+        if kind not in MINING_LOCATION_TYPES:
+            continue
+        key = _mining_location_key(entry.get("location"))
+        matched = False
+        for group in groups:
+            if _normalize_text(group.system) != _normalize_text(entry.get("system")):
+                continue
+            locations = getattr(group, kind)
+            remaining = [location for location in locations if _mining_location_key(location) != key]
+            matched = matched or len(remaining) != len(locations)
+            locations[:] = remaining
+        # Keep an aggregate location if another system still contains it.
+        if matched and not any(_mining_location_key(location) == key for group in groups for location in getattr(group, kind)):
+            locations = getattr(result, kind)
+            locations[:] = [location for location in locations if _mining_location_key(location) != key]
+    nonempty = [group for group in groups if any(getattr(group, kind) for kind in MINING_LOCATION_TYPES)]
+    emptied = {_normalize_text(group.system) for group in groups if group not in nonempty}
+    return replace(result, location_groups=nonempty,
+                   systems=[system for system in result.systems if _normalize_text(system) not in emptied])
 
 
 async def remove_community_mining_location(cache: SQLiteCache, entry: dict) -> bool:
@@ -137,9 +221,9 @@ async def apply_community_mining_locations(
     entries = await _community_mining_entries(cache)
     material_entries = entries.get(_normalize_text(result.material_name), [])
     if not material_entries:
-        return result
+        return await _apply_mining_exclusions(cache, result)
 
-    groups = list(result.location_groups or [])
+    groups = deepcopy(list(result.location_groups or []))
     groups_by_system = {_normalize_text(group.system): group for group in groups}
     systems, lagrange_points = list(result.systems), list(result.lagrange_points)
     planets, moons = list(result.planets), list(result.moons)
@@ -169,4 +253,4 @@ async def apply_community_mining_locations(
     values = dict(result.__dict__)
     values.update(systems=systems, lagrange_points=lagrange_points, planets=planets,
                   moons=moons, points_of_interest=points_of_interest, location_groups=groups)
-    return MiningLocationResult(**values)
+    return await _apply_mining_exclusions(cache, MiningLocationResult(**values))
