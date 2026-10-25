@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.shared import _same_community_mining_location, remove_community_mining_location
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.reputation import (
@@ -188,6 +189,7 @@ VISITOR_COMMAND_CHANNELS = {
     "trade routing": "trade-tools",
     "mining": "mining-tools",
     "miningadd": "mining-tools",
+    "miningsubtract": "mining-tools",
     "industry split": "mining-tools",
     "industry refinery": "mining-tools",
     "industry brief": "mining-tools",
@@ -1024,7 +1026,7 @@ class GameAssistBot(commands.Bot):
             self.add_view(MembershipReviewView())
         public_commands = (
             ship_command, commodity_command, mining_command, industry_group,
-            miningadd_command, blueprint_command, my_blueprints_command,
+            miningadd_command, miningsubtract_command, blueprint_command, my_blueprints_command,
             mission_command, wikelo_command, item_group, loot_group,
             inventory_group, exec_command, execset_command, execclear_command,
             cztimer_command, trade_group,
@@ -5485,6 +5487,104 @@ async def miningadd_system_autocomplete(
     return await commodity_system_autocomplete(interaction, current)
 
 
+@app_commands.command(name="miningsubtract", description="Remove an incorrect community-reported mining location.")
+@app_commands.describe(
+    material="Mineable material name or code.",
+    system="Star system of the community report.",
+    location_type="Type of location to remove.",
+    location="Exact location name to remove, without the (Community) label.",
+)
+@app_commands.choices(
+    location_type=[
+        app_commands.Choice(name="Lagrange Point", value="lagrange_points"),
+        app_commands.Choice(name="Planet", value="planets"),
+        app_commands.Choice(name="Moon", value="moons"),
+        app_commands.Choice(name="Point of Interest", value="points_of_interest"),
+    ]
+)
+async def miningsubtract_command(
+    interaction: discord.Interaction,
+    material: str,
+    system: str,
+    location_type: app_commands.Choice[str],
+    location: str,
+) -> None:
+    bot = interaction.client
+    if not isinstance(bot, GameAssistBot):
+        await interaction.response.send_message("Bot is not fully initialized.", ephemeral=True)
+        return
+    if not _can_manage_change_commands(interaction, bot.settings):
+        await interaction.response.send_message("You do not have permission to remove mining locations.", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    result = await bot.sources.lookup_mining_material(material)
+    if result is None:
+        await interaction.followup.send(f"No mining material found for `{material}`.", ephemeral=True)
+        return
+    entry = {
+        "material": result.material_name,
+        "system": system.strip(),
+        "location_type": location_type.value,
+        "location": location.strip(),
+        "reported_by": str(interaction.user),
+    }
+    entries = await _community_mining_entries(bot.cache)
+    if not any(
+        _same_community_mining_location(existing, entry)
+        for existing in entries.get(_normalize_text(result.material_name), [])
+    ):
+        await interaction.followup.send(
+            "No matching community mining location was found. Check the material, system, location type, "
+            "and exact location name. This command removes locations added with `/miningadd`.",
+            ephemeral=True,
+        )
+        return
+    if not bot.settings.approval_authority or interaction.user.id not in bot.settings.bot_admin_user_ids:
+        review_id = await bot.cache.submit_review_request(
+            "mining_subtract", entry, submitted_by=interaction.user.id, submitted_by_name=str(interaction.user),
+            origin_guild_id=interaction.guild_id, origin_channel_id=interaction.channel_id,
+        )
+        await interaction.followup.send(
+            f"Mining removal request #{review_id} was sent to the central review queue.", ephemeral=True,
+        )
+        return
+    removed = await remove_community_mining_location(bot.cache, entry)
+    if not removed:
+        await interaction.followup.send("That community mining location has already been removed.", ephemeral=True)
+        return
+    await bot.log_audit_event(
+        "Mining Location Removed",
+        {
+            "User": _audit_user(interaction.user),
+            "Channel": _audit_channel(interaction.channel_id),
+            "Material": result.material_name,
+            "System": system.strip(),
+            "Location Type": location_type.name,
+            "Location": location.strip(),
+        },
+        color=discord.Color.orange(),
+    )
+    await interaction.followup.send(
+        f"Removed `{location.strip()}` from `{result.material_name}` community mining locations in `{system.strip()}`.",
+        ephemeral=True,
+    )
+
+
+@miningsubtract_command.autocomplete("material")
+async def miningsubtract_material_autocomplete(
+    interaction: discord.Interaction, current: str,
+) -> list[app_commands.Choice[str]]:
+    return await mining_material_autocomplete(interaction, current)
+
+
+@miningsubtract_command.autocomplete("system")
+async def miningsubtract_system_autocomplete(
+    interaction: discord.Interaction, current: str,
+) -> list[app_commands.Choice[str]]:
+    return await commodity_system_autocomplete(interaction, current)
+
+
 class MiningLocationView(discord.ui.View):
     def __init__(
         self,
@@ -7811,6 +7911,8 @@ async def admin_review_command(interaction: discord.Interaction, request_id: int
         await bot.cache.set(exec_override_cache_key(review["origin_guild_id"]), review["payload"], 315360000)
     elif decision.value == "approved" and review["review_type"] == "mining":
         await add_community_mining_location(bot.cache, review["payload"])
+    elif decision.value == "approved" and review["review_type"] == "mining_subtract":
+        await remove_community_mining_location(bot.cache, review["payload"])
     changed = await bot.cache.review_request(request_id, decision.value, interaction.user.id, str(interaction.user))
     await bot.log_audit_event("Central Review Completed", {"Request": request_id, "Decision": decision.name,
                                                              "Reviewer": _audit_user(interaction.user)})
@@ -9364,7 +9466,7 @@ def build_visitor_command_example_embeds() -> dict[str, discord.Embed]:
             "Example /mining Response",
             "/mining material: Quantanium",
             "Type `/mining`, select the `material` option, enter or choose `Quantanium`, then submit. Optional `system` and `planet` options narrow the results.",
-            (("Best locations", "Lyria · Aaron Halo · microTech moon belts"), ("Scan signature", "High-value volatile mineral; confirm cluster composition before extraction"), ("Handling", "Transport promptly after collection and monitor instability"), ("Community data", "Type `/miningadd`, then fill `material`, `system`, `location_type`, and `location` to submit a verified location."), ("Industry tools", "Use `/industry split` for crew payouts, `/industry refinery` for completion times, or `/industry brief` for an operation brief.")),
+            (("Best locations", "Lyria · Aaron Halo · microTech moon belts"), ("Scan signature", "High-value volatile mineral; confirm cluster composition before extraction"), ("Handling", "Transport promptly after collection and monitor instability"), ("Community data", "Type `/miningadd`, then fill `material`, `system`, `location_type`, and `location` to submit a verified location. Use `/miningsubtract` with the same fields to remove an incorrect community report."), ("Industry tools", "Use `/industry split` for crew payouts, `/industry refinery` for completion times, or `/industry brief` for an operation brief.")),
         ),
         "blueprints": _visitor_example_embed(
             "Example Blueprint Response",

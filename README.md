@@ -48,7 +48,7 @@ On startup, the bot also creates private `website-changelog` and `discord-change
 
 Every command-focused channel in the Discord Bot Hub also receives a durable example embed showing the command syntax and representative response data. These examples are refreshed on startup without duplicating posts. In the Executive Hangar and Contested Zone channels, the example appears first and the live auto-updating dashboard is posted directly below it. The bot automatically removes a duplicate legacy `Visitor Bot Hub`, preserving unique channels by moving them into `Discord Bot Hub` and deleting only duplicate managed channels.
 
-The Discord Bot Hub is the sole public command area. On startup, known bot-managed text channels under the `Star Citizen` category are removed, while unrelated discussion channels are preserved. Each public command is accepted only in its associated Hub channel; for example, `/ship` is limited to `ship-search`, trade commands to `trade-tools`, and `/mining` plus `/miningadd` to `mining-tools`.
+The Discord Bot Hub is the sole public command area. On startup, known bot-managed text channels under the `Star Citizen` category are removed, while unrelated discussion channels are preserved. Each public command is accepted only in its associated Hub channel; for example, `/ship` is limited to `ship-search`, trade commands to `trade-tools`, and `/mining`, `/miningadd`, plus `/miningsubtract` to `mining-tools`.
 
 The `@everyone` role can view and interact with the bot throughout `Discord Bot Hub`, including its text, thread, forum, and voice features. Individual slash commands remain restricted to their associated Hub channels.
 
@@ -58,7 +58,7 @@ Set `UEX_API_TOKEN` to the bearer token from your registered UEX API application
 
 Set `EXEC_STATUS_CHANNEL_ID` in `.env` to have the bot keep a public Executive Hangar status message updated every 60 seconds.
 
-Set comma-separated `EXEC_ADMIN_ROLE_IDS` in `.env` to restrict change commands to specific Discord roles. This includes `/execset`, `/execclear`, and `/miningadd`.
+Set comma-separated `EXEC_ADMIN_ROLE_IDS` in `.env` to restrict change commands to specific Discord roles. This includes `/execset`, `/execclear`, `/miningadd`, and `/miningsubtract`.
 
 Set comma-separated `BOT_ADMIN_ROLE_IDS` and/or `BOT_ADMIN_USER_IDS` in `.env` to restrict bot management and audit commands. This includes `/admin channels`, `/admin health`, and `/audit recent`. If no admin role IDs or user IDs are configured, users with Manage Server can use those commands.
 

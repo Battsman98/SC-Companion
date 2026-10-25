@@ -207,6 +207,18 @@ Example:
 /miningadd material:Borase system:Stanton location_type:Moon location:Aberdeen
 ```
 
+## `/miningsubtract`
+
+Removes an incorrect community location added through `/miningadd`. This command belongs to SC Companion's Mining Tools module and uses the same permissions and private replies as `/miningadd`.
+
+Provide `material`, `system`, `location_type`, and the exact `location` name, without the `(Community)` label. Matching ignores capitalization and surrounding spaces. Only that material/location combination is removed; imported source locations are unaffected.
+
+Requests go to the central review queue unless the caller is a configured bot administrator on an approval-authority runtime. Approve or reject removal requests through the existing central review controls. A missing match leaves the data unchanged.
+
+```text
+/miningsubtract material:Borase system:Stanton location_type:Moon location:Aberdeen
+```
+
 ## `/blueprint`
 
 Searches Star Citizen crafting blueprints using SC Craft Tools data.

@@ -47,7 +47,7 @@ def test_mining_tools_are_visible_and_complete() -> None:
     mining = BOT_MODULES["mining_tools"]
     assert mining["label"] == "Mining Tools"
     assert set(mining["commands"]) == {
-        "mining", "miningadd", "industry split", "industry refinery", "industry brief"
+        "mining", "miningadd", "miningsubtract", "industry split", "industry refinery", "industry brief"
     }
 
 

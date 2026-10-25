@@ -12,7 +12,7 @@ BOT_MODULES: Final[dict[str, dict[str, object]]] = {
     "mining_tools": {
         "label": "Mining Tools",
         "description": "Mining lookup, community locations, and industry planning.",
-        "commands": ("mining", "miningadd", "industry split", "industry refinery", "industry brief"),
+        "commands": ("mining", "miningadd", "miningsubtract", "industry split", "industry refinery", "industry brief"),
     },
     "blueprints": {
         "label": "Blueprints",

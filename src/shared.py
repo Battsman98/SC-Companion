@@ -104,6 +104,28 @@ async def add_community_mining_location(cache: SQLiteCache, entry: dict) -> None
     await cache.set(MINING_COMMUNITY_LOCATIONS_CACHE_KEY, entries, 315360000)
 
 
+def _same_community_mining_location(existing: object, entry: dict) -> bool:
+    return isinstance(existing, dict) and all(
+        _normalize_text(existing.get(field)) == _normalize_text(entry.get(field))
+        for field in ("material", "system", "location_type", "location")
+    )
+
+
+async def remove_community_mining_location(cache: SQLiteCache, entry: dict) -> bool:
+    entries = await _community_mining_entries(cache)
+    key = _normalize_text(entry.get("material"))
+    material_entries = entries.get(key, [])
+    remaining = [existing for existing in material_entries if not _same_community_mining_location(existing, entry)]
+    if len(remaining) == len(material_entries):
+        return False
+    if remaining:
+        entries[key] = remaining
+    else:
+        entries.pop(key, None)
+    await cache.set(MINING_COMMUNITY_LOCATIONS_CACHE_KEY, entries, 315360000)
+    return True
+
+
 def _append_unique(values: list[str], value: str) -> None:
     if all(_normalize_text(existing) != _normalize_text(value) for existing in values):
         values.append(value)
