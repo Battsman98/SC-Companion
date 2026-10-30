@@ -7,7 +7,7 @@ const {chromium}=require(process.env.CCU_PLAYWRIGHT_PATH || 'playwright');
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(process.env.CCU_LIVE_URL || 'https://sccompanion.org/',{waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>document.querySelector('#ccuWorkspace form[data-ccu=ship]'),{},{timeout:20000});
-  await page.getByRole('button',{name:'Ships',exact:true}).click();
+  await page.locator('button[data-tab="lookup"]').click();
   await page.getByRole('button',{name:'CCU Planner',exact:true}).click();
   const form=page.locator('#ccuWorkspace form[data-ccu=ship]');
   await form.locator('[name=name]').fill('Guest smoke test');
