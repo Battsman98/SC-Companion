@@ -41,13 +41,18 @@
       busy = false; root.removeAttribute('aria-busy');root.querySelectorAll('button').forEach(b => b.disabled = false);
     }
   }
-  async function save(next) {
+  async function save(next, {preserveGoal = true} = {}) {
     plan = await request('/api/ccu/validate', 'POST', next);
     dirty = true;
-    render(); announce('Draft updated for this page session. Use Save to account to keep it. Costs are USD before tax and fees.');
+    render({preserveGoal}); announce('Draft updated for this page session. Use Save to account to keep it. Costs are USD before tax and fees.');
   }
   const remove = (kind, id) => `<button type="button" data-edit="${kind}" data-id="${esc(id)}">Edit</button> <button type="button" data-remove="${kind}" data-id="${esc(id)}">Remove</button>`;
-  function render() {
+  function render({preserveGoal = true} = {}) {
+    const goalForm = workspace.querySelector('form[data-ccu="goal"]');
+    const goalDraft = preserveGoal && goalForm && {
+      editId: goalForm.dataset.editId,
+      controls: [...goalForm.elements].filter(c=>c.name).map(c=>({name:c.name,value:c.value,checked:c.checked}))
+    };
     const openSections = [...workspace.querySelectorAll(':scope > details')].map(d=>d.open);
     workspace.hidden = false;
     const reserved = id => plan.goals.filter(g => g.reserved_base === id || g.reserved_ccus.includes(id)).map(g=>g.target).join(', ');
@@ -89,11 +94,19 @@
       ${g.saved_path?.length?`<p>Saved route: ${g.saved_path.map(esc).join(' → ')}. Find routes again to refresh costs.</p>`:''}<div data-results="${esc(g.id)}"></div></article>`).join('') || '<p>Enter a goal ship above to build your first chain. Base ship and owned CCUs can stay blank.</p>'}</div>
       <p>All gap and candidate costs are estimates, not live offers. Reservations protect individual bases and CCUs across goals. A re-import does not erase your planner.</p>`;
     workspace.querySelectorAll(':scope > details').forEach((d,i)=>{if(openSections[i]!==undefined)d.open=openSections[i];});
+    if(goalDraft && (!goalDraft.editId || plan.goals.some(g=>g.id===goalDraft.editId))){
+      const form=workspace.querySelector('form[data-ccu="goal"]');
+      for(const saved of goalDraft.controls){
+        const control=form.elements.namedItem(saved.name);
+        if(control.type==='checkbox')control.checked=saved.checked;else control.value=saved.value;
+      }
+      if(goalDraft.editId){form.dataset.editId=goalDraft.editId;form.querySelector('button').textContent='Save changes';}
+    }
   }
   async function load() {
     if (dirty && !confirm('Replace your current unsaved draft with your saved account plan?')) return;
     const [data, hangar] = await Promise.all([request('/api/me/ccu'),request('/api/me/ships')]);
-    plan = data; dirty = false; imported = hangar.filter(s=>s.ownership_type==='pledged');render();announce('Account planner loaded. Changes stay in this page until you save.');
+    plan = data; dirty = false; imported = hangar.filter(s=>s.ownership_type==='pledged');render({preserveGoal:false});announce('Account planner loaded. Changes stay in this page until you save.');
   }
   document.querySelector('#ccuReload').addEventListener('click',()=>action(load));
   document.querySelector('#ccuSave').addEventListener('click',()=>action(async()=>{
@@ -140,7 +153,7 @@
         }
       }
       if(form.dataset.ccu==='goal')next.goals.push({...previous,id:editId||uid(),target:d.target,base_id:d.base_id,lti_only:!!d.lti_only,reserved_base:'',reserved_ccus:[],saved_path:[]});
-      await save(next);
+      await save(next,{preserveGoal:form.dataset.ccu!=='goal'});
       if(form.dataset.ccu==='goal')await showRoutes(next.goals.at(-1).id);
       if(['deals','history'].includes(form.dataset.ccu)&&next.goals.length)await showRoutes(next.goals.at(-1).id);
     });

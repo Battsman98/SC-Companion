@@ -1,7 +1,7 @@
 const {chromium}=require(process.env.CCU_PLAYWRIGHT_PATH || 'playwright');
 const fs=require('node:fs');
 const {execFileSync}=require('node:child_process');
-let fixtureMarket={};
+let fixtureMarket={offers:[],historical:[]};
 function backend(body,goal){
  return JSON.parse(execFileSync(process.env.CCU_PYTHON||'python',['-c','import json,sys; from src.ccu_planner import Planner,find_routes; d=json.load(sys.stdin); p=Planner.model_validate(d["plan"]); print(json.dumps({"routes":find_routes(p,d["goal"],d["market"])} if d["goal"] else p.model_dump()))'],{input:JSON.stringify({plan:body,goal,market:fixtureMarket}),encoding:'utf8',env:{...process.env,PYTHONIOENCODING:'utf-8'}}));
 }
@@ -35,7 +35,18 @@ function backend(body,goal){
  });
  await page.goto('http://localhost/');
  const goal=page.locator('form[data-ccu=goal]');
- await goal.locator('[name=target]').fill('Mako');await goal.getByRole('button').click();
+ await goal.locator('[name=target]').fill('Mako');
+ await goal.locator('[name=base_ship]').fill('Dragonfly Black');
+ await goal.locator('[name=lti_only]').check();
+ await page.getByText('Warbond savings',{exact:true}).click();
+ await page.getByRole('button',{name:'Review deal catalogue',exact:true}).click();
+ await page.getByText('Deal catalogue refreshed.',{exact:false}).waitFor();
+ await page.getByRole('button',{name:'Apply deal preferences',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('#ccuPlanner').hasAttribute('aria-busy'));
+ if(await goal.locator('[name=target]').inputValue()!=='Mako'||await goal.locator('[name=base_ship]').inputValue()!=='Dragonfly Black'||!await goal.locator('[name=lti_only]').isChecked())throw Error('Option update erased goal draft');
+ await goal.locator('[name=base_ship]').fill('');await goal.locator('[name=lti_only]').uncheck();
+ await page.getByText('Warbond savings',{exact:true}).click();
+ await goal.getByRole('button').click();
  await page.getByText('Standalone purchase baseline',{exact:false}).first().waitFor();
  if(plan.bases.length||plan.upgrades.length||plan.goals.length!==1||plan.ships[0].value!==95||saves)throw Error('Goal-only planning failed');
  await page.getByRole('button',{name:'Reserve this base and listed CCUs'}).first().click();
@@ -161,6 +172,14 @@ function backend(body,goal){
  await page.getByRole('button',{name:'Reserve this base and listed CCUs'}).first().click();
  await page.getByText(/Reserved in this draft/).waitFor();
  if(plan.goals[0].reserved_ccus.length)throw Error('Market offers reserved as owned copies');
+ await page.locator('[data-edit="goals"]').first().click();
+ const editingId=await goal.getAttribute('data-edit-id');
+ await page.getByRole('button',{name:'Apply deal preferences',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('#ccuPlanner').hasAttribute('aria-busy'));
+ if(await goal.getAttribute('data-edit-id')!==editingId||await goal.locator('[name=target]').inputValue()!=='Mako')throw Error('Option update lost goal editing state');
+ await goal.getByRole('button',{name:'Save changes',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('#ccuPlanner').hasAttribute('aria-busy'));
+ if(plan.goals.length!==1)throw Error('Preserved edit created duplicate goal');
  await page.locator('[data-find]').first().click();
  await page.getByText('Active warbond · new cash required',{exact:false}).first().waitFor();
  if(errors.length)throw Error(errors.join('\n'));
