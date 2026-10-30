@@ -15,7 +15,7 @@ def sample():
         bases=[dict(id='b',ship='Base',label='Pack ship 2',lti=True,cost=35)],
         upgrades=[dict(id='c',source='Base',target='Middle',cost=10),
                   dict(id='deal',source='Middle',target='Target',status='candidate',cost=20)],
-        goals=[dict(id='g',target='Target')]))
+        goals=[dict(id='g',target='Target',lti_only=True)]))
 
 
 def test_goal_only_and_unknown_value_draft():
@@ -140,3 +140,76 @@ def test_guest_routes_validate_without_storage_or_login(monkeypatch):
     monkeypatch.setattr(web, 'state', lambda: SimpleNamespace(settings=None))
     monkeypatch.setattr(web, 'current_user_from_request', lambda request, settings: None)
     assert client.put('/api/me/ccu', json=sample().model_dump()).status_code == 401
+
+
+def test_default_goal_needs_no_base_or_inventory():
+    p=Planner(ships=[dict(name='Target',value=200)],goals=[dict(id='g',target='Target')])
+    assert find_routes(p,'g')[0]['additional']==200
+
+
+def test_copy_protection_loaners_and_missing_inventory():
+    p=sample();p.upgrades[0].protected=True
+    assert all(e['id']!='c' for r in find_routes(p,'g') for e in r['steps'])
+    p.bases[0].protected=True
+    assert find_routes(p,'g')==[]
+    p.bases[0].protected=False;p.bases[0].ownership='loaner'
+    assert find_routes(p,'g')==[]
+    p.bases[0].ownership='pledged';p.bases[0].import_missing=True
+    assert find_routes(p,'g')==[]
+
+
+def test_locked_excluded_and_alternative_steps():
+    p=sample();g=p.goals[0]
+    g.locked_steps=['ccu:c','ccu:deal']
+    r=find_routes(p,'g')[0]
+    assert [e['id'] for e in r['steps']]==['c','deal']
+    assert not any(e['target']=='Target' for e in r['steps'][0]['alternatives'])
+    g.excluded_steps=['ccu:c']
+    assert find_routes(p,'g')==[]  # conflicts do not silently discard a lock
+    g.locked_steps=[]
+    assert all(e['id']!='c' for r in find_routes(p,'g') for e in r['steps'])
+    g.locked_steps=['gap:Base→Middle']
+    assert find_routes(p,'g')[0]['steps'][0]['status']=='gap'
+
+
+def test_lock_does_not_override_another_goal_or_protection():
+    p=sample();p.goals[0].locked_steps=['ccu:c']
+    p.goals.append(p.goals[0].model_copy(update={'id':'other','reserved_ccus':['c']}))
+    assert find_routes(p,'g')==[]
+    p.goals.pop();p.upgrades[0].protected=True
+    assert find_routes(p,'g')==[]
+
+
+def test_rsi_and_package_values_never_substitute_actual_paid():
+    p=sample();p.bases[0].cost=None;p.bases[0].package_id='two-pack';p.bases[0].package_value=100
+    p.bases[0].pledge_value=100;p.bases[0].melt_value=80
+    p.upgrades[0].cost=None;p.upgrades[0].pledge_value=60;p.upgrades[0].melt_value=5
+    route=find_routes(p,'g')[0]
+    assert route['total'] is None and route['savings'] is None
+    assert route['additional']==20 and route['known_cost']==20
+    assert route['steps'][0]['remaining']==20 and route['steps'][1]['remaining']==0
+    assert route['steps'][0]['pledge_value']==60
+
+
+def test_objectives_distinguish_paid_from_remaining_spend():
+    p=sample();p.upgrades[0].cost=150
+    routes={r['mode']:r for r in find_routes(p,'g')}
+    assert routes['cash']['additional']==20 and routes['cash']['total']==205
+    assert routes['total']['additional']==80 and routes['total']['total']==115
+
+
+def test_all_offered_replacements_can_reach_goal_with_other_locks():
+    p=sample();p.goals[0].locked_steps=['ccu:deal']
+    for route in find_routes(p,'g'):
+        for step in route['steps']:
+            for alternative in step['alternatives']:
+                proposal=p.model_copy(deep=True)
+                proposal.goals[0].locked_steps=[k for k in p.goals[0].locked_steps if k!=step['key']]+[alternative['key']]
+                assert find_routes(proposal,'g')
+
+
+def test_stable_import_id_cannot_create_extra_copies():
+    p=sample();p.upgrades[0].import_id='rsi-ccu:123';p.upgrades[0].import_identity='stable'
+    p.upgrades.append(p.upgrades[0].model_copy(update={'id':'different-planner-id'}))
+    with pytest.raises(ValidationError, match='stable RSI item'):
+        Planner.model_validate(p.model_dump())
