@@ -9,20 +9,12 @@ def test_rsi_connector_reports_paginated_scan_progress() -> None:
     content = (EXTENSION_DIR / "content.js").read_text(encoding="utf-8")
     manifest = (EXTENSION_DIR / "manifest.json").read_text(encoding="utf-8")
 
-    assert '"version": "0.5.0"' in manifest
-    assert "function pledgePageCount(pageHTML)" in background
-    assert "return [...extractTypedItemShips(pageHTML)]" in background
-    assert "function importDiagnostics(scannedPages, pageCount, typedCandidates)" in background
-    assert 'parser_version: "typed-items-v2"' in background
+    assert '"version": "0.6.0"' in manifest
+    assert 'parser_version: "structured-inventory-v1"' in background
     assert "markup_fingerprint: fnv1a(structure)" in background
-    assert "shipLinks" not in background
-    assert "containedShips" not in background
-    assert "(?:Standalone Ship|Game Package|Package)" not in background
-    assert "(?:ship|vehicle)" in background
-    assert "Promise.all(remainingPages.map" in background
     assert "const controller = new AbortController()" in background
     assert "setTimeout(() => controller.abort(), 20000)" in background
-    assert "reportProgress({ page: completedPages, totalPages, candidates: candidates.size })" in background
+    assert 'phase:"scanning"' in background
     assert 'direction: "from-game-assist-rsi-progress"' in background
     assert 'message.requestId = event.data.requestId' in content
     assert 'message?.direction !== "from-game-assist-rsi-progress"' in content
@@ -32,12 +24,21 @@ def test_rsi_connector_has_firefox_manifest_and_compatible_messaging() -> None:
     background = (EXTENSION_DIR / "background.js").read_text(encoding="utf-8")
     manifest = (EXTENSION_DIR / "manifest.firefox.json").read_text(encoding="utf-8")
 
-    assert '"scripts": ["background.js"]' in manifest
+    import json
+    assert json.loads(manifest)["background"]["scripts"] == ["inventory.js", "background.js"]
     assert '"browser_specific_settings"' in manifest
     assert '"id": "rsi-hangar-importer@sccompanion.org"' in manifest
     assert '"strict_min_version": "109.0"' in manifest
-    assert '"required": ["none"]' in manifest
+    assert json.loads(manifest)["browser_specific_settings"]["gecko"]["data_collection_permissions"]["required"] == ["none"]
     assert "service_worker" not in manifest
     assert "() => void chrome.runtime.lastError" in background
     assert ".sendMessage(sender.tab.id" in background
     assert ").catch(() => {})" not in background
+
+
+def test_inventory_behavior_suite() -> None:
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    assert node, "Node.js is required for the importer behavioral tests"
+    subprocess.run([node, "--test", "tests/rsi_inventory.test.cjs"], cwd=EXTENSION_DIR.parents[1], check=True)

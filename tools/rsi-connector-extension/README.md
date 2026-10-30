@@ -1,50 +1,57 @@
-# Game Assist RSI Hangar Importer
+# RSI Hangar Importer 0.6.0
 
-This optional local browser extension lets the Game Assist website import ships and vehicles from your RSI pledge hangar without downloading HTML files manually. The website rejects upgrades, CCUs, paints, equipment, flair, and other non-vehicle extras.
+Reads RSI My Hangar locally using the browser's existing login session. Unofficial
+fan extension; not affiliated with, endorsed or authorized by CIG/RSI.
 
-This is an unofficial fan-made extension. It is not affiliated with, endorsed by, sponsored by, or authorized by Cloud Imperium Games or Roberts Space Industries, and it does not claim authorization from either company.
+## Install and preview
 
-It only runs on:
+Chrome/Edge: extract web/rsi-connector-extension-v0.6.0.zip, enable Developer mode
+on the Extensions page, and Load unpacked from the extracted folder.
+Firefox: load web/rsi-connector-extension-firefox-v0.6.0.zip using Load Temporary
+Add-on in about:debugging#/runtime/this-firefox. Temporary installations disappear
+when Firefox closes; permanent installation requires Mozilla signing.
 
-- `https://sccompanion.org/*`
-- `https://star-citizen-game-assist.onrender.com/*`
-- `http://127.0.0.1:8000/*`
-- `http://localhost:8000/*`
+Sign into RSI in the same browser. Open the extension popup, select Preview RSI
+inventory, then Read RSI hangar. Review packages, current ships, individual CCUs,
+insurance and unknown fields. Download normalized JSON if desired. Load a previous
+export from the same RSI account to compare added, changed, missing and uncertain
+records. No planner changes are applied here.
 
-It fetches:
+Existing SC Companion import buttons remain compatible. New consumers can request
+importInventory. See docs/rsi-inventory-contract.md for the versioned boundary and
+reconciliation helpers. Planner integration is a separate change.
 
-- `https://robertsspaceindustries.com/account/pledges`
+## Limits
 
-using your existing browser RSI login session. It does not ask for, display, store, or send your RSI password or cookie value to the website.
+- Stable CCU IDs come from the observed Apply upgrade control. Populated pledge ID
+  inputs are used when available. Empty IDs and child ship IDs remain uncertain.
+- Package membership and current ships remain separate. Galaxy and Paladin in the
+  Dragonfly two-pack are not two purchases. Package values must be summed once.
+- Insurance terms are package evidence. RSI pledge/melt amounts remain unknown
+  until a verified monetary adapter exists. Manual actual-paid costs stay separate.
+- Buybacks and loaner entitlements are not collected. Unknown ownership is never an
+  eligible upgrade base. Navigation links do not establish ownership or buybacks.
+- Up to three concurrent requests and 25 pages. Failures, unknown markup and
+  truncation produce incomplete previews. Legacy imports fail closed.
+- Comparisons never delete, reserve, release or reassign planner items. Switching
+  RSI accounts requires a new baseline; account identity is not collected.
 
-## Install in Chrome or Edge
+## Privacy
 
-1. Open `chrome://extensions` or `edge://extensions`.
-2. Turn on Developer mode.
-3. Choose `Load unpacked`.
-4. Select this folder:
+GET requests only to https://robertsspaceindustries.com/account/pledges and its
+pagination using the local browser session. No cookies, credentials, authenticated
+HTML, billing details, coupon codes or unrelated account data leave the extension.
+Normalized data contains inventory titles, identities, package relationships,
+insurance and scan diagnostics. Local preview sends nothing to SC Companion.
+Inventory is not stored automatically.
 
-   `C:\Users\1121b\OneDrive\Documents\Website\tools\rsi-connector-extension`
+The bridge allows https://sccompanion.org,
+https://star-citizen-game-assist.onrender.com, and localhost/127.0.0.1 port 8000.
+The extension's own preview page is additionally allowed.
 
-5. Sign into RSI in the same browser.
-6. Open [SC Companion](https://sccompanion.org/).
-7. Click `Ships`, then `Import RSI Hangar`.
+## Validation and packaging
 
-## Install in Firefox
-
-Use the packaged Firefox ZIP from `web/rsi-connector-extension-firefox-v0.4.9.zip`:
-
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Choose `Load Temporary Add-on`.
-3. Select the Firefox ZIP.
-4. Sign into RSI in the same Firefox profile.
-5. Open [SC Companion](https://sccompanion.org/), click `Ships`, then `Import RSI Hangar`.
-
-Temporary add-ons are removed when Firefox closes. A permanent installation requires a Mozilla-signed package.
-
-Version 0.4.9 reports pledge-page scan progress, imports only RSI items explicitly typed as ships or vehicles, and sends privacy-safe parser health metrics and a structural fingerprint to SC Companion.
-
-
-## CCU Planner import (0.5.0)
-
-In Ships > CCU Planner > Owned CCUs, click Import owned CCUs from RSI. This optional action reads explicit unapplied upgrade titles on paginated My Hangar pages. It sends only source/target ship names and generated copy identifiers. It does not import buybacks, prices, actual pledge identifiers, or full page HTML. Repeating an import adds only new generated copies and does not remove existing planner entries. Review changed inventory manually after applying or melting upgrades. Sign into RSI in the same browser; Discord is only needed to save the planner. Update unpacked installations by loading the extracted 0.5.0 folder and reloading the website.
+Run node --test tests/rsi_inventory.test.cjs and
+py -3 -m pytest tests/test_rsi_connector_extension.py from the repository root.
+Run py -3 scripts/package_rsi_connector.py to rebuild both ZIPs. The script checks
+version agreement, shared helper equality and every packaged source file.

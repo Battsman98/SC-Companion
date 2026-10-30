@@ -1,3 +1,5 @@
+if (typeof importScripts === "function") importScripts("inventory.js");
+
 async function rsiHTMLGet(url) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
@@ -13,10 +15,10 @@ async function rsiHTMLGet(url) {
       },
       signal: controller.signal
     });
+    return { code: response.status, payload: await response.text(), url: response.url };
   } finally {
     clearTimeout(timeoutId);
   }
-  return { code: response.status, payload: await response.text(), url: response.url };
 }
 
 function cleanShipName(value) {
@@ -99,8 +101,8 @@ function importDiagnostics(scannedPages, pageCount, typedCandidates) {
   const orderedPages = [...scannedPages].sort((left, right) => left.page - right.page);
   const structure = pageStructure(orderedPages.map((item) => item.payload).join(""));
   return {
-    connector_version: "0.4.9",
-    parser_version: "typed-items-v2",
+    connector_version: "0.6.0",
+    parser_version: "structured-inventory-v1",
     page_count: pageCount,
     scanned_pages: orderedPages.length,
     pledge_count: orderedPages.reduce(
@@ -112,72 +114,66 @@ function importDiagnostics(scannedPages, pageCount, typedCandidates) {
   };
 }
 
-async function importHangar(reportProgress = () => {}, ccusOnly = false) {
+async function importHangar(reportProgress = () => {}, ccusOnly = false, structured = false) {
+  const scanId = crypto.randomUUID();
+  const scannedPages = [], failedPages = [];
+  let totalPages = 1, truncated = false, completed = 0;
   const candidates = new Set();
-  let finalURL = "";
-  let firstPageHTML = "";
-  let response;
-  try {
-    response = await rsiHTMLGet("https://robertsspaceindustries.com/account/pledges");
-  } catch (_error) {
-    return { code: 504, error: "RSI pledge page 1 timed out. Reload RSI and try again." };
-  }
-  finalURL = response.url || finalURL;
-  firstPageHTML = response.payload;
-  if (response.code !== 200) {
-    return { code: response.code, error: "RSI did not return pledge page 1. Confirm that you are signed in." };
-  }
-  for (const name of extractShipCandidates(response.payload)) candidates.add(name);
-  const totalPages = Math.max(1, pledgePageCount(response.payload));
-  const scannedPages = [{ page: 1, payload: response.payload }];
-  reportProgress({ page: 1, totalPages, candidates: candidates.size });
-
-  let completedPages = 1;
-  const remainingPages = Array.from({ length: totalPages - 1 }, (_, index) => index + 2);
-  const pageResults = await Promise.all(remainingPages.map(async (page) => {
-    try {
-      const pageResponse = await rsiHTMLGet(`https://robertsspaceindustries.com/account/pledges?page=${page}`);
-      if (pageResponse.code !== 200) {
-        return { page, error: `RSI returned ${pageResponse.code} for pledge page ${page}.` };
-      }
-      for (const name of extractShipCandidates(pageResponse.payload)) candidates.add(name);
-      completedPages += 1;
-      reportProgress({ page: completedPages, totalPages, candidates: candidates.size });
-      return { page, payload: pageResponse.payload };
-    } catch (_error) {
-      return { page, error: `RSI pledge page ${page} timed out.` };
+  const fetchPage = async page => {
+    let response;
+    try { response = await rsiHTMLGet("https://robertsspaceindustries.com/account/pledges" + (page > 1 ? "?page=" + page : "")); }
+    catch (_) { failedPages.push({page, reason:"timeout-or-network"}); return; }
+    let url;
+    try { url = new URL(response.url); } catch (_) {}
+    if (response.code !== 200 || !url || url.hostname !== "robertsspaceindustries.com" || !/\/account\/pledges\/?$/.test(url.pathname)) {
+      failedPages.push({page, reason:response.code === 200 ? "sign-in-or-unexpected-page" : "http-" + response.code}); return;
+    }
+    if (page === 1) {
+      const requested = [...response.payload.matchAll(/[?&](?:amp;)?page=(\d+)/gi)].map(m=>Number(m[1]));
+      const advertised = Math.max(1, ...requested);
+      totalPages = Math.min(25, advertised); truncated = advertised > totalPages;
+    }
+    if (scannedPages.some(p=>p.payload === response.payload)) {
+      failedPages.push({page,reason:"repeated-page-content"}); return;
+    }
+    scannedPages.push({page, payload:response.payload});
+    const parsed = RSIInventory.parsePage(response.payload, page, scanId);
+    for (const item of parsed.items) if ((item.kind === "ship" || item.kind === "vehicle") && item.ownership === "owned") candidates.add(item.name);
+  };
+  await fetchPage(1);
+  completed++;
+  reportProgress({phase:"scanning", page:completed, totalPages, candidates:candidates.size, failedPages:failedPages.length});
+  if (!scannedPages.length) return {code:failedPages[0]?.reason === "sign-in-or-unexpected-page" ? 401 : 504, error:"RSI hangar could not be read. Sign into RSI and retry.", failed_pages:failedPages};
+  // Bounded concurrency avoids a burst of 24 authenticated requests.
+  let nextPage = 2;
+  await Promise.all(Array.from({length:Math.min(3,totalPages-1)}, async () => {
+    while (nextPage <= totalPages) {
+      const page = nextPage++;
+      await fetchPage(page); completed++;
+      reportProgress({phase:"scanning", page:completed, totalPages, candidates:candidates.size, failedPages:failedPages.length});
     }
   }));
-  const failedPage = pageResults.find((result) => result.error);
-  scannedPages.push(...pageResults.filter((result) => result.payload));
-  const diagnostics = importDiagnostics(scannedPages, totalPages, candidates.size);
-  if (failedPage) {
-    return { code: 504, error: `${failedPage.error} Reload RSI and try again.`, diagnostics };
-  }
+  scannedPages.sort((a,b)=>a.page-b.page);
+  const inventory = RSIInventory.normalize(scannedPages, {expected_pages:totalPages, scanned_pages:scannedPages.map(p=>p.page), failed_pages:failedPages,
+    truncated, complete:!truncated && !failedPages.length}, scanId);
+  const diagnostics = importDiagnostics(scannedPages,totalPages,candidates.size);
+  const preview = RSIInventory.preview(null,inventory);
+  const result = {code:inventory.sync.complete ? 200 : 206, inventory, preview, diagnostics};
+  reportProgress({phase:"preview", page:completed, totalPages, records:inventory.items.length, complete:inventory.sync.complete});
+  if (structured) return result;
+  if (!inventory.sync.complete) return {...result, code:504, error:"The hangar scan is incomplete. No legacy import was applied; review the partial inventory or retry."};
   if (ccusOnly) {
-    const signedOut = /(?:sign in|log in|login)/i.test(finalURL) || /(?:sign in|log in to your account)/i.test(firstPageHTML);
-    if(signedOut)return {code:401,error:"Sign into RSI in this browser, then try again."};
-    const counts = new Map(), upgrades = [];
-    for(const page of scannedPages.sort((a,b)=>a.page-b.page)) {
-      for(const item of extractCCUs(page.payload)) {
-        const key = item.source + " to " + item.target;
-        const copy = (counts.get(key)||0)+1; counts.set(key,copy);
-        upgrades.push({...item,id:"rsi-ccu:"+fnv1a(key)+":"+copy});
-      }
-    }
-    return {code:200,upgrades};
-  }
-  if (!candidates.size) {
-    const signedOut = /(?:sign in|log in|login)/i.test(finalURL) || /(?:sign in|log in to your account)/i.test(firstPageHTML);
-    return {
-      code: 422,
-      error: signedOut
-        ? "RSI redirected to sign-in. Sign into RSI in this browser profile, then try again."
-        : "RSI returned the hangar page, but no ship records were recognized. Reload the extension and report this message so the parser can be updated.",
-      diagnostics,
-    };
-  }
-  return { code: 200, candidates: [...candidates].sort((a, b) => a.localeCompare(b)), diagnostics };
+    const counts = new Map();
+    // Keep pre-v1 legacy IDs for old consumers. V1 consumers use inventory.items.
+    result.upgrades = inventory.items.filter(r=>r.kind === "ccu" && r.ownership === "owned").map(item => {
+      const source = cleanShipName(item.source_ship), target = cleanShipName(item.target_ship);
+      if (!source || !target) return null;
+      const key = source + " to " + target;
+      const copy = (counts.get(key)||0)+1; counts.set(key,copy);
+      return {source, target, id:"rsi-ccu:"+fnv1a(key)+":"+copy};
+    }).filter(Boolean);
+  } else result.candidates = [...candidates].sort((a,b)=>a.localeCompare(b));
+  return result;
 }
 
 const ALLOWED_WEBSITE_ORIGINS = new Set([
@@ -195,7 +191,8 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
     sendResponse(JSON.stringify({ code: 403, error: "Unrecognized website origin." }));
     return false;
   }
-  if (!ALLOWED_WEBSITE_ORIGINS.has(senderOrigin)) {
+  const localPreview = sender.url === chrome.runtime.getURL("preview.html");
+  if (!localPreview && !ALLOWED_WEBSITE_ORIGINS.has(senderOrigin)) {
     sendResponse(JSON.stringify({ code: 403, error: "Website origin is not allowed." }));
     return false;
   }
@@ -222,8 +219,9 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
 async function handleMessage(rawMessage, reportProgress = () => {}) {
   const message = JSON.parse(rawMessage || "{}");
   if (message.action === "connect") {
-    return { code: 200, version: "0.5.0", scope: "ships-vehicles-and-optional-ccus" };
+    return { code: 200, version: "0.6.0", scope: "ships-vehicles-and-optional-ccus", inventory_schema_version: 1 };
   }
+  if (message.action === "importInventory") return await importHangar(reportProgress, false, true);
   if (message.action === "importCCUs") return await importHangar(reportProgress, true);
   if (message.action === "importHangar") {
     return await importHangar(reportProgress);

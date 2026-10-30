@@ -1,0 +1,5 @@
+:root {color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#09141e;color:#eef5fa}
+main {max-width:960px;margin:40px auto;padding:0 24px} h1,h2 {color:#76d9f4}
+button,input {font:inherit} button {background:#76d9f4;color:#09141e;padding:10px 18px;border:0;border-radius:6px;cursor:pointer}
+label {display:block;margin:20px 0} a {color:#76d9f4} article {border:1px solid #365061;border-radius:8px;margin:16px 0;padding:18px}
+article h2 {font-size:18px;margin:0 0 8px} li {margin:8px 0} #status {padding:16px;background:#172b39} small {color:#c1d3df}
