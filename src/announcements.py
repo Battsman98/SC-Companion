@@ -54,10 +54,20 @@ class AnnouncementStore:
 
 
 def permitted(interaction):
+    return denial_reason(interaction) is None
+
+
+def denial_reason(interaction):
     settings = interaction.client.settings
-    return bool(settings.runtime_profile == "public" and settings.award_test_guild_id
-                and interaction.guild_id == settings.award_test_guild_id
-                and interaction.user.id in settings.bot_admin_user_ids)
+    if settings.runtime_profile != "public":
+        return "Use SC Companion for announcements, not Peep."
+    if not settings.award_test_guild_id or interaction.guild_id != settings.award_test_guild_id:
+        return "Announcements are available only in the configured testing Discord."
+    guild = getattr(interaction, "guild", None)
+    if (guild is not None and guild.owner_id == interaction.user.id
+            or interaction.user.id in settings.bot_admin_user_ids):
+        return None
+    return "Only the testing-server owner or a configured bot admin can manage announcements."
 
 
 def preview(draft):
@@ -71,7 +81,7 @@ class Announcements(app_commands.Group):
     async def interaction_check(self, interaction):
         if permitted(interaction):
             return True
-        await interaction.response.send_message("Only configured bot admins can manage announcements in the testing Discord.", ephemeral=True)
+        await interaction.response.send_message(denial_reason(interaction), ephemeral=True)
         return False
 
 

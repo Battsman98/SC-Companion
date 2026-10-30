@@ -2,7 +2,7 @@
 
 SC Companion can publish approved feature/project starts and completions. There is no deployment or startup posting hook. Creating a draft never sends a public announcement.
 
-This pilot registers `/announcement` only in `AWARD_TEST_GUILD_ID`, the existing testing Discord. Every command also checks the public runtime, that guild, and `BOT_ADMIN_USER_IDS`. Peep and other servers do not receive the commands. General server administrators cannot approve announcements unless explicitly listed as bot admins.
+This pilot registers `/announcement` only in `AWARD_TEST_GUILD_ID`, the existing testing Discord. Every command also checks the public runtime and that guild, then permits the testing-server owner or an account listed in `BOT_ADMIN_USER_IDS`. Peep and other servers do not receive the commands. Other server administrators cannot approve announcements unless explicitly listed as bot admins.
 
 1. Run `/announcement channel` to create/find `development-announcements`, or use an existing text/announcement channel.
 2. Run `/announcement draft`, selecting the destination, project name, started/completed stage, and public-facing update text.

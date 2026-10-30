@@ -6,7 +6,23 @@ from unittest.mock import AsyncMock, Mock
 import discord
 import pytest
 
-from src.announcements import AnnouncementStore, announcement_group, approve_command, permitted
+from src.announcements import AnnouncementStore, announcement_group, approve_command, permitted, denial_reason
+
+
+@pytest.mark.parametrize('profile,guild_id,owner_id,expected', [
+    ('public', 1, 4, True), ('public', 1, 5, False),
+    ('public', 2, 4, False), ('peep', 1, 4, False),
+])
+def test_testing_owner_with_empty_admin_configuration(profile, guild_id, owner_id, expected):
+    interaction = SimpleNamespace(
+        client=SimpleNamespace(settings=SimpleNamespace(runtime_profile=profile, award_test_guild_id=1, bot_admin_user_ids=())),
+        guild_id=guild_id, guild=SimpleNamespace(owner_id=owner_id),
+        user=SimpleNamespace(id=4), response=SimpleNamespace(send_message=AsyncMock()))
+    assert permitted(interaction) is expected
+    assert asyncio.run(announcement_group.interaction_check(interaction)) is expected
+    if not expected:
+        assert denial_reason(interaction)
+        interaction.response.send_message.assert_awaited_once_with(denial_reason(interaction), ephemeral=True)
 
 
 def test_drafts_survive_restart_and_claim_once(tmp_path):

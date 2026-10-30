@@ -16,7 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
-from src.announcements import announcement_group, permitted as announcement_permitted
+from src.announcements import announcement_group, permitted as announcement_permitted, denial_reason as announcement_denial_reason
 from src.shared import (
     _same_community_mining_location, remove_community_mining_location,
     add_community_mining_location, apply_community_mining_locations,
@@ -579,7 +579,7 @@ class GameAssistCommandTree(app_commands.CommandTree):
         if command_name.startswith("announcement "):
             if announcement_permitted(interaction):
                 return True
-            await interaction.response.send_message("Announcements are restricted to configured bot admins in the testing Discord.", ephemeral=True)
+            await interaction.response.send_message(announcement_denial_reason(interaction), ephemeral=True)
             return False
         configured = await bot.cache.guild_bot_settings(interaction.guild_id)
         is_primary_guild = interaction.guild_id == bot.settings.discord_guild_id
