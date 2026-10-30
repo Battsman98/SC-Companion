@@ -122,12 +122,9 @@ async def ensure_development_panel(bot, guild):
         saved["channel_id"] = channel.id
         await bot.cache.set(key, saved, 315360000)
         embed = discord.Embed(title="Development Announcements", description=(
-            "Approved SC Companion project starts and completed features appear here.\n\n"
-            "**Central broadcasts:** Opt in with `/development subscription`, choosing this channel. "
-            "The owner drafts and approves central updates using Peep’s `/broadcast` commands in its home Discord. "
-            "Use subscription with enabled=False to opt out.\n\n"
-            "Deployments never approve project announcements automatically."), color=0x3498DB)
-        embed.set_footer(text="SC Companion • Development announcement setup")
+            "News and updates about SC Companion, including upcoming features, "
+            "improvements, and completed projects."), color=0x3498DB)
+        embed.set_footer(text="SC Companion • Development Announcements")
         message = None
         if saved.get("panel_message_id"):
             try:
@@ -136,7 +133,7 @@ async def ensure_development_panel(bot, guild):
                 pass
         if message is None:
             async for candidate in channel.history(limit=100):
-                if candidate.author.id == bot.user.id and candidate.embeds and candidate.embeds[0].footer.text == embed.footer.text:
+                if candidate.author.id == bot.user.id and candidate.embeds and candidate.embeds[0].footer.text in {embed.footer.text, "SC Companion • Development announcement setup"}:
                     message = candidate
                     break
         if message is None:
@@ -145,7 +142,15 @@ async def ensure_development_panel(bot, guild):
             await message.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
         else:
             raise ValueError("Saved panel belongs to another application; no message was changed.")
-        saved.update(panel_message_id=message.id, requested=False, error=None)
+        # Complete the existing testing pilot without enabling other servers or undoing opt-outs.
+        if guild.id == bot.settings.award_test_guild_id:
+            from src.broadcast_store import BroadcastStore
+            db = BroadcastStore(bot.cache._connection)
+            db.db.execute("""INSERT INTO development_subscriptions
+                (guild_id,channel_id,enabled,updated_by) VALUES (?,?,1,?)
+                ON CONFLICT(guild_id) DO NOTHING""", (guild.id,channel.id,bot.user.id))
+            db.db.commit()
+        saved.update(panel_message_id=message.id, panel_version=2, requested=False, error=None)
         await bot.cache.set(key, saved, 315360000)
         return channel
 

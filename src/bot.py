@@ -1544,7 +1544,7 @@ class GameAssistBot(commands.Bot):
                     continue
                 if self.settings.runtime_profile == "public" and destination_available(self.settings, guild.id):
                     development = await self.cache.get(f"guild:{guild.id}:development-announcements") or {}
-                    if development.get("requested"):
+                    if development.get("requested") or (development.get("channel_id") and development.get("panel_version", 0) < 2):
                         try:
                             await ensure_development_panel(self, guild)
                         except Exception:
