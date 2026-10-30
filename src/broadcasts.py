@@ -68,13 +68,13 @@ async def review_command(interaction: discord.Interaction, draft_id: str):
         return
     receipts = db.db.execute('SELECT guild_id,state,message_id,error FROM development_deliveries WHERE broadcast_id=?', (draft_id,)).fetchall()
     status = '\n'.join(f'{guild}: {state}' + (f' (message {message})' if message else '') + (f' — {error}' if error else '') for guild,state,message,error in receipts)
-    await interaction.response.send_message(f"Status: {draft['state']}\n{destinations(draft)}\n{status}"[:1900], embed=preview(draft), ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
+    await interaction.response.send_message(f"Status: {draft['state']}\n{destinations(draft)}\n{status}"[:1900], embed=preview(draft), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 @broadcast_group.command(name='pending', description='List recent broadcasts, including drafts and approved deliveries.')
 async def pending_command(interaction: discord.Interaction):
     rows = store(interaction).db.execute('SELECT id,project,state FROM development_broadcasts WHERE source_guild_id=? ORDER BY created_at DESC LIMIT 12', (interaction.guild_id,)).fetchall()
-    await interaction.response.send_message('\n'.join(f'`{key}` — {project[:60]} ({state})' for key,project,state in rows) or 'No broadcasts.', ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
+    await interaction.response.send_message('\n'.join(f'`{key}` — {project[:60]} ({state})' for key,project,state in rows) or 'No broadcasts.', ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 @broadcast_group.command(name='approve', description='Review a saved announcement and submit it.')
@@ -86,7 +86,7 @@ async def approve_command(interaction: discord.Interaction):
 @broadcast_group.command(name='reject', description='Discard an unapproved broadcast.')
 async def reject_command(interaction: discord.Interaction, draft_id: str):
     changed = store(interaction).decide(interaction.guild_id, draft_id, 'rejected', interaction.user.id)
-    await interaction.response.send_message('Draft rejected.' if changed else 'No pending draft with that ID.', ephemeral=not changed)
+    await interaction.response.send_message('Draft rejected.' if changed else 'No pending draft with that ID.', ephemeral=True)
 
 
 async def deliver_broadcasts(bot):

@@ -12,7 +12,7 @@ Choose **Opt In to Broadcasts** in the setup response, or use `/development subs
 
 Peep creates `development-announcements` under the existing **audit log** category on startup. `/broadcast channel` repairs it. It copies the category's viewer overwrites, denies @everyone visibility, and grants the owner and Peep access. Other audit viewers have read-only access. Discord Administrator permissions still bypass channel overwrites, but the bot enforces owner-only broadcast commands even for administrators.
 
-All broadcast operations except channel setup must run in this private workspace. Draft previews, approval/rejection notices, and requested delivery reviews are visible to its authorized readers. Re-run `/broadcast channel` after changing audit-category roles to apply the current access rules.
+All broadcast operations except channel setup must run in this private workspace. Draft previews, approval/rejection notices, and requested delivery reviews are private, dismissible responses to the owner. The main Draft/Approve panel stays visible to authorized channel readers. Dismissing a response does not discard its saved draft or retract a submitted announcement. Re-run `/broadcast channel` after changing audit-category roles to apply the current access rules.
 
 ## Draft and approve in Peep
 

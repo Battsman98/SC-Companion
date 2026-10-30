@@ -36,7 +36,7 @@ class DraftModal(discord.ui.Modal, title='Draft announcement'):
             await interaction.response.send_message(str(error), ephemeral=True)
             return
         await interaction.response.send_message('Draft saved. Click **Approve** to review and submit.',
-            embed=preview(db.get(interaction.guild_id, key)), allowed_mentions=discord.AllowedMentions.none())
+            embed=preview(db.get(interaction.guild_id, key)), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 class SubmitView(OwnerView):
@@ -69,7 +69,7 @@ async def show_review(interaction, key):
         await interaction.response.send_message('That draft is no longer available.', ephemeral=True)
         return
     await interaction.response.send_message('Review your announcement below. Nothing is sent until you click **Submit announcement**.\n\n'
-        + destinations(draft), embed=preview(draft), view=SubmitView(key), allowed_mentions=discord.AllowedMentions.none())
+        + destinations(draft), embed=preview(draft), view=SubmitView(key), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 class DraftSelect(discord.ui.Select):

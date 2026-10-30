@@ -35,10 +35,12 @@ def test_single_text_draft_requires_review_and_explicit_submission():
         assert len(modal.children)==1
         modal.announcement._value='Here is exactly what I want to announce.'
         await modal.on_submit(i)
+        assert i.response.send_message.await_args.kwargs["ephemeral"] is True
         key,state,body=db.db.execute('SELECT id,state,body FROM development_broadcasts').fetchone()
         assert state=='draft'
         assert body==str(modal.announcement)
         await choose_draft(i)
+        assert i.response.send_message.await_args.kwargs["ephemeral"] is True
         view=i.response.send_message.await_args.kwargs['view']
         assert isinstance(view,SubmitView)
         assert db.get(9,key)['state']=='draft'
