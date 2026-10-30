@@ -1251,6 +1251,13 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
     modules = normalize_module_settings(stored.get("modules") if stored else None, enabled_default=enabled_default)
     channels = await _discord_guild_channels(guild_id) if bot_guild is not None else []
     awards_available = guild_id == state().settings.award_test_guild_id
+    development = (await state().cache.get(f"guild:{guild_id}:development-announcements") or {}) if awards_available else None
+    if development is not None:
+        detected = next((item for item in channels if item["name"] == "development-announcements" and item["type"] in {0, 5}), None)
+        if not any(int(item["id"]) == development.get("channel_id") for item in channels):
+            development["channel_id"] = int(detected["id"]) if detected else None
+        development["channel_id"] = _snowflake(development.get("channel_id"))
+        development["can_manage"] = bool(bot_guild and (str(bot_guild.get("owner_id")) == str(user.id) or user.id in state().settings.bot_admin_user_ids))
     award_settings = await state().cache.award_settings(guild_id) if awards_available else None
     award_channel_settings = (await state().cache.get(f"guild:{guild_id}:award-channel-settings") or {}) if awards_available else {}
     award_definitions = await state().cache.award_definitions(guild_id, active_only=False) if awards_available else []
@@ -1316,6 +1323,7 @@ async def guild_bot_configuration(guild_id: int, user=Depends(require_user)) -> 
             }
             for channel in channels
         ],
+        "development_announcements": development,
         "awards_available": awards_available,
         "awards": {
             "settings": {
@@ -1408,6 +1416,23 @@ def _clean_award_requirements(requirements: list[str], award_type: str) -> list[
     if award_type == "custom" and cleaned:
         raise HTTPException(status_code=422, detail="Custom awards cannot have tracker requirements.")
     return cleaned
+
+
+@app.post("/api/bot-management/guilds/{guild_id}/development-announcements/setup")
+async def setup_development_dashboard(guild_id: int, user=Depends(require_user)) -> dict[str, Any]:
+    if guild_id != state().settings.award_test_guild_id:
+        raise HTTPException(status_code=404, detail="Development announcements are limited to the testing Discord.")
+    await _managed_guild(user, guild_id)
+    guild = await _discord_bot_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=409, detail="SC Companion is not installed in this server.")
+    if str(guild.get("owner_id")) != str(user.id) and user.id not in state().settings.bot_admin_user_ids:
+        raise HTTPException(status_code=403, detail="Only the testing-server owner or a configured bot admin can manage announcements.")
+    key = f"guild:{guild_id}:development-announcements"
+    settings = await state().cache.get(key) or {}
+    settings.update(requested=True, error=None)
+    await state().cache.set(key, settings, 315360000)
+    return {"status": "queued"}
 
 
 @app.put("/api/bot-management/guilds/{guild_id}/awards/settings")

@@ -6,6 +6,53 @@ from unittest.mock import AsyncMock, Mock
 import discord
 import pytest
 
+
+def test_setup_button_only_in_testing_admin_panel():
+    from src.bot import NativeAdminView
+    from src.guild_config import default_module_settings
+    async def check():
+        assert 'Development Announcements' in [getattr(item, 'label', None) for item in NativeAdminView(default_module_settings(), awards_available=True).children]
+        assert 'Development Announcements' not in [getattr(item, 'label', None) for item in NativeAdminView(default_module_settings()).children]
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('guild_id,owner,allowed', [(1, 4, True), (1, 5, False), (2, 4, False)])
+def test_website_setup_requires_testing_owner(monkeypatch, guild_id, owner, allowed):
+    from src import web
+    from fastapi import HTTPException
+    cache = SimpleNamespace(get=AsyncMock(return_value={}), set=AsyncMock())
+    monkeypatch.setattr(web, 'state', lambda: SimpleNamespace(cache=cache, settings=SimpleNamespace(award_test_guild_id=1, bot_admin_user_ids=())))
+    monkeypatch.setattr(web, '_managed_guild', AsyncMock(return_value={}))
+    monkeypatch.setattr(web, '_discord_bot_guild', AsyncMock(return_value={'owner_id': str(owner)}))
+    if allowed:
+        assert asyncio.run(web.setup_development_dashboard(guild_id, SimpleNamespace(id=4))) == {'status': 'queued'}
+        assert cache.set.await_args.args[1]['requested'] is True
+    else:
+        with pytest.raises(HTTPException):
+            asyncio.run(web.setup_development_dashboard(guild_id, SimpleNamespace(id=4)))
+        cache.set.assert_not_awaited()
+
+
+def test_panel_setup_reuses_channel_and_saved_message():
+    from src.announcements import ensure_development_panel
+    from src.cache import SQLiteCache
+    async def check():
+        cache = await SQLiteCache.create(':memory:')
+        message = SimpleNamespace(id=6, author=SimpleNamespace(id=7), edit=AsyncMock())
+        channel = Mock(spec=discord.TextChannel)
+        channel.id = 2
+        channel.fetch_message = AsyncMock(return_value=message)
+        channel.send = AsyncMock()
+        guild = SimpleNamespace(id=1, get_channel=lambda _: channel)
+        bot = SimpleNamespace(settings=SimpleNamespace(runtime_profile='public', award_test_guild_id=1), cache=cache, user=SimpleNamespace(id=7))
+        await cache.set('guild:1:development-announcements', {'channel_id': 2, 'panel_message_id': 6, 'requested': True}, 300)
+        await ensure_development_panel(bot, guild)
+        await ensure_development_panel(bot, guild)
+        assert message.edit.await_count == 2
+        channel.send.assert_not_awaited()
+        assert not (await cache.get('guild:1:development-announcements'))['requested']
+    asyncio.run(check())
+
 from src.announcements import AnnouncementStore, announcement_group, approve_command, permitted, denial_reason
 
 
