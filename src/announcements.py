@@ -94,32 +94,39 @@ def store(interaction):
 
 
 async def ensure_development_panel(bot, guild):
-    if bot.settings.runtime_profile != "public" or guild.id != bot.settings.award_test_guild_id:
+    from src.broadcasts import destination_available
+    if bot.settings.runtime_profile != "public" or not destination_available(bot.settings, guild.id):
         raise ValueError("Development announcements are limited to the testing Discord.")
     if not hasattr(bot, "_development_setup_lock"):
         bot._development_setup_lock = asyncio.Lock()
     async with bot._development_setup_lock:
         key = f"guild:{guild.id}:development-announcements"
         saved = await bot.cache.get(key) or {}
+        category = discord.utils.find(
+            lambda item: item.name.casefold() in {"sc companion", "🚀 sc companion"}, guild.categories)
+        if category is None:
+            category = await guild.create_category("🚀 SC COMPANION", reason="Set up development announcements")
         channel = guild.get_channel(saved.get("channel_id", 0))
         if not isinstance(channel, discord.TextChannel):
             channel = discord.utils.get(guild.text_channels, name="development-announcements")
         if channel is None:
             channel = await guild.create_text_channel(
-                "development-announcements", category=discord.utils.get(guild.categories, name="SC Companion"),
+                "development-announcements", category=category,
                 topic="Approved SC Companion project starts and completed features.",
                 overwrites={guild.default_role: discord.PermissionOverwrite(send_messages=False),
                             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True)},
                 reason="Requested development announcement setup")
+        elif channel.category_id != category.id:
+            await channel.edit(category=category, sync_permissions=False,
+                               reason="Move development announcements into SC Companion")
         saved["channel_id"] = channel.id
         await bot.cache.set(key, saved, 315360000)
         embed = discord.Embed(title="Development Announcements", description=(
             "Approved SC Companion project starts and completed features appear here.\n\n"
-            "**Owner / bot admins:** Use `/announcement draft` to prepare an update, "
-            "`/announcement pending` to find drafts, `/announcement review` to review, "
-            "and `/announcement approve` to publish. Use `/announcement revise` or "
-            "`/announcement reject` to change or discard a draft.\n\n"
-            "Deployments never publish project announcements automatically."), color=0x3498DB)
+            "**Central broadcasts:** Opt in with `/development subscription`, choosing this channel. "
+            "The owner drafts and approves central updates using Peep’s `/broadcast` commands in its home Discord. "
+            "Use subscription with enabled=False to opt out.\n\n"
+            "Deployments never approve project announcements automatically."), color=0x3498DB)
         embed.set_footer(text="SC Companion • Development announcement setup")
         message = None
         if saved.get("panel_message_id"):
@@ -144,8 +151,9 @@ async def ensure_development_panel(bot, guild):
 
 
 async def setup_development_announcements(interaction):
-    if not permitted(interaction):
-        await interaction.response.send_message(denial_reason(interaction), ephemeral=True)
+    from src.broadcasts import subscription_permitted, DevelopmentSubscriptionView
+    if not subscription_permitted(interaction):
+        await interaction.response.send_message("A manager of an eligible server must configure development announcements.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     try:
@@ -153,7 +161,7 @@ async def setup_development_announcements(interaction):
     except (discord.HTTPException, ValueError):
         await interaction.followup.send("Could not create the channel/panel. Check SC Companion's Manage Channels, View Channel, Read Message History, Send Messages, and Embed Links permissions, then retry.", ephemeral=True)
         return
-    await interaction.followup.send(f"Channel and setup panel ready in {channel.mention}. Use it as the destination in `/announcement draft`.", ephemeral=True)
+    await interaction.followup.send(f"Channel and setup panel ready in {channel.mention}. Opt in below to receive approved Peep broadcasts. Creating the channel alone does not subscribe this server.", ephemeral=True, view=DevelopmentSubscriptionView(channel))
 
 
 @announcement_group.command(name="channel", description="Create or repair the development announcement channel and setup panel.")
