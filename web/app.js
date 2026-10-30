@@ -4394,7 +4394,9 @@ async function loadWarbonds(force = false, options = {}) {
       ? offers.map(renderWarbond).join("")
       : stateMessage("No active USD warbond CCUs were reported.");
     const checkedAt = payload.checked_at ? new Date(payload.checked_at).toLocaleString() : "Unavailable";
-    const freshness = payload.stale ? "Last known data — live refresh unavailable" : `Checked ${checkedAt}`;
+    const freshness = payload.stale
+      ? `Last verified with RSI ${checkedAt} — live refresh unavailable`
+      : `Verified with RSI ${checkedAt}`;
     outputs.warbonds.innerHTML = `${cards}<p class="warbond-freshness">${escapeHtml(freshness)}</p>`;
     warbondsLoaded = true;
   } catch (error) {

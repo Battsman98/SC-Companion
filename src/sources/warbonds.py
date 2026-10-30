@@ -7,21 +7,23 @@ from typing import Any
 import aiohttp
 
 from src.cache import SQLiteCache
+
+
 class WarbondTrackerSource:
     """Build active warbond CCU summaries without relying on Discord messages."""
 
-    PRICES_URL = "https://api.uexcorp.uk/2.0/vehicles_prices"
-    VEHICLES_URL = "https://api.uexcorp.uk/2.0/vehicles"
-    STORE_URL = "https://robertsspaceindustries.com/en/pledge/ship-upgrades"
-    CACHE_KEY = "warbonds:active:v5"
-    # UEX can lag current RSI promotions and sometimes omits their warbond
-    # price entirely. Keep the currently confirmed offers here while using the
-    # live catalogs for ship metadata and source-ship calculations.
-    ACTIVE_OFFERS = {
-        "basher": {"name": "Basher", "standard_price": 110, "warbond_price": 100},
-        "hermes": {"name": "Hermes", "standard_price": 220, "warbond_price": 200},
-        "mole": {"name": "MOLE", "standard_price": 315, "warbond_price": 295},
-    }
+    STORE_URL = "https://robertsspaceindustries.com/en/pledge"
+    UPGRADE_URL = "https://robertsspaceindustries.com/pledge-store/api/upgrade/graphql"
+    CACHE_KEY = "warbonds:active:rsi:v6"
+    CATALOG_QUERY = """
+        query WarbondCatalog {
+          app { pricing { currencyCode exponent exchangeRate taxRate isTaxInclusive } }
+          ships {
+            id name msrp link flyableStatus
+            medias { productThumbMediumAndSmall }
+          }
+        }
+    """
 
     def __init__(self, cache: SQLiteCache, timeout_seconds: int = 15) -> None:
         self._cache = cache
@@ -53,129 +55,108 @@ class WarbondTrackerSource:
             return result
 
     async def _refresh(self) -> dict[str, Any]:
-        prices_payload = await self._fetch(self.PRICES_URL)
-        vehicles_payload = await self._fetch(self.VEHICLES_URL)
-        rows = prices_payload.get("data") if isinstance(prices_payload, dict) else None
-        vehicles = vehicles_payload.get("data") if isinstance(vehicles_payload, dict) else None
-        if not isinstance(rows, list) or not isinstance(vehicles, list):
-            raise ValueError("Warbond sources returned an invalid payload.")
+        data = await self._graphql(self.CATALOG_QUERY)
+        ships = data.get("ships")
+        pricing = (data.get("app") or {}).get("pricing") or {}
+        if not isinstance(ships, list) or not ships:
+            raise ValueError("RSI returned an invalid upgrade catalog.")
+        # MSRP and SKU prices are native minor units. Do not silently label a
+        # localized/tax-inclusive response as USD.
+        if (pricing.get("currencyCode") != "USD"
+                or self._number(pricing.get("exchangeRate")) != 1
+                or self._number(pricing.get("taxRate")) != 0
+                or pricing.get("isTaxInclusive") is not False
+                or pricing.get("exponent") != 2):
+            raise ValueError("RSI did not return tax-exclusive USD upgrade prices.")
+        if any(not isinstance(ship, dict) or not isinstance(ship.get("id"), int)
+               or not ship.get("name") for ship in ships):
+            raise ValueError("RSI returned malformed upgrade ships.")
 
-        usd_prices = self._latest_usd_prices(rows)
-        active_rows = self._active_rows(usd_prices)
-        rsi_results = await asyncio.gather(
-            *(self._verify_rsi_ship(str(row.get("vehicle_name") or "")) for row in active_rows)
-        )
-        rsi_by_name = {
-            self._normalize(result.get("title")): result
-            for result in rsi_results
-            if isinstance(result, dict) and result.get("title")
-        }
-        active_rows = [
-            row for row in active_rows
-            if self._normalize(row.get("vehicle_name")) in rsi_by_name
-        ]
-        vehicle_by_name = {
-            self._normalize(vehicle.get("name")): vehicle
-            for vehicle in vehicles
-            if isinstance(vehicle, dict) and vehicle.get("name")
-        }
+        # The catalog's embedded SKUs include expired promotions. Only ship()
+        # applies current storefront availability. Query every discovered ship,
+        # with small batches to respect RSI's GraphQL complexity limits.
+        semaphore = asyncio.Semaphore(4)
 
-        price_catalog = [
-            {
-                "name": str(row.get("vehicle_name") or "").strip(),
-                "price": self._number(row.get("price")),
-                "on_sale": self._number(row.get("on_sale")) == 1,
-                "status": "concept" if vehicle_by_name.get(self._normalize(row.get("vehicle_name")), {}).get("is_concept") else "flight ready",
-            }
-            for row in usd_prices.values()
-            if self._number(row.get("price")) > 0 and row.get("vehicle_name")
-        ]
+        async def details(batch: list[dict]) -> dict:
+            fields = " ".join(
+                f"s{ship['id']}: ship(id: {ship['id']}) {{ skus {{ "
+                "id title price available unlimitedStock availableStock } }"
+                for ship in batch
+            )
+            async with semaphore:
+                result = await self._graphql("query CurrentUpgradeOffers { " + fields + " }")
+            for ship in batch:
+                detail = result.get(f"s{ship['id']}")
+                if not isinstance(detail, dict) or not isinstance(detail.get("skus"), list):
+                    raise ValueError("RSI returned incomplete upgrade availability.")
+            return result
 
+        batches = await asyncio.gather(*(details(ships[i:i + 5]) for i in range(0, len(ships), 5)))
+        current = {key: value for batch in batches for key, value in batch.items()}
+        catalog = []
         offers = []
-        for row in active_rows:
-            name = str(row.get("vehicle_name") or "").strip()
-            standard = self._number(row.get("price"))
-            warbond = self._number(row.get("price_warbond"))
-            key = self._normalize(name)
-            vehicle = vehicle_by_name.get(key, {})
-            rsi_ship = rsi_by_name.get(key, {})
-            offers.append({
-                "name": name,
-                "title": f"{name} - Warbond Edition",
-                "warbond_price": warbond,
-                "standard_price": standard,
-                "saving": standard - warbond,
-                "currency": "USD",
-                "cheapest_source": self._best_source(price_catalog, warbond),
-                "flight_ready_source": self._best_source(price_catalog, warbond, flight_ready=True),
-                "unlimited_source": self._best_source(price_catalog, warbond, on_sale=True),
-                "image_url": vehicle.get("url_photo"),
-                "store_url": vehicle.get("url_store") or rsi_ship.get("url") or self.STORE_URL,
-                "updated_at": self._iso_date(row.get("date_modified")),
+        for ship in ships:
+            skus = current[f"s{ship['id']}"]["skus"]
+            available = [sku for sku in skus if isinstance(sku, dict) and sku.get("available") is True]
+            standard = self._number(ship.get("msrp")) / 100
+            catalog.append({
+                "name": str(ship["name"]).strip(),
+                "price": standard,
+                "status": "flight ready" if ship.get("flyableStatus") == "Flyable" else "concept",
+                "on_sale": any(sku.get("unlimitedStock") is True
+                               and "warbond" not in str(sku.get("title", "")).lower()
+                               for sku in available),
             })
-
-        result = {
+            for sku in available:
+                warbond = self._number(sku.get("price")) / 100
+                if "warbond" not in str(sku.get("title", "")).lower() or not 0 < warbond < standard:
+                    continue
+                offers.append({
+                    "name": str(ship["name"]).strip(),
+                    "title": f"{str(ship['name']).strip()} - {sku['title']}",
+                    "sku_id": sku["id"],
+                    "warbond_price": warbond,
+                    "standard_price": standard,
+                    "saving": round(standard - warbond, 2),
+                    "currency": "USD",
+                    "image_url": self._rsi_url((ship.get("medias") or {}).get("productThumbMediumAndSmall")),
+                    "store_url": self._rsi_url(ship.get("link")) or self.STORE_URL,
+                    "updated_at": None,
+                })
+        catalog = [ship for ship in catalog if ship["price"] > 0]
+        for offer in offers:
+            offer["cheapest_source"] = self._best_source(catalog, offer["warbond_price"])
+            offer["flight_ready_source"] = self._best_source(catalog, offer["warbond_price"], flight_ready=True)
+            offer["unlimited_source"] = self._best_source(catalog, offer["warbond_price"], on_sale=True)
+        offers.sort(key=lambda offer: (offer["warbond_price"], offer["name"], offer["sku_id"]))
+        return {
             "offers": offers,
-            "updated_at": max((offer["updated_at"] for offer in offers if offer["updated_at"]), default=None),
+            "updated_at": None,
             "checked_at": datetime.now(tz=timezone.utc).isoformat(),
-            "source": "UEX pledge prices and the RSI pledge store",
+            "source": "RSI pledge store live ship-upgrade availability",
         }
-        return result
 
-    def _active_rows(self, prices: dict[str, dict]) -> list[dict]:
-        return [
-            {
-                **prices.get(key, {}),
-                "vehicle_name": offer["name"],
-                "price": offer["standard_price"],
-                "price_warbond": offer["warbond_price"],
-            }
-            for key, offer in self.ACTIVE_OFFERS.items()
-        ]
-
-    async def _fetch(self, url: str) -> dict | None:
-        async with self._session.get(url, headers={"Accept": "application/json"}) as response:
-            response.raise_for_status()
-            payload = await response.json()
-        return payload if isinstance(payload, dict) else None
-
-    async def _verify_rsi_ship(self, name: str) -> dict | None:
-        query = """
-        query ActiveWarbondShip($query: SearchQuery) {
-          store(name: "pledge", browse: true) {
-            search(query: $query) {
-              resources { ... on RSIShip { title url msrp productionStatus } }
-            }
-          }
-        }
-        """
+    async def _graphql(self, query: str) -> dict:
         async with self._session.post(
-            "https://robertsspaceindustries.com/graphql",
-            json={"query": query, "variables": {"query": {"ships": {"name": name}}}},
-            headers={"Accept": "application/json", "Content-Type": "application/json", "Referer": self.STORE_URL},
+            self.UPGRADE_URL,
+            json={"query": query},
+            headers={"Accept": "application/json", "Referer": self.STORE_URL},
         ) as response:
             response.raise_for_status()
             payload = await response.json()
-        resources = payload.get("data", {}).get("store", {}).get("search", {}).get("resources", [])
-        expected = self._normalize(name)
-        for resource in resources if isinstance(resources, list) else []:
-            if isinstance(resource, dict) and self._normalize(resource.get("title")) == expected:
-                url = resource.get("url")
-                if isinstance(url, str) and url.startswith("/"):
-                    resource["url"] = f"https://robertsspaceindustries.com{url}"
-                return resource
-        return None
+        if not isinstance(payload, dict) or payload.get("errors") or not isinstance(payload.get("data"), dict):
+            raise ValueError("RSI upgrade availability could not be verified.")
+        return payload["data"]
 
-    @classmethod
-    def _latest_usd_prices(cls, rows: list[Any]) -> dict[str, dict]:
-        latest: dict[str, dict] = {}
-        for row in rows:
-            if not isinstance(row, dict) or row.get("currency") != "USD" or not row.get("vehicle_name"):
-                continue
-            key = cls._normalize(row.get("vehicle_name"))
-            if key not in latest or cls._number(row.get("date_modified")) > cls._number(latest[key].get("date_modified")):
-                latest[key] = row
-        return latest
+    @staticmethod
+    def _rsi_url(value: Any) -> str | None:
+        if not isinstance(value, str) or not value:
+            return None
+        if value.startswith("/") and not value.startswith("//"):
+            return "https://robertsspaceindustries.com" + value
+        if value.startswith("https://"):
+            return value
+        return None
 
     @classmethod
     def _best_source(
@@ -206,17 +187,6 @@ class WarbondTrackerSource:
             return float(value or 0)
         except (TypeError, ValueError):
             return 0.0
-
-    @staticmethod
-    def _normalize(value: Any) -> str:
-        return " ".join(str(value or "").lower().replace("-", " ").split())
-
-    @staticmethod
-    def _iso_date(value: Any) -> str | None:
-        timestamp = WarbondTrackerSource._number(value)
-        if timestamp <= 0:
-            return None
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
     async def close(self) -> None:
         await self._session.close()
