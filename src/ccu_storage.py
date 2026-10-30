@@ -7,6 +7,18 @@ class CcuStore:
     def __init__(self, cache):
         self._connection = cache._connection
 
+    async def warbond_history(self, observations: list[dict]) -> list[dict]:
+        self._connection.execute("""CREATE TABLE IF NOT EXISTS ccu_warbond_observations (
+            deal_id TEXT PRIMARY KEY, value_json TEXT NOT NULL
+        )""")
+        for item in observations:
+            self._connection.execute("""INSERT INTO ccu_warbond_observations (deal_id, value_json)
+                VALUES (?, ?) ON CONFLICT(deal_id) DO UPDATE SET value_json = excluded.value_json""",
+                (item['id'], json.dumps(item)))
+        self._connection.commit()
+        return [json.loads(row[0]) for row in self._connection.execute(
+            'SELECT value_json FROM ccu_warbond_observations ORDER BY deal_id').fetchall()]
+
     def _ensure_ccu_plans(self) -> None:
         self._connection.execute("""CREATE TABLE IF NOT EXISTS user_ccu_plans (
             user_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, value_json TEXT NOT NULL

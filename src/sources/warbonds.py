@@ -14,7 +14,7 @@ class WarbondTrackerSource:
 
     STORE_URL = "https://robertsspaceindustries.com/en/pledge"
     UPGRADE_URL = "https://robertsspaceindustries.com/pledge-store/api/upgrade/graphql"
-    CACHE_KEY = "warbonds:active:rsi:v6"
+    CACHE_KEY = "warbonds:active:rsi:v7"
     CATALOG_QUERY = """
         query WarbondCatalog {
           app { pricing { currencyCode exponent exchangeRate taxRate isTaxInclusive } }
@@ -131,6 +131,7 @@ class WarbondTrackerSource:
         offers.sort(key=lambda offer: (offer["warbond_price"], offer["name"], offer["sku_id"]))
         return {
             "offers": offers,
+            "catalog": catalog,
             "updated_at": None,
             "checked_at": datetime.now(tz=timezone.utc).isoformat(),
             "source": "RSI pledge store live ship-upgrade availability",

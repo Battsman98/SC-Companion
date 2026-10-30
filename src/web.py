@@ -40,6 +40,7 @@ from src.shared import (
 )
 from src.ccu_planner import Planner, find_routes
 from src.ccu_storage import CcuStore
+from src.ccu_deals import planner_market
 from src.cache import AUDIT_ACTION_TYPES, SCANNER_DIAGNOSTIC_RETENTION_SECONDS, SQLiteCache
 from src.config import Settings
 from src.guild_config import BOT_MODULES, default_module_settings, normalize_module_settings
@@ -660,7 +661,7 @@ async def _item_catalog_maintenance_loop(sources: SourceRegistry) -> None:
 async def _warbond_maintenance_loop(warbonds: WarbondTrackerSource) -> None:
     while True:
         try:
-            await warbonds.active(force_refresh=True)
+            await planner_market(warbonds, warbonds._cache, force_refresh=True)
         except Exception:
             pass
         await asyncio.sleep(15 * 60)
@@ -2794,6 +2795,15 @@ def ccu_store():
     return CcuStore(state().cache)
 
 
+async def ccu_market():
+    return await planner_market(state().warbonds, state().cache)
+
+
+@app.get("/api/ccu/deals")
+async def ccu_deals():
+    return await ccu_market()
+
+
 @app.post("/api/ccu/validate")
 async def validate_ccu_draft(request: Planner):
     return request.model_dump()
@@ -2801,9 +2811,11 @@ async def validate_ccu_draft(request: Planner):
 
 @app.post("/api/ccu/routes/{goal_id}")
 async def preview_ccu_routes(goal_id: str, request: Planner):
-    # Stateless guest planning: no account or storage access.
+    # Guest plans remain stateless; only shared public market observations are stored.
     try:
-        return {"routes": find_routes(request, goal_id)}
+        market = await ccu_market()
+        return {"routes": find_routes(request, goal_id, market), "market_warning": market.get('warning', ''),
+                "checked_at": market.get('checked_at')}
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -2825,7 +2837,7 @@ async def put_ccu_plan(request: Planner, user=Depends(require_user)):
 async def get_ccu_routes(goal_id: str, user=Depends(require_user)):
     plan = Planner.model_validate(await ccu_store().ccu_plan(user.id))
     try:
-        return {"revision": plan.revision, "routes": find_routes(plan, goal_id)}
+        return {"revision": plan.revision, "routes": find_routes(plan, goal_id, await ccu_market())}
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -2836,12 +2848,15 @@ async def reserve_ccu_route(goal_id: str, mode: str, revision: int, user=Depends
     if revision != plan.revision:
         raise HTTPException(status_code=409, detail="Plan changed. Find routes again before reserving.")
     try:
-        route = next((r for r in find_routes(plan, goal_id) if r["mode"] == mode), None)
+        route = next((r for r in find_routes(plan, goal_id, await ccu_market()) if r["mode"] == mode), None)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     if route is None:
         raise HTTPException(status_code=422, detail="No eligible route to reserve.")
     goal = next(g for g in plan.goals if g.id == goal_id)
+    from src.ccu_planner import Ship
+    if not any(s.name == route['base']['ship'] for s in plan.ships):
+        plan.ships.append(Ship(name=route['base']['ship'], value=route['base_value']))
     if route["base"]["id"].startswith("suggested:"):
         from uuid import uuid4
         from src.ccu_planner import Base

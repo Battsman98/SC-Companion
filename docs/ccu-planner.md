@@ -12,7 +12,24 @@ The ascending-value graph compares lowest additional spending, lowest total with
 known costs, and fewest missing purchases. Owned items add zero additional spend;
 their actual paid costs still contribute to total cost. Unknown costs suppress
 total and savings, rather than becoming zero. Suggested base purchases and gaps
-are value-based estimates, never confirmed offers. No pledge-store reader exists.
+are value-based estimates, never confirmed offers.
+
+Active warbond offers now use the existing RSI tracker and its current USD ship
+catalogue. The engine can stack eligible discounts between increasing ship values;
+it reports both total route savings and savings attributable to warbond steps.
+Warbond purchases require new cash. The target offer is observed active; the
+source-to-target price is calculated and still requires checkout verification.
+Stale or failed availability checks exclude active edges and show a warning.
+
+Historical warbonds are opt-in and off by default. The website archives dated,
+specific CCU pairs observed by its tracker from this release onward. This is not
+a complete historical catalogue. Users may add their own past CCU reference
+prices. No seller, acquisition location, or marketplace URL is stored or returned
+by the planner deal catalogue. Historical prices are hypothetical; a saved
+acquisition quote replaces that reference for routing, but does not confirm
+availability. Historical pairs require known current endpoint values; discounts
+are never transplanted onto arbitrary source ships. Market offers are not owned
+copies and are never allocated as owned inventory when a chain is reserved.
 
 Each route step has a stable planner key, displayed current endpoint values,
 cost, insurance evidence, and remaining additional spend. Users can lock or

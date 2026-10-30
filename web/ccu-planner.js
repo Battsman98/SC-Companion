@@ -3,7 +3,7 @@
   const root = document.querySelector('#ccuPlanner');
   const workspace = document.querySelector('#ccuWorkspace');
   const notice = document.querySelector('#ccuNotice');
-  let plan = {revision:0, ships:[], bases:[], upgrades:[], goals:[]}, imported = [], busy = false, dirty = false, pendingImport=null;
+  let plan = {revision:0, ships:[], bases:[], upgrades:[], goals:[]}, imported = [], busy = false, dirty = false, pendingImport=null, marketInfo=null;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money = value => value == null ? 'Unknown' : new Intl.NumberFormat('en-US', {style:'currency', currency:'USD'}).format(value);
   const uid = () => crypto.randomUUID();
@@ -17,6 +17,7 @@
   const shipSelect = name => input(name, 'list="ccuNames" required autocomplete="off" placeholder="Type a ship name" maxlength="100"');
   const names = {cash:'Lowest additional spending', total:'Lowest total — known costs only', gaps:'Fewest missing upgrades'};
   const protection = (kind, item) => `<button type="button" data-protect="${kind}" data-id="${esc(item.id)}" aria-pressed="${!!item.protected}">${item.protected?'Unprotect':'Protect'} this copy</button>`;
+  const historicalRow = d => `<li>${esc(d.source)} → ${esc(d.target)} · Historical reference ${money(d.reference_cost)} · Observed ${esc(d.observed_at)} · Availability unconfirmed<label>Acquisition quote (USD; blank uses reference)<input data-acquisition-quote type="number" min="0" max="10000" step="0.01" value="${plan.deal_quotes?.['historical:'+d.id]??''}"></label><button type="button" data-quote="${esc('historical:'+d.id)}" data-goal="${esc(plan.goals.at(-1)?.id||'')}">Update acquisition quote</button></li>`;
   const accounting = item => `${item.status==='owned'?'Actual paid / allocated child cost':'Entered purchase estimate'}: ${money(item.cost)} · RSI pledge: ${money(item.pledge_value)} · Melt: ${money(item.melt_value)} · Insurance: ${esc(item.insurance||'Unknown')}${item.lti?' · Confirmed LTI':''}${item.package_id?` · Package ${esc(item.package_id)}: pledge ${money(item.package_value)}, melt ${money(item.package_melt_value)} (shared values, excluded from child cost)`:''}${item.import_missing?' · Missing or changed import evidence; unavailable for routing':''}`;
   function announce(text, error = false) {notice.textContent = text; notice.className = error ? 'error' : 'state';}
   async function request(path, method='GET', body) {
@@ -55,6 +56,17 @@
       <h3>Goal ship</h3>
       <p>Choose the ship you want to reach. Everything else is optional. We look up its USD pledge value for you.</p>
       <form data-ccu="goal">${field('Goal ship',shipSelect('target'))}${field('Base ship you own (optional)',input('base_ship','list="ccuNames" placeholder="Leave blank to compare starting options" maxlength="100"'))}${field('Use a saved base (optional)',choices('base_id',option('','No specific base')+plan.bases.map(b=>option(b.id,b.label)).join('')))}${field('Require confirmed LTI',input('lti_only','type="checkbox"'))}<button>Build chain</button></form>
+      <details><summary>Warbond savings</summary>
+      <form data-ccu="deals">${field('Use active warbond offers',input('use_active_warbonds',`type="checkbox" ${plan.use_active_warbonds!==false?'checked':''}`))}${field('Include historical warbond deals (optional)',input('include_historical',`type="checkbox" ${plan.include_historical?'checked':''}`))}<button>Apply deal preferences</button></form>
+      <p>Active offers require new cash; prices and availability are checked when calculating routes. Historical deals are off by default. Historical reference prices are hypothetical until you enter an acquisition quote; availability remains unconfirmed. No acquisition locations are displayed.</p>
+      <button type="button" data-market>Review deal catalogue</button>
+      <p>${marketInfo?`${marketInfo.offers.length} active target offers · ${marketInfo.historical.length} archived CCU references · Checked ${esc(marketInfo.checked_at||'Unknown')}. ${esc(marketInfo.warning)}`:'The deal catalogue is checked automatically when you build a route.'}</p>
+      ${marketInfo?`<ul>${marketInfo.offers.map(d=>`<li>${esc(d.name)} · Current upgrade value ${money(d.standard_price)} · Discounted target value ${money(d.warbond_price)} · Potential discount ${money(d.standard_price-d.warbond_price)}</li>`).join('')}</ul>`:''}
+      ${plan.include_historical?`<p>History contains offers observed by this site from this release onward, plus your references. It is not a complete record of past promotions. Only pairs with known current ship values can be routed.</p>
+      <ul>${(marketInfo?.historical||[]).map(historicalRow).join('')}</ul>
+      <form data-ccu="history">${field('Historical from ship',shipSelect('source'))}${field('Historical to ship',shipSelect('target'))}${field('Historical CCU price (USD)',input('reference_cost','type="number" min="0.01" max="10000" step="0.01" required'))}${field('Historical offer date (optional)',input('observed_at','type="date"'))}<button>Add historical reference</button></form>
+      ${(plan.historical_deals||[]).map(d=>`<ul>${historicalRow(d)}</ul><button type="button" data-remove="historical_deals" data-id="${esc(d.id)}">Remove reference</button>`).join('')}`:''}
+      ${plan.include_historical&&Object.keys(plan.deal_quotes||{}).length?`<details><summary>Saved acquisition quotes</summary>${Object.entries(plan.deal_quotes).map(([key,value])=>{const d=[...(plan.historical_deals||[]),...(marketInfo?.historical||[])].find(d=>'historical:'+d.id===key);return `<p>${d?esc(d.source+' → '+d.target):'Historical CCU quote'} · ${money(value)} <button type="button" data-clear-quote="${esc(key)}">Remove acquisition quote</button></p>`;}).join('')}</details>`:''}</details>
       <details><summary>Base ships (optional) · ${plan.bases.length}</summary>
       <p>Add a ship you already own, or a buyback / purchase you are considering. Leave this blank to compare suggested purchases. Confirm LTI only when your pledge includes it. For package children, enter only an allocated share of actual paid cost; never repeat the full package price on every ship.</p>
       <form data-ccu="base">${field('Base ship',shipSelect('ship'))}${field('Label (optional)',input('label','maxlength="150" placeholder="Pack ship 2"'))}${field('Status',status())}${field('Paid / buyback / target cost (optional)',number('cost'))}${field('Confirmed LTI',input('lti','type="checkbox"'))}<button>Add base ship</button></form>
@@ -96,6 +108,13 @@
       const editId=form.dataset.editId;
       const collection={base:'bases',upgrade:'upgrades',goal:'goals'}[form.dataset.ccu];
       const previous=editId?next[collection].find(x=>x.id===editId):{};
+      if(form.dataset.ccu==='deals'){
+        next.use_active_warbonds=!!d.use_active_warbonds;next.include_historical=!!d.include_historical;
+      }
+      if(form.dataset.ccu==='history'){
+        const source=await ensureShip(next,d.source),target=await ensureShip(next,d.target);
+        next.historical_deals||=[];next.historical_deals.push({id:uid(),source,target,reference_cost:Number(d.reference_cost),observed_at:d.observed_at||'User-entered historical reference'});
+      }
       if(editId) {
         const reserved=next.goals.some(g=>g.reserved_base===editId||g.reserved_ccus.includes(editId));
         if(reserved)throw new Error('Release this pledge or CCU from its goal before editing it.');
@@ -123,10 +142,19 @@
       if(form.dataset.ccu==='goal')next.goals.push({...previous,id:editId||uid(),target:d.target,base_id:d.base_id,lti_only:!!d.lti_only,reserved_base:'',reserved_ccus:[],saved_path:[]});
       await save(next);
       if(form.dataset.ccu==='goal')await showRoutes(next.goals.at(-1).id);
+      if(['deals','history'].includes(form.dataset.ccu)&&next.goals.length)await showRoutes(next.goals.at(-1).id);
     });
   });
   workspace.addEventListener('click',event=>{
     const b=event.target.closest('button');if(!b)return;
+    if(b.hasAttribute('data-market'))action(async()=>{marketInfo=await request('/api/ccu/deals');render();announce('Deal catalogue refreshed. Historical availability is never assumed.');});
+    if(b.dataset.clearQuote)action(async()=>{const next=structuredClone(plan);delete next.deal_quotes[b.dataset.clearQuote];await save(next);if(next.goals.length)await showRoutes(next.goals.at(-1).id);});
+    if(b.dataset.quote)action(async()=>{
+      const value=b.closest('li').querySelector('[data-acquisition-quote]').value;
+      const next=structuredClone(plan);next.deal_quotes||={};
+      if(value==='')delete next.deal_quotes[b.dataset.quote];else next.deal_quotes[b.dataset.quote]=Number(value);
+      await save(next);if(b.dataset.goal)await showRoutes(b.dataset.goal);
+    });
     if(b.dataset.protect)action(async()=>{
       const next=structuredClone(plan),item=next[b.dataset.protect].find(x=>x.id===b.dataset.id);
       item.protected=!item.protected;await save(next);
@@ -170,6 +198,7 @@
       const route=result.routes.find(r=>r.mode===b.dataset.mode);
       if(!route)throw new Error('No eligible route to reserve. Find routes again.');
       const next=structuredClone(plan), goal=next.goals.find(g=>g.id===b.dataset.reserve);
+      if(!next.ships.some(s=>s.name===route.base.ship))next.ships.push({name:route.base.ship,value:route.base_value});
       if(route.base.id.startsWith('suggested:')){route.base.id=uid();next.bases.push(route.base);}
       goal.reserved_base=route.base.id;goal.reserved_ccus=route.steps.filter(e=>e.id).map(e=>e.id);
       goal.saved_path=[route.base.ship,...route.steps.map(e=>e.target)];
@@ -184,13 +213,16 @@
       const control=(action,key,label)=>`<button type="button" data-constraint="${action}" data-goal="${esc(id)}" data-key="${esc(key)}">${label}</button>`;
       out.innerHTML=result.routes.map(r=>`<details open><summary>${esc(names[r.mode])}</summary><p><strong>${esc(r.base.label)}</strong> (${r.base.id.startsWith('suggested:')?'suggested purchase · availability and LTI unverified':esc(r.base.status)}) → ${r.steps.map(e=>`${esc(e.target)} [${esc(e.status)}]`).join(' → ') || (r.base.status==='owned'?'Already at target':'Standalone purchase baseline')}</p>
       <p>Estimated additional spend: <strong>${money(r.additional)}</strong> · Estimated total: ${money(r.total)} · Potential savings against current goal value: ${money(r.savings)} · Missing purchases: ${r.missing}</p>
+      <p>Warbond step savings versus standard value differences: <strong>${money(r.warbond_savings||0)}</strong>. ${r.hypothetical?'Hypothetical: this route uses historical prices without acquisition quotes.':'Any historical acquisition quotes remain unconfirmed until purchased.'}</p>
       <p>${accounting(r.base)}. No availability or savings guarantee. Package costs require an explicit per-child allocation before totals are known.</p>
       ${r.unknown_costs?`<p>${r.unknown_costs} purchase prices unknown. Known cost subtotal: ${money(r.known_cost)}. Total and savings cannot be confirmed.</p>`:''}
-      <ol class="ccu-steps">${r.steps.map(e=>`<li><strong>${esc(e.source)} → ${esc(e.target)}</strong><p>Current upgrade values: ${money(e.source_value)} → ${money(e.target_value)}</p><p>${e.status==='owned'?'Owned · 1 copy':e.status==='gap'?'Missing · theoretical bridge, availability unverified':'Missing · entered purchase estimate'} · ${e.id?`Copy ${esc(e.id)} · `:''}${e.status==='owned'?'Actual paid':'Estimated cost'}: ${money(e.cost)} · Insurance: ${esc(e.insurance||'Unknown')} · Spend remaining after step: ${money(e.remaining)}</p><p>${esc(e.note)}</p>
+      <ol class="ccu-steps">${r.steps.map(e=>`<li><strong>${esc(e.source)} → ${esc(e.target)}</strong><p>Current upgrade values: ${money(e.source_value)} → ${money(e.target_value)}</p><p>${e.status==='owned'?'Owned · 1 copy':e.status==='gap'?'Missing · theoretical bridge, availability unverified':e.status==='active_warbond'?'Active warbond · new cash required':e.status==='historical_warbond'?'Historical warbond · availability unconfirmed':'Missing · entered purchase estimate'} · ${e.id?`Copy ${esc(e.id)} · `:''}${e.status==='owned'?'Actual paid':'Estimated cost'}: ${money(e.cost)} · Insurance: ${esc(e.insurance||'Unknown')} · Spend remaining after step: ${money(e.remaining)}</p><p>${esc(e.note)} ${e.observed_at?'Observed: '+esc(e.observed_at):''}</p>
+      ${e.status==='historical_warbond'?`<p>Historical reference: ${money(e.reference_cost)} · ${e.hypothetical?'Hypothetical price':'Your acquisition quote'}</p><label>Acquisition quote (USD; blank uses historical reference)<input data-acquisition-quote type="number" min="0" max="10000" step="0.01" value="${e.acquisition_quote??''}"></label><button type="button" data-quote="${esc(e.key)}" data-goal="${esc(id)}">Update acquisition quote</button>`:''}
       ${control((goal.locked_steps||[]).includes(e.key)?'unlock':'lock',e.key,(goal.locked_steps||[]).includes(e.key)?'Unlock step':'Lock step')}${control('exclude',e.key,'Exclude step')}
       ${(e.alternatives||[]).length?`<details><summary>Replace this step</summary><label>Alternative from ${esc(e.source)}<select>${option('','Choose an alternative')}${e.alternatives.map(a=>option(a.key,`${a.target} · ${a.status==='gap'?'theoretical':a.status} · ${money(a.cost)}${a.id?' · '+a.id:''}`)).join('')}</select></label>${control('replace',e.key,'Use alternative')}</details>`:''}</li>`).join('')}</ol>
       <button type="button" data-reserve="${esc(id)}" data-mode="${r.mode}">Reserve this base and listed CCUs</button></details>`).join('') || '<p>Your goal is added. A price may be missing, LTI may need confirmation, or protected/reserved copies and route constraints prevent a route. Check Advanced: pledge values, add a suitable base, or clear route constraints. You can leave this goal in your plan and fill details later.</p>';
       if(result.routes.length&&!result.routes.some(r=>r.mode==='total'))out.insertAdjacentHTML('afterbegin','<p>Lowest total comparison is unavailable for these constraints because actual paid costs are unknown. Additional-spend estimates are still shown.</p>');
+      if(result.market_warning)out.insertAdjacentHTML('afterbegin',`<p>${esc(result.market_warning)}</p>`);
 
   }
   async function ensureShip(next, name) {

@@ -1,8 +1,9 @@
 const {chromium}=require(process.env.CCU_PLAYWRIGHT_PATH || 'playwright');
 const fs=require('node:fs');
 const {execFileSync}=require('node:child_process');
+let fixtureMarket={};
 function backend(body,goal){
- return JSON.parse(execFileSync(process.env.CCU_PYTHON||'python',['-c','import json,sys; from src.ccu_planner import Planner,find_routes; d=json.load(sys.stdin); p=Planner.model_validate(d["plan"]); print(json.dumps({"routes":find_routes(p,d["goal"])} if d["goal"] else p.model_dump()))'],{input:JSON.stringify({plan:body,goal}),encoding:'utf8',env:{...process.env,PYTHONIOENCODING:'utf-8'}}));
+ return JSON.parse(execFileSync(process.env.CCU_PYTHON||'python',['-c','import json,sys; from src.ccu_planner import Planner,find_routes; d=json.load(sys.stdin); p=Planner.model_validate(d["plan"]); print(json.dumps({"routes":find_routes(p,d["goal"],d["market"])} if d["goal"] else p.model_dump()))'],{input:JSON.stringify({plan:body,goal,market:fixtureMarket}),encoding:'utf8',env:{...process.env,PYTHONIOENCODING:'utf-8'}}));
 }
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:process.env.CCU_BROWSER_CHANNEL || undefined});
@@ -12,6 +13,7 @@ function backend(body,goal){
  let plan, saves=0, authenticated=false;
  await page.route('http://localhost/**',async route=>{
   const req=route.request(),path=new URL(req.url()).pathname;
+  if(path==='/api/ccu/deals')return route.fulfill({json:fixtureMarket});
   if(path==='/api/me/ccu'){
    saves++;
    if(!authenticated)return route.fulfill({status:401,json:{detail:'Sign in required'}});
@@ -133,6 +135,34 @@ function backend(body,goal){
  if(!plan.upgrades.find(x=>x.id===reserved).import_missing||plan.goals[0].reserved_ccus[0]!==reserved)throw Error('Complete missing scan deleted or released a copy');
  await page.locator('[data-find]').first().click();
  await page.locator('.ccu-steps li').first().waitFor();
+ if(errors.length)throw Error(errors.join('\n'));
+ page.on('dialog',dialog=>dialog.accept());
+ await page.goto('http://localhost/warbonds');
+ fixtureMarket={fresh:true,checked_at:'2026-10-30',warning:'',catalog:[{name:'Dragonfly Black',value:40},{name:'Mid',value:70},{name:'Mako',value:95}],offers:[{name:'Mid',sku_id:1,warbond_price:60,standard_price:70},{name:'Mako',sku_id:2,warbond_price:85,standard_price:95}],historical:[{id:'history-fixture',source:'Dragonfly Black',target:'Mako',reference_cost:10,observed_at:'2025-01-01'}]};
+ await goal.locator('[name=target]').fill('Mako');await goal.getByRole('button').click();
+ await page.getByText('Active warbond · new cash required',{exact:false}).first().waitFor();
+ if(plan.include_historical)throw Error('History enabled by default');
+ await page.getByText('Warbond savings',{exact:true}).click();
+ await page.getByRole('button',{name:'Review deal catalogue',exact:true}).click();
+ await page.getByText('Deal catalogue refreshed.',{exact:false}).waitFor();
+ await page.locator('form[data-ccu=deals] [name=include_historical]').check();
+ await page.getByRole('button',{name:'Apply deal preferences',exact:true}).click();
+ await page.getByText('Historical warbond · availability unconfirmed',{exact:false}).first().waitFor();
+ await page.locator('[data-acquisition-quote]').first().fill('20');
+ await page.getByRole('button',{name:'Update acquisition quote',exact:true}).first().click();
+ await page.getByText('Your acquisition quote',{exact:false}).first().waitFor();
+ if(plan.deal_quotes['historical:history-fixture']!==20)throw Error('Quote not retained');
+ const quoted=backend(plan,plan.goals[0].id).routes[0];
+ if(quoted.additional!==60||quoted.hypothetical)throw Error('Quote did not replace reference price');
+ await page.locator('form[data-ccu=deals] [name=include_historical]').uncheck();
+ await page.getByRole('button',{name:'Apply deal preferences',exact:true}).click();
+ await page.getByText('Active warbond · new cash required',{exact:false}).first().waitFor();
+ if(await page.locator('[data-acquisition-quote]').count())throw Error('Historical deal used after opt-out');
+ await page.getByRole('button',{name:'Reserve this base and listed CCUs'}).first().click();
+ await page.getByText(/Reserved in this draft/).waitFor();
+ if(plan.goals[0].reserved_ccus.length)throw Error('Market offers reserved as owned copies');
+ await page.locator('[data-find]').first().click();
+ await page.getByText('Active warbond · new cash required',{exact:false}).first().waitFor();
  if(errors.length)throw Error(errors.join('\n'));
  fs.mkdirSync('output',{recursive:true});
  await page.screenshot({path:'output/ccu-goal-first-desktop.png',fullPage:true});

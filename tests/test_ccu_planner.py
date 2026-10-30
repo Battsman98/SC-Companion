@@ -9,6 +9,12 @@ from src.ccu_storage import CcuStore
 import src.web as web
 
 
+@pytest.fixture(autouse=True)
+def no_live_market(monkeypatch):
+    async def market(): return {}
+    monkeypatch.setattr(web, 'ccu_market', market)
+
+
 def sample():
     return Planner.model_validate(dict(
         ships=[dict(name=n,value=v) for n,v in [('Base',40),('Middle',100),('Equal',100),('Target',200)]],
@@ -213,3 +219,27 @@ def test_stable_import_id_cannot_create_extra_copies():
     p.upgrades.append(p.upgrades[0].model_copy(update={'id':'different-planner-id'}))
     with pytest.raises(ValidationError, match='stable RSI item'):
         Planner.model_validate(p.model_dump())
+
+
+def test_market_routes_and_account_reservations_add_catalog_base(monkeypatch):
+    from tests.test_ccu_deals import market
+    async def current(): return market()
+    monkeypatch.setattr(web, 'ccu_market', current)
+    draft=Planner(ships=[dict(name='Target',value=200)],goals=[dict(id='g',target='Target')]).model_dump()
+    class Cache:
+        data=draft
+        async def ccu_plan(self,user): return self.data
+        async def save_ccu_plan(self,user,revision,data): self.data={**data,'revision':revision+1};return True
+    cache=Cache();monkeypatch.setattr(web,'ccu_store',lambda:cache)
+    client=TestClient(web.app)
+    result=client.post('/api/ccu/routes/g',json=draft)
+    assert result.status_code==200 and result.json()['routes'][0]['warbond_savings']==45
+    web.app.dependency_overrides[web.require_user]=lambda:SimpleNamespace(id=123)
+    try:
+        result=client.post('/api/me/ccu/reserve/g/cash?revision=0')
+        assert result.status_code==200
+        saved=result.json()
+        assert saved['goals'][0]['reserved_ccus']==[]
+        assert saved['bases'][0]['ship']=='Base'
+        assert any(s['name']=='Base' for s in saved['ships'])
+    finally: web.app.dependency_overrides.pop(web.require_user,None)
