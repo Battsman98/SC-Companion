@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.broadcasts import broadcast_group, permitted as broadcast_permitted, deliver_broadcasts, development_group, subscription_permitted, destination_available
 from src.announcements import ensure_development_panel, setup_development_announcements, announcement_group, permitted as announcement_permitted, denial_reason as announcement_denial_reason
 from src.shared import (
     _same_community_mining_location, remove_community_mining_location,
@@ -576,6 +577,16 @@ class GameAssistCommandTree(app_commands.CommandTree):
             return False
 
         command_name = _interaction_command_name(interaction)
+        if command_name.startswith("development "):
+            if subscription_permitted(interaction):
+                return True
+            await interaction.response.send_message("Development subscriptions require a server manager and an eligible server (testing Discord during the pilot).", ephemeral=True)
+            return False
+        if command_name.startswith("broadcast "):
+            if broadcast_permitted(interaction):
+                return True
+            await interaction.response.send_message("Broadcasts are restricted to Peep's home-server owner and configured bot admins.", ephemeral=True)
+            return False
         if command_name.startswith("announcement "):
             if announcement_permitted(interaction):
                 return True
@@ -1054,6 +1065,7 @@ class GameAssistBot(commands.Bot):
             guild = discord.Object(id=self.settings.discord_guild_id)
             self.tree.add_command(admin_group, guild=guild)
             self.tree.add_command(audit_group, guild=guild)
+            self.tree.add_command(broadcast_group, guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced Peep admin commands to guild %s", self.settings.discord_guild_id)
             return
@@ -1061,6 +1073,7 @@ class GameAssistBot(commands.Bot):
         for command in public_commands:
             self.tree.add_command(command)
         self.tree.add_command(admin_group)
+        self.tree.add_command(development_group)
 
         # Primary-community maintenance commands are deliberately excluded
         # from the global command registration.
@@ -1418,6 +1431,12 @@ class GameAssistBot(commands.Bot):
                 raise
             except Exception:
                 logging.exception("Could not synchronize shared feedback tickets")
+            try:
+                await deliver_broadcasts(self)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.exception("Could not process development broadcasts")
             await asyncio.sleep(60)
 
     async def remove_mirrored_feedback_examples(self) -> None:
@@ -1523,7 +1542,7 @@ class GameAssistBot(commands.Bot):
                     and guild.id != self.settings.discord_guild_id
                 ):
                     continue
-                if self.settings.runtime_profile == "public" and guild.id == self.settings.award_test_guild_id:
+                if self.settings.runtime_profile == "public" and destination_available(self.settings, guild.id):
                     development = await self.cache.get(f"guild:{guild.id}:development-announcements") or {}
                     if development.get("requested"):
                         try:
@@ -7289,7 +7308,7 @@ class NativeAdminModuleSelect(discord.ui.Select):
         pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
         refreshed = await bot.cache.guild_bot_settings(interaction.guild.id)
         mode = str((refreshed or {}).get("channel_setup_mode") or "manual")
-        await interaction.edit_original_response(embed=build_native_admin_embed(interaction.guild, modules, pending), view=NativeAdminView(modules, mode, awards_available=_award_test_guild(interaction, interaction.client)))
+        await interaction.edit_original_response(embed=build_native_admin_embed(interaction.guild, modules, pending), view=NativeAdminView(modules, mode, awards_available=_award_test_guild(interaction, interaction.client), development_available=destination_available(interaction.client.settings, interaction.guild_id)))
 
 
 class ChannelSetupChoiceView(discord.ui.View):
@@ -7322,7 +7341,7 @@ class ChannelSetupChoiceView(discord.ui.View):
         await bot.ensure_about_panel(interaction.guild)
         await interaction.edit_original_response(
             embed=build_native_admin_embed(interaction.guild, self.modules),
-            view=NativeAdminView(self.modules, mode, awards_available=_award_test_guild(interaction, interaction.client)),
+            view=NativeAdminView(self.modules, mode, awards_available=_award_test_guild(interaction, interaction.client), development_available=destination_available(interaction.client.settings, interaction.guild_id)),
         )
 
     @discord.ui.button(label="Let the bot set up channels", style=discord.ButtonStyle.primary)
@@ -7451,7 +7470,7 @@ class ManualChannelWizardView(discord.ui.View):
         await bot.ensure_about_panel(interaction.guild)
         embed = build_native_admin_embed(interaction.guild, self.modules)
         embed.description = "Manual channel setup is complete. You can change these choices at any time."
-        await interaction.edit_original_response(embed=embed, view=NativeAdminView(self.modules, "manual", awards_available=_award_test_guild(interaction, interaction.client)))
+        await interaction.edit_original_response(embed=embed, view=NativeAdminView(self.modules, "manual", awards_available=_award_test_guild(interaction, interaction.client), development_available=destination_available(interaction.client.settings, interaction.guild_id)))
 
     async def use_any_channel(self, interaction: discord.Interaction) -> None:
         await self.save_selection(interaction, None)
@@ -7459,7 +7478,7 @@ class ManualChannelWizardView(discord.ui.View):
     async def back_to_panel(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(
             embed=build_native_admin_embed(interaction.guild, self.modules),
-            view=NativeAdminView(self.modules, "manual", awards_available=_award_test_guild(interaction, interaction.client)),
+            view=NativeAdminView(self.modules, "manual", awards_available=_award_test_guild(interaction, interaction.client), development_available=destination_available(interaction.client.settings, interaction.guild_id)),
         )
 
 
@@ -7709,13 +7728,70 @@ class AwardAdminView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         await interaction.response.edit_message(
-            embed=build_native_admin_embed(interaction.guild, self.modules), view=NativeAdminView(self.modules, awards_available=_award_test_guild(interaction, interaction.client))
+            embed=build_native_admin_embed(interaction.guild, self.modules), view=NativeAdminView(self.modules, awards_available=_award_test_guild(interaction, interaction.client), development_available=destination_available(interaction.client.settings, interaction.guild_id))
         )
+
+
+class ReputationSetupRoleSelect(discord.ui.RoleSelect):
+    def __init__(self):
+        super().__init__(placeholder="Choose the reputation reviewer role", min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        role = self.values[0]
+        if role.is_default() or role.managed:
+            await interaction.response.send_message("Choose a dedicated, unmanaged reviewer role, not @everyone.", ephemeral=True)
+            return
+        key = _reputation_settings_key(interaction.guild_id)
+        settings = await interaction.client.cache.get(key) or {}
+        settings["reviewer_role_id"] = role.id
+        await interaction.client.cache.set(key, settings, 315360000)
+        await interaction.response.send_message("Reviewer role saved. Use Enable & Create / Repair to apply it to the channels.", ephemeral=True)
+
+
+class ReputationAdminView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=900)
+        self.add_item(ReputationSetupRoleSelect())
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        bot = interaction.client
+        if (isinstance(bot, GameAssistBot) and interaction.guild is not None
+                and _award_test_guild(interaction, bot)
+                and _can_manage_admin_commands(interaction, bot.settings)):
+            return True
+        await interaction.response.send_message("Reputation setup requires Manage Server in the testing Discord.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Enable & Create / Repair", style=discord.ButtonStyle.primary)
+    async def enable(self, interaction: discord.Interaction, button: discord.ui.Button):
+        bot = interaction.client
+        key = _reputation_settings_key(interaction.guild_id)
+        settings = await bot.cache.get(key) or {}
+        if not settings.get("reviewer_role_id") or interaction.guild.get_role(int(settings["reviewer_role_id"])) is None:
+            await interaction.response.send_message("Choose an existing reviewer role first.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        settings["enabled"] = True
+        await bot.cache.set(key, settings, 315360000)
+        try:
+            await bot.ensure_reputation_submission_channels(interaction.guild)
+        except (discord.HTTPException, RuntimeError):
+            await interaction.followup.send("Settings saved, but channel setup failed. Check the bot's channel and message permissions, then retry.", ephemeral=True)
+            return
+        await interaction.followup.send("Reputation enabled. Application, private review, and activity channels/panels are ready.", ephemeral=True)
+
+    @discord.ui.button(label="Disable Reputation", style=discord.ButtonStyle.secondary)
+    async def disable(self, interaction: discord.Interaction, button: discord.ui.Button):
+        key = _reputation_settings_key(interaction.guild_id)
+        settings = await interaction.client.cache.get(key) or {}
+        settings["enabled"] = False
+        await interaction.client.cache.set(key, settings, 315360000)
+        await interaction.response.send_message("Reputation submissions disabled. Existing records and channels are preserved.", ephemeral=True)
 
 
 class NativeAdminView(discord.ui.View):
     def __init__(self, modules: dict[str, dict[str, object]], setup_mode: str = "manual",
-                 awards_available: bool = False) -> None:
+                 awards_available: bool = False, development_available: bool = False) -> None:
         super().__init__(timeout=900)
         self.modules = modules
         self.add_item(NativeAdminModuleSelect(modules))
@@ -7735,9 +7811,14 @@ class NativeAdminView(discord.ui.View):
         guide.callback = self.show_guide
         self.add_item(guide)
         if awards_available:
+            reputation = discord.ui.Button(label="Reputation Setup", style=discord.ButtonStyle.secondary)
+            reputation.callback = self.show_reputation
+            self.add_item(reputation)
+        if awards_available or development_available:
             development = discord.ui.Button(label="Development Announcements", style=discord.ButtonStyle.secondary)
             development.callback = setup_development_announcements
             self.add_item(development)
+        if awards_available:
             awards = discord.ui.Button(label="Award Setup", style=discord.ButtonStyle.secondary, emoji="🏆")
             awards.callback = self.show_awards
             self.add_item(awards)
@@ -7748,6 +7829,18 @@ class NativeAdminView(discord.ui.View):
 
     async def show_guide(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(embed=build_bot_setup_guide_embed(), ephemeral=True)
+
+    async def show_reputation(self, interaction: discord.Interaction):
+        view = ReputationAdminView()
+        if not await view.interaction_check(interaction):
+            return
+        settings = await interaction.client.cache.get(_reputation_settings_key(interaction.guild_id)) or {}
+        embed = discord.Embed(title="Reputation Setup", description=(
+            "Choose a reviewer role, then enable and create/repair the application panel, private review queue, "
+            "and activity channel. These settings are shared with the website."), color=discord.Color.blue())
+        embed.add_field(name="Status", value="Enabled" if settings.get("enabled") else "Disabled")
+        embed.add_field(name="Reviewer role", value=f"<@&{settings['reviewer_role_id']}>" if settings.get("reviewer_role_id") else "Not selected")
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def show_awards(self, interaction: discord.Interaction) -> None:
         bot = interaction.client
@@ -7795,7 +7888,7 @@ class NativeAdminView(discord.ui.View):
         await bot.ensure_about_panel(interaction.guild)
         await interaction.edit_original_response(
             embed=build_native_admin_embed(interaction.guild, self.modules),
-            view=NativeAdminView(self.modules, "automatic", awards_available=_award_test_guild(interaction, bot)),
+            view=NativeAdminView(self.modules, "automatic", awards_available=_award_test_guild(interaction, bot), development_available=destination_available(bot.settings, interaction.guild_id)),
         )
 
     async def show_channel_choice(self, interaction: discord.Interaction) -> None:
@@ -7846,7 +7939,7 @@ async def respond_with_admin_panel(interaction: discord.Interaction) -> None:
         embed=build_native_admin_embed(interaction.guild, modules, pending),
         view=NativeAdminView(
             modules, str((stored or {}).get("channel_setup_mode") or "manual"),
-            awards_available=_award_test_guild(interaction, bot),
+            awards_available=_award_test_guild(interaction, bot), development_available=destination_available(bot.settings, interaction.guild_id),
         ),
         ephemeral=True,
     )

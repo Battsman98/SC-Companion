@@ -1,19 +1,38 @@
-# Project announcements (testing pilot)
+# Development announcements
 
-SC Companion can publish approved feature/project starts and completions. There is no deployment or startup posting hook. Creating a draft never sends a public announcement.
+Peep owns private announcement drafts and approvals in its home Discord. SC Companion delivers approved updates to each participating server, using the same shared database pattern as feedback routing in the opposite direction. Peep keeps its existing OAuth, identity, feedback, support, and admin responsibilities. Neither deployment nor normal chat messages create or approve broadcasts.
 
-This pilot registers `/announcement` only in `AWARD_TEST_GUILD_ID`, the existing testing Discord. Every command also checks the public runtime and that guild, then permits the testing-server owner or an account listed in `BOT_ADMIN_USER_IDS`. Peep and other servers do not receive the commands. Other server administrators cannot approve announcements unless explicitly listed as bot admins.
+## Set up a receiving server
 
-1. Run `/announcement channel` to create/find `development-announcements`, or use an existing text/announcement channel.
-2. Run `/announcement draft`, selecting the destination, project name, started/completed stage, and public-facing update text.
-3. Inspect the private preview. `/announcement pending` lists recent drafts; `/announcement review` retrieves the saved text and destination after a restart.
-4. Use `/announcement revise` to correct the text/destination, or `/announcement reject` to discard it. Rejected drafts can be revised and reviewed again.
-5. Run `/announcement approve` with the draft ID to publish that saved announcement once. Mentions are disabled and announcement-channel messages are not crossposted.
+Use SC Companion's `/admin panel` → Development Announcements to create or repair `development-announcements` under `🚀 SC COMPANION`. Existing channels move into that category without resetting permissions. Creating a channel does not subscribe the server.
 
-Use a consistent project name: the database permits one announcement per project/stage/server. Drafts and publication receipts are durable. An atomic claim prevents concurrent approvals or restarts from resending an announcement. If delivery is uncertain, the record stays `sending`; inspect the destination using the ID in the embed footer before manual recovery. There is deliberately no automatic retry.
+Choose **Opt In to Broadcasts** in the setup response, or use `/development subscription enabled:True channel:#development-announcements`. A server owner, member with Manage Server, or configured bot admin may configure the subscription. To use a different channel, run the command again with that channel. Set enabled to False to opt out. Broadcast subscriptions are managed entirely in Discord.
 
-Other SC Companion servers remain excluded. A future rollout needs an explicit per-server opt-in/channel configuration and separate deployment approval.
+## Draft and approve in Peep
 
-## Setup screens
+1. In Peep's home Discord, run `/broadcast draft` with the project name, started/completed stage, and announcement text. Only the home-server owner or `BOT_ADMIN_USER_IDS` can do this.
+2. Inspect the private preview and saved recipients. Use `/broadcast review` to retrieve it later, `/broadcast recipients` for a paginated full audience, and `/broadcast pending` to list recent records.
+3. Run `/broadcast approve` with the draft ID to authorize delivery. To change the content, reject the draft with `/broadcast reject` and create a replacement. Draft content and audience are immutable.
+4. SC Companion picks up approved broadcasts within about one minute. `/broadcast review` shows per-server delivery receipts: published, skipped, failed, uncertain, or sending. A processed broadcast means delivery attempts were handled; inspect individual receipts to see failures.
 
-In the testing Discord, `/admin panel` includes **Development Announcements**, which creates or repairs the channel and an informational setup panel. The same action is available on the website under Bot Management → Features and Channel Management. The website detects an existing `development-announcements` channel and shows the stored panel status. Website setup requests are handled by SC Companion within about one minute; refresh to see the result. Only the testing-server owner or a configured bot admin can request setup. Setup does not approve or publish project updates.
+Approval freezes the text and destination list shown in the draft. A newly subscribed server does not receive old broadcasts. Opting out or changing the destination before delivery causes that recipient to be skipped. Messages suppress mentions and push notifications; this does not change members' personal channel-mute settings.
+
+Durable claims prevent double delivery from concurrent workers, repeated approvals, and restarts. An ambiguous Discord failure is marked uncertain (or sending if the process stopped) and is never automatically retried. Inspect the destination using the announcement ID in the footer before creating any replacement broadcast. There is no bulk delete/retract feature. Drafting the same project again creates a distinct broadcast, so check recent records before approving duplicates.
+
+The previous `/announcement` commands remain available for local testing drafts. They never broadcast to other servers.
+
+## Deployment and rollout
+
+Peep and SC Companion must use the same PostgreSQL `DATABASE_PATH`. Deploy the shared broadcast code only to both bot runtimes; Peep remains on its own deployment branch with its own token. No credentials are exchanged between applications.
+
+`ANNOUNCEMENT_TESTING_ONLY` defaults to true. Set the same `AWARD_TEST_GUILD_ID` on both bot services; while testing-only is enabled, only that server can subscribe or receive deliveries. The sender and receiver independently enforce this restriction. If the ID is missing, the pilot fails closed.
+
+After testing and explicit rollout approval, set `ANNOUNCEMENT_TESTING_ONLY=false` on both bot services to include every opted-in SC Companion server. Existing servers are never subscribed automatically.
+
+Do not deploy the website for this release. Before any authorized push, check whether shared source changes would trigger its auto-deploy and prevent that deployment. The existing website remains at its current release.
+
+Every bot push/deployment requires user confirmation under AGENTS.md. No deployment is authorized by implementing this feature.
+
+## Reputation setup
+
+In the testing Discord, `/admin panel` also includes Reputation Setup. Select a reviewer role, then enable/create or repair the application, private review, and activity panels. The controls share settings with the website. Disabling preserves existing records and channels.
