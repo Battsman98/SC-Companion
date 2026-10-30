@@ -18,6 +18,18 @@
   const names = {cash:'Lowest additional spending', total:'Lowest total — known costs only', gaps:'Fewest missing upgrades'};
   const protection = (kind, item) => `<button type="button" data-protect="${kind}" data-id="${esc(item.id)}" aria-pressed="${!!item.protected}">${item.protected?'Unprotect':'Protect'} this copy</button>`;
   const historicalRow = d => `<li>${esc(d.source)} → ${esc(d.target)} · Historical reference ${money(d.reference_cost)} · Observed ${esc(d.observed_at)} · Availability unconfirmed<label>Acquisition quote (USD; blank uses reference)<input data-acquisition-quote type="number" min="0" max="10000" step="0.01" value="${plan.deal_quotes?.['historical:'+d.id]??''}"></label><button type="button" data-quote="${esc('historical:'+d.id)}" data-goal="${esc(plan.goals.at(-1)?.id||'')}">Update acquisition quote</button></li>`;
+  const replacementLabel = edge => {
+    const price=edge.cost==null?'cost unknown':money(edge.cost);
+    const description={
+      gap:`theoretical ${price} upgrade`,
+      owned:`owned CCU — $0 additional spend; paid ${price}`,
+      active_warbond:`active warbond ${price} upgrade — new cash`,
+      historical_warbond:edge.hypothetical?`historical ${price} upgrade — reference estimate`:`historical ${price} upgrade — acquisition quote`,
+      buyback:`buyback ${price} upgrade — verify checkout`,
+      candidate:`estimated ${price} upgrade`
+    }[edge.status]||`estimated ${price} upgrade`;
+    return `To ${edge.target} — ${description}${edge.id?' · Copy '+edge.id:''}`;
+  };
   const accounting = item => `${item.status==='owned'?'Actual paid / allocated child cost':'Entered purchase estimate'}: ${money(item.cost)} · RSI pledge: ${money(item.pledge_value)} · Melt: ${money(item.melt_value)} · Insurance: ${esc(item.insurance||'Unknown')}${item.lti?' · Confirmed LTI':''}${item.package_id?` · Package ${esc(item.package_id)}: pledge ${money(item.package_value)}, melt ${money(item.package_melt_value)} (shared values, excluded from child cost)`:''}${item.import_missing?' · Missing or changed import evidence; unavailable for routing':''}`;
   function announce(text, error = false) {notice.textContent = text; notice.className = error ? 'error' : 'state';}
   async function request(path, method='GET', body) {
@@ -234,7 +246,7 @@
       <ol class="ccu-steps">${r.steps.map(e=>`<li><strong>${esc(e.source)} → ${esc(e.target)}</strong><p>Current upgrade values: ${money(e.source_value)} → ${money(e.target_value)}</p><p>${e.status==='owned'?'Owned · 1 copy':e.status==='gap'?'Missing · theoretical bridge, availability unverified':e.status==='active_warbond'?'Active warbond · new cash required':e.status==='historical_warbond'?'Historical warbond · availability unconfirmed':'Missing · entered purchase estimate'} · ${e.id?`Copy ${esc(e.id)} · `:''}${e.status==='owned'?'Actual paid':'Estimated cost'}: ${money(e.cost)} · Insurance: ${esc(e.insurance||'Unknown')} · Spend remaining after step: ${money(e.remaining)}</p><p>${esc(e.note)} ${e.observed_at?'Observed: '+esc(e.observed_at):''}</p>
       ${e.status==='historical_warbond'?`<p>Historical reference: ${money(e.reference_cost)} · ${e.hypothetical?'Hypothetical price':'Your acquisition quote'}</p><label>Acquisition quote (USD; blank uses historical reference)<input data-acquisition-quote type="number" min="0" max="10000" step="0.01" value="${e.acquisition_quote??''}"></label><button type="button" data-quote="${esc(e.key)}" data-goal="${esc(id)}">Update acquisition quote</button>`:''}
       ${control((goal.locked_steps||[]).includes(e.key)?'unlock':'lock',e.key,(goal.locked_steps||[]).includes(e.key)?'Unlock step':'Lock step')}${control('exclude',e.key,'Exclude step')}
-      ${(e.alternatives||[]).length?`<details><summary>Replace this step</summary><label>Alternative from ${esc(e.source)}<select>${option('','Choose an alternative')}${e.alternatives.map(a=>option(a.key,`${a.target} · ${a.status==='gap'?'theoretical':a.status} · ${money(a.cost)}${a.id?' · '+a.id:''}`)).join('')}</select></label>${control('replace',e.key,'Use alternative')}</details>`:''}</li>`).join('')}</ol>
+      ${(e.alternatives||[]).length?`<details><summary>Replace this step</summary><p>Each option is a next upgrade from this ship. The amount is that upgrade’s cost, not a surcharge over the current step or the total remaining chain cost. Choosing one recalculates the route to your goal. Theoretical upgrades and historical deals have unconfirmed availability.</p><label>Alternative from ${esc(e.source)}<select>${option('','Choose an alternative')}${e.alternatives.map(a=>option(a.key,replacementLabel(a))).join('')}</select></label>${control('replace',e.key,'Use alternative')}</details>`:''}</li>`).join('')}</ol>
       <button type="button" data-reserve="${esc(id)}" data-mode="${r.mode}">Reserve this base and listed CCUs</button></details>`).join('') || '<p>Your goal is added. A price may be missing, LTI may need confirmation, or protected/reserved copies and route constraints prevent a route. Check Advanced: pledge values, add a suitable base, or clear route constraints. You can leave this goal in your plan and fill details later.</p>';
       if(result.routes.length&&!result.routes.some(r=>r.mode==='total'))out.insertAdjacentHTML('afterbegin','<p>Lowest total comparison is unavailable for these constraints because actual paid costs are unknown. Additional-spend estimates are still shown.</p>');
       if(result.market_warning)out.insertAdjacentHTML('afterbegin',`<p>${esc(result.market_warning)}</p>`);
