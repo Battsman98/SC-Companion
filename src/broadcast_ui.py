@@ -19,9 +19,13 @@ class OwnerView(discord.ui.View):
         return await allowed(interaction)
 
 
+def draft_count(body):
+    return f'{len(body):,} / 3,500 characters · {len(body.split()):,} words'
+
+
 class DraftModal(discord.ui.Modal, title='Draft announcement'):
-    announcement = discord.ui.TextInput(label='What would you like to announce?', style=discord.TextStyle.paragraph,
-                                        placeholder='Type your announcement here…', max_length=3500)
+    announcement = discord.ui.TextInput(label='Announcement (max 3,500 characters)', style=discord.TextStyle.paragraph,
+                                        placeholder='Spaces and line breaks count toward the character limit.', max_length=3500)
 
     async def on_submit(self, interaction):
         if not await allowed(interaction):
@@ -35,8 +39,9 @@ class DraftModal(discord.ui.Modal, title='Draft announcement'):
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
             return
-        await interaction.response.send_message('Draft saved. Click **Approve** to review and submit.',
-            embed=preview(db.get(interaction.guild_id, key)), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        draft = db.get(interaction.guild_id, key)
+        await interaction.response.send_message('Draft saved. Click **Approve** to review and submit.\n' + draft_count(draft['body']),
+            embed=preview(draft), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 class SubmitView(OwnerView):
@@ -69,7 +74,7 @@ async def show_review(interaction, key):
         await interaction.response.send_message('That draft is no longer available.', ephemeral=True)
         return
     await interaction.response.send_message('Review your announcement below. Nothing is sent until you click **Submit announcement**.\n\n'
-        + destinations(draft), embed=preview(draft), view=SubmitView(key), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        + draft_count(draft['body']) + '\n' + destinations(draft), embed=preview(draft), view=SubmitView(key), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 class DraftSelect(discord.ui.Select):
