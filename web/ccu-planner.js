@@ -224,7 +224,7 @@
       const out=workspace.querySelector(`[data-results="${CSS.escape(id)}"]`);
       const goal=plan.goals.find(g=>g.id===id);
       const control=(action,key,label)=>`<button type="button" data-constraint="${action}" data-goal="${esc(id)}" data-key="${esc(key)}">${label}</button>`;
-      out.innerHTML=result.routes.map(r=>`<details open><summary>${esc(names[r.mode])}</summary><p><strong>${esc(r.base.label)}</strong> (${r.base.id.startsWith('suggested:')?'suggested purchase · availability and LTI unverified':esc(r.base.status)}) → ${r.steps.map(e=>`${esc(e.target)} [${esc(e.status)}]`).join(' → ') || (r.base.status==='owned'?'Already at target':'Standalone purchase baseline')}</p>
+      out.innerHTML=result.routes.map(r=>`<details><summary>${esc(names[r.mode])}</summary><p><strong>${esc(r.base.label)}</strong> (${r.base.id.startsWith('suggested:')?'suggested purchase · availability and LTI unverified':esc(r.base.status)}) → ${r.steps.map(e=>`${esc(e.target)} [${esc(e.status)}]`).join(' → ') || (r.base.status==='owned'?'Already at target':'Standalone purchase baseline')}</p>
       <p>Estimated additional spend: <strong>${money(r.additional)}</strong> · Estimated total: ${money(r.total)} · Potential savings against current goal value: ${money(r.savings)} · Missing purchases: ${r.missing}</p>
       <p>Warbond step savings versus standard value differences: <strong>${money(r.warbond_savings||0)}</strong>. ${r.hypothetical?'Hypothetical: this route uses historical prices without acquisition quotes.':'Any historical acquisition quotes remain unconfirmed until purchased.'}</p>
       <p>${accounting(r.base)}. No availability or savings guarantee. Package costs require an explicit per-child allocation before totals are known.</p>
