@@ -79,6 +79,8 @@
       <details><summary>Owned CCUs (optional) · ${plan.upgrades.length}</summary>
       <p>Import unapplied upgrades using the RSI Hangar Importer, or enter them here. Each copy is tracked separately. Unknown purchase costs stay blank. ${plan.upgrades.filter(c=>c.status==='owned'&&!c.protected&&!c.import_missing&&!reserved(c.id)).length} owned copies available; ${plan.upgrades.filter(c=>c.protected).length} protected.</p>
       <button type="button" data-import-ccu>Import owned CCUs from RSI</button>
+      <label>Import HangarLink CSV<input type="file" data-hangarlink-csv accept=".csv,text/csv"></label>
+      <p>Choose your Hangar Export CSV, then review ships and CCUs before applying. Buybacks and unsupported items are skipped. CSV values are not treated as actual paid costs or current upgrade prices.</p>
       <div id="ccuImportPreview"></div>
       <p>Requires RSI sign-in in your browser. Importer 0.6.0 includes ships, packages and CCUs; older CCU imports remain supported. Discord is only needed to save your plan. For Chrome / Edge, extract the download and load its folder using Load unpacked on the browser extensions page. <a href="/assets/rsi-connector-extension-v0.6.0.zip">Chrome / Edge importer</a> · <a href="/assets/rsi-connector-extension-firefox-v0.6.0.zip">Firefox importer</a></p>
       <form data-ccu="upgrade">${field('From ship',shipSelect('source'))}${field('To ship',shipSelect('target'))}${field('Status',status())}${field('Purchase cost (optional)',number('cost'))}${field('Note (optional)',input('note','maxlength="200"'))}<button>Add CCU copy</button></form>
@@ -252,6 +254,17 @@
     return name;
   }
   let suggestTimer;
+  workspace.addEventListener('change',event=>{
+    if(!event.target.matches('[data-hangarlink-csv]'))return;
+    const file=event.target.files?.[0];if(!file)return;
+    action(async()=>{
+      pendingImport=null;workspace.querySelector('#ccuImportPreview').innerHTML='';
+      if(file.size>5*1024*1024)throw Error('CSV is too large (maximum 5 MB).');
+      pendingImport=await window.HangarLinkCSV.parse(await file.text());
+      previewImport();
+    });
+    event.target.value='';
+  });
   workspace.addEventListener('input',event=>{
     if(event.target.getAttribute('list')!=='ccuNames')return;
     clearTimeout(suggestTimer);const query=event.target.value;
@@ -313,7 +326,7 @@
         const values=kind==='upgrades'?{source:await ensureShip(next,item.source_ship),target:await ensureShip(next,item.target_ship)}:{ship:await ensureShip(next,item.name),ownership:'pledged'};
         if(current&&Object.keys(values).some(k=>k!=='ownership'&&current[k]!==values[k])){current.import_missing=true;continue;}
         if(current){Object.assign(current,metadata);updated++;}
-        else{next[kind].push({id:uid(),...values,...metadata,status:'owned',cost:null,...(kind==='bases'?{label:(pkg?.title||item.name).slice(0,150),lti:/lifetime insurance|\bLTI\b/i.test(insurance)}:{note:'RSI import; actual paid unknown'})});added++;}
+        else{next[kind].push({id:uid(),...values,...metadata,status:'owned',cost:null,...(kind==='bases'?{label:(pkg?.title||item.name).slice(0,150),lti:/lifetime insurance|\bLTI\b/i.test(insurance)}:{note:pendingImport.source==='HangarLink CSV'?'HangarLink CSV; actual paid unknown':'RSI import; actual paid unknown'})});added++;}
       }
       if(pendingImport.sync.complete)for(const item of [...next.bases,...next.upgrades])if(item.import_identity==='stable'&&!seen.has(item.import_id))item.import_missing=true;
       for(const item of [...next.bases,...next.upgrades]){

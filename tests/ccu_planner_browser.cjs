@@ -31,7 +31,7 @@ function backend(body,goal){
    return route.fulfill({json:backend(plan,goal.id)});
   }
   const html=fs.readFileSync('web/index.html','utf8').match(/<article class="panel ccu-planner"[\s\S]*?<\/article>/)[0];
-  return route.fulfill({contentType:'text/html',body:`<html><head><meta charset="utf-8"><style>${fs.readFileSync('web/styles.css','utf8')}\n${fs.readFileSync('web/ccu-planner.css','utf8')}</style></head><body>${html}<script>async function rsiConnect(){return {code:200,upgrades:[{id:'rsi-copy-1',source:'Dragonfly Black',target:'Mako'},{id:'rsi-copy-2',source:'Dragonfly Black',target:'Mako'}]};}</script><script>${fs.readFileSync('web/ccu-planner.js','utf8')}</script></body></html>`});
+  return route.fulfill({contentType:'text/html',body:`<html><head><meta charset="utf-8"><style>${fs.readFileSync('web/styles.css','utf8')}\n${fs.readFileSync('web/ccu-planner.css','utf8')}</style></head><body>${html}<script>async function rsiConnect(){return {code:200,upgrades:[{id:'rsi-copy-1',source:'Dragonfly Black',target:'Mako'},{id:'rsi-copy-2',source:'Dragonfly Black',target:'Mako'}]};}</script><script>${fs.readFileSync('web/hangarlink-csv.js','utf8')}</script><script>${fs.readFileSync('web/ccu-planner.js','utf8')}</script></body></html>`});
  });
  await page.goto('http://localhost/');
  const goal=page.locator('form[data-ccu=goal]');
@@ -212,6 +212,28 @@ function backend(body,goal){
  await page.locator('[data-find]').first().click();
  await openComparisons();
  await page.getByText('Active warbond · new cash required',{exact:false}).first().waitFor();
+ if(errors.length)throw Error(errors.join('\n'));
+
+ await page.goto('http://localhost/csv');
+ await goal.locator('[name=target]').fill('Mako');
+ await page.getByText('Owned CCUs (optional) · 0',{exact:true}).click();
+ const csvText='"Pilot Type","PledgeId","Name","Value","ConfigurationValue","AlsoContains","Items"\r\n"PLEDGE","100","Starter Pack","4000","99999","[TITLE Lifetime Insurance]","[KIND Ship][TITLE Dragonfly Black]"\r\n"PLEDGE","200","Upgrade - Dragonfly Black to Mako - Warbond Edition","500","99999","",""';
+ const upload=()=>page.locator('[data-hangarlink-csv]').setInputFiles({name:'hangarexport.csv',mimeType:'text/csv',buffer:Buffer.from(csvText)});
+ await upload();await page.getByText('Review inventory import',{exact:true}).waitFor();
+ if(await page.locator('[data-import-row]').count()!==2)throw Error('CSV observations missing');
+ for(const select of await page.locator('[data-import-row]').all()){
+  if(await select.inputValue()!=='skip')throw Error('CSV identities must require review');
+  await select.selectOption('new');
+ }
+ await page.locator('#ccuSameAccount').check();await page.getByRole('button',{name:'Apply reviewed import'}).click();
+ await page.getByText('Imported 2 copies;',{exact:false}).waitFor();
+ if(plan.bases.length!==1||plan.upgrades.length!==1||plan.bases[0].cost!==null||plan.upgrades[0].cost!==null||!plan.bases[0].lti)throw Error('CSV accounting or insurance incorrect');
+ if(await goal.locator('[name=target]').inputValue()!=='Mako')throw Error('CSV import erased goal draft');
+ await upload();await page.getByText('Review inventory import',{exact:true}).waitFor();
+ await page.locator('#ccuSameAccount').check();
+ await page.getByRole('button',{name:'Apply reviewed import'}).click();
+ await page.getByText('Imported 0 copies;',{exact:false}).waitFor();
+ if(plan.bases.length!==1||plan.upgrades.length!==1)throw Error('Repeated CSV import duplicated inventory');
  if(errors.length)throw Error(errors.join('\n'));
  fs.mkdirSync('output',{recursive:true});
  await page.screenshot({path:'output/ccu-goal-first-desktop.png',fullPage:true});

@@ -84,3 +84,24 @@ availability or the final insurance resulting from applying upgrades.
 
 No deploy or push is part of this implementation. Peep authentication and support
 remain separate from the SC Companion public-install Discord application.
+
+## HangarLink CSV
+
+The file picker under Owned CCUs accepts the Hangar Export CSV format described by
+[its public exporter](https://github.com/SC-Open/hangarlink-hangarexport/blob/master/scripts/content.js).
+The independent reader recognizes the handle-specific Type header, PledgeId, Name,
+Items and AlsoContains fields. It reads PLEDGE ships/vehicles from tagged items and
+unambiguous upgrade names; buybacks and unsupported/non-ship rows are reported as
+skipped. Quoted CSV fields support commas, escaped quotes, and newlines.
+
+Imports use the existing reviewed reconciliation flow. CSV identities remain
+uncertain and default to Skip; users explicitly add separate copies or match
+existing ones. CSVs are partial snapshots, so absence never marks other inventory
+missing. Package children stay separate, insurance is retained, and raw Value and
+ConfigurationValue columns are never interpreted as actual paid costs or current
+upgrade values. Raw CSV contents and acquisition URLs are not sent to the planner
+API. Maximum file size is 5 MB, with at most 600 supported observations.
+
+Route comparisons start collapsed; users expand the comparison they want to read.
+Release reservations clears a goal's allocated base, allocated CCU copies and
+saved path, keeping the goal and inventory available for further planning.
