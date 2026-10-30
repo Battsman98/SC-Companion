@@ -77,6 +77,15 @@ def test_panel_setup_reuses_channel_and_saved_message():
         await ensure_development_panel(bot, guild)
         await ensure_development_panel(bot, guild)
         assert message.edit.await_count == 2
+        description = message.edit.await_args.kwargs['embed'].description
+        assert '/broadcast' not in description and '/announcement' not in description
+        assert 'upcoming features' in description
+        from src.broadcast_store import BroadcastStore
+        db = BroadcastStore(cache._connection)
+        assert db.targets(1) == [(1, 2)]
+        db.subscribe(1, 2, False, 7)
+        await ensure_development_panel(bot, guild)
+        assert db.targets(1) == []
         assert channel.edit.await_args.kwargs["category"].id == 8
         assert channel.edit.await_args.kwargs["sync_permissions"] is False
         channel.send.assert_not_awaited()

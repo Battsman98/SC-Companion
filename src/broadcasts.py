@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 
 def preview(draft):
-    embed = discord.Embed(title=f"Project {draft['phase']}: {draft['project']}",
+    embed = discord.Embed(title="Development Announcement" if draft["project"] == "Development Announcement" else f"Project {draft['phase']}: {draft['project']}",
                           description=draft['body'], color=0x3498DB)
     embed.set_footer(text=f"SC Companion • Announcement {draft['id']}")
     return embed
