@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.broadcasts import broadcast_group, permitted as broadcast_permitted
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.sources.base import (
@@ -567,6 +568,11 @@ class GameAssistCommandTree(app_commands.CommandTree):
             return False
 
         command_name = _interaction_command_name(interaction)
+        if command_name.startswith("broadcast "):
+            if broadcast_permitted(interaction):
+                return True
+            await interaction.response.send_message("Broadcasts are restricted to Peep's home-server owner and configured bot admins.", ephemeral=True)
+            return False
         configured = await bot.cache.guild_bot_settings(interaction.guild_id)
         is_primary_guild = interaction.guild_id == bot.settings.discord_guild_id
         if configured is None and not is_primary_guild and not command_name.startswith("admin "):
@@ -876,6 +882,7 @@ class GameAssistBot(commands.Bot):
             guild = discord.Object(id=self.settings.discord_guild_id)
             self.tree.add_command(admin_group, guild=guild)
             self.tree.add_command(audit_group, guild=guild)
+            self.tree.add_command(broadcast_group, guild=guild)
             await self.tree.sync(guild=guild)
             logging.info("Synced Peep admin commands to guild %s", self.settings.discord_guild_id)
             return

@@ -40,6 +40,8 @@ class Settings:
     discord_support_guild_id: int | None = None
     approval_authority: bool = True
     runtime_profile: str = "peep"
+    award_test_guild_id: int | None = None
+    announcement_testing_only: bool = True
 
     @classmethod
     def from_env(cls, load_env_file: bool = True, require_discord_token: bool = True) -> "Settings":
@@ -129,6 +131,8 @@ class Settings:
             approval_authority=os.getenv("BOT_APPROVAL_AUTHORITY", "true").strip().casefold()
             not in {"0", "false", "no", "off"},
             runtime_profile=runtime_profile,
+            award_test_guild_id=int(os.getenv("AWARD_TEST_GUILD_ID", "").strip()) if os.getenv("AWARD_TEST_GUILD_ID", "").strip() else None,
+            announcement_testing_only=os.getenv("ANNOUNCEMENT_TESTING_ONLY", "true").strip().lower() != "false",
         )
 
 
