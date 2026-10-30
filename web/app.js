@@ -134,11 +134,26 @@ function openMissionFromBlueprint(missionName) {
   outputs.missions.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-const homeBackgrounds = [
-  "25", "29", "30", "32", "34", "36",
-  "user-01", "user-04", "user-05", "user-06", "user-07", "user-08", "user-09",
-  "gallery-01", "gallery-02", "gallery-03", "gallery-04", "gallery-05", "gallery-06", "gallery-07",
-];
+// Hawaii has no daylight saving time: its calendar day starts at 10:00 UTC.
+function homeDayKey(now = Date.now()) {
+  return new Date(now - 10 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function selectHomeBackgrounds(pool, day) {
+  let seed = 2166136261;
+  for (const char of day) seed = Math.imul(seed ^ char.charCodeAt(0), 16777619) >>> 0;
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const j = Math.floor((seed / 4294967296) * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, 10);
+}
+
+const homeImagePool = window.homeImagePool || [{ wide: "gallery-01.webp" }];
+let homeSelectionDay = homeDayKey();
+let homeBackgrounds = selectHomeBackgrounds(homeImagePool, homeSelectionDay);
 const homeBackgroundLayers = Array.from(document.querySelectorAll(".home-background-layer"));
 const homeSlideButtons = Array.from(document.querySelectorAll("[data-home-slide]"));
 const homeCarouselToggle = document.querySelector("[data-home-carousel-toggle]");
@@ -147,6 +162,7 @@ let homeSlideIndex = Math.floor(Math.random() * homeBackgrounds.length);
 let homeLayerIndex = 0;
 let homeCarouselTimer = null;
 let homeCarouselPaused = reduceMotionQuery.matches;
+let homeImageRequest = 0;
 
 function homeBackgroundSize() {
   if (window.matchMedia("(max-width: 680px)").matches) return "mobile";
@@ -156,12 +172,12 @@ function homeBackgroundSize() {
 
 function homeBackgroundUrl(index) {
   const background = homeBackgrounds[index];
-  if (background.startsWith("user-") || background.startsWith("gallery-")) return `/assets/media/home/${background}.webp`;
-  return `/assets/media/home/sc-${background}-${homeBackgroundSize()}.jpg`;
+  return `/assets/media/home/${background[homeBackgroundSize()] || background.wide}`;
 }
 
 function updateHomeSlideControls() {
   homeSlideButtons.forEach((button, index) => {
+    button.hidden = index >= homeBackgrounds.length;
     const active = index === homeSlideIndex;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
@@ -172,12 +188,14 @@ function updateHomeSlideControls() {
 }
 
 function showHomeBackground(index, immediate = false) {
-  if (!homeBackgroundLayers.length) return;
+  if (!homeBackgroundLayers.length || !homeBackgrounds.length) return;
+  const request = ++homeImageRequest;
   homeSlideIndex = (index + homeBackgrounds.length) % homeBackgrounds.length;
   const nextLayerIndex = immediate ? homeLayerIndex : 1 - homeLayerIndex;
   const nextLayer = homeBackgroundLayers[nextLayerIndex];
   const image = new Image();
   image.addEventListener("load", () => {
+    if (request !== homeImageRequest) return;
     nextLayer.style.backgroundImage = `url("${image.src}")`;
     homeBackgroundLayers.forEach((layer, layerIndex) => layer.classList.toggle("active", layerIndex === nextLayerIndex));
     homeLayerIndex = nextLayerIndex;
@@ -211,6 +229,30 @@ window.addEventListener("resize", () => {
   window.clearTimeout(homeResizeTimer);
   homeResizeTimer = window.setTimeout(() => showHomeBackground(homeSlideIndex, true), 150);
 });
+
+function refreshHomeDay() {
+  const day = homeDayKey();
+  if (day === homeSelectionDay) return;
+  homeSelectionDay = day;
+  homeBackgrounds = selectHomeBackgrounds(homeImagePool, day);
+  showHomeBackground(0, true);
+  updateHomeSlideControls();
+  restartHomeCarousel();
+}
+
+let homeDayTimer;
+function scheduleHomeDay() {
+  window.clearTimeout(homeDayTimer);
+  refreshHomeDay();
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const nextMidnight = (Math.floor((now - 10 * 60 * 60 * 1000) / dayMs) + 1) * dayMs + 10 * 60 * 60 * 1000;
+  homeDayTimer = window.setTimeout(scheduleHomeDay, nextMidnight - now + 50);
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) scheduleHomeDay();
+});
+scheduleHomeDay();
 
 showHomeBackground(homeSlideIndex, true);
 updateHomeSlideControls();
