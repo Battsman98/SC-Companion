@@ -8,6 +8,7 @@
   <link rel="apple-touch-icon" href="/assets/sc-companion-icon.png?v=20260907-2">
   <link rel="stylesheet" href="/assets/styles.css?v=20260917-all-special-channels-v5-awards-layout-v2">
   <link rel="stylesheet" href="/assets/hotfix-overlay.css?v=20260815-scanner-errors">
+  <link rel="stylesheet" href="/assets/ccu-planner.css?v=1">
 </head>
 <body data-mfd-theme="overview">
   <header class="topbar">
@@ -127,6 +128,12 @@
         <button type="submit">Search Ships</button>
         <div id="lookupOutput" class="results"></div>
       </form>
+      <article class="panel ccu-planner" id="ccuPlanner">
+        <div class="panel-heading"><h2>CCU Planner</h2><button type="button" id="ccuReload">Load / refresh planner</button></div>
+        <p>Plan one goal at a time while protecting other builds. Uses your RSI-imported hangar as starting candidates. Confirm pledge values and LTI before planning.</p>
+        <p id="ccuNotice" role="status" aria-live="polite">Load your planner to begin. Discord sign-in is required.</p>
+        <div id="ccuWorkspace" hidden></div>
+      </article>
       <article class="panel warbond-tracker">
         <div class="panel-heading">
           <div>
@@ -861,5 +868,6 @@
 
   <script src="/assets/hotfix-overlay.js?v=20260815-scanner-errors" defer></script>
   <script src="/assets/app.js?v=20260917-reputation-save-v1-award-roles-v1-award-delete-v1-all-special-channels-v5-award-selection-v2-rep-panel-guide-v1-awards-layout-v3-rep-manual-v1" defer></script>
+  <script src="/assets/ccu-planner.js?v=1" defer></script>
 </body>
 </html>

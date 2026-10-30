@@ -38,6 +38,8 @@ from src.shared import (
     apply_community_mining_locations,
     get_cz_dashboard_timers,
 )
+from src.ccu_planner import Planner, find_routes
+from src.ccu_storage import CcuStore
 from src.cache import AUDIT_ACTION_TYPES, SCANNER_DIAGNOSTIC_RETENTION_SECONDS, SQLiteCache
 from src.config import Settings
 from src.guild_config import BOT_MODULES, default_module_settings, normalize_module_settings
@@ -2761,6 +2763,51 @@ async def autocomplete_ships(query: str = "") -> list[str]:
 @app.get("/api/ships/facets")
 async def ship_facets() -> dict[str, list[str]]:
     return await state().sources.ship_facets()
+
+
+def ccu_store():
+    return CcuStore(state().cache)
+
+
+@app.get("/api/me/ccu")
+async def get_ccu_plan(user=Depends(require_user)):
+    return Planner.model_validate(await ccu_store().ccu_plan(user.id)).model_dump()
+
+
+@app.put("/api/me/ccu")
+async def put_ccu_plan(request: Planner, user=Depends(require_user)):
+    # Browser revisions prevent a second tab from silently overwriting a plan.
+    if not await ccu_store().save_ccu_plan(user.id, request.revision, request.model_dump()):
+        raise HTTPException(status_code=409, detail="Plan changed in another tab. Reload before editing.")
+    return {**request.model_dump(), "revision": request.revision + 1}
+
+
+@app.get("/api/me/ccu/routes/{goal_id}")
+async def get_ccu_routes(goal_id: str, user=Depends(require_user)):
+    plan = Planner.model_validate(await ccu_store().ccu_plan(user.id))
+    try:
+        return {"revision": plan.revision, "routes": find_routes(plan, goal_id)}
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/api/me/ccu/reserve/{goal_id}/{mode}")
+async def reserve_ccu_route(goal_id: str, mode: str, revision: int, user=Depends(require_user)):
+    plan = Planner.model_validate(await ccu_store().ccu_plan(user.id))
+    if revision != plan.revision:
+        raise HTTPException(status_code=409, detail="Plan changed. Find routes again before reserving.")
+    try:
+        route = next((r for r in find_routes(plan, goal_id) if r["mode"] == mode), None)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if route is None:
+        raise HTTPException(status_code=422, detail="No eligible route to reserve.")
+    goal = next(g for g in plan.goals if g.id == goal_id)
+    goal.reserved_base = route["base"]["id"]
+    goal.reserved_ccus = [e["id"] for e in route["steps"] if e["id"]]
+    goal.saved_path = [route["base"]["ship"]] + [e["target"] for e in route["steps"]]
+    return await put_ccu_plan(Planner.model_validate(plan.model_dump()), user)
+
 
 
 @app.get("/api/ships/warbonds")

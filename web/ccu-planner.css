@@ -1,0 +1,10 @@
+.ccu-planner form { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin:16px 0; }
+.ccu-planner label { display:flex; flex-direction:column; gap:6px; min-width:150px; flex:1 1 170px; }
+.ccu-planner input, .ccu-planner select { width:100%; min-width:0; }
+.ccu-planner input[type=checkbox] { width:22px; height:22px; }
+.ccu-planner details, .ccu-goals > article { padding:16px; border:1px solid #52616d; border-radius:8px; margin:12px 0; }
+.ccu-planner summary { cursor:pointer; font-weight:700; }
+.ccu-planner p, .ccu-planner li { overflow-wrap:anywhere; line-height:1.6; }
+.ccu-planner button { margin:4px; }
+.ccu-planner [aria-busy=true] { opacity:.8; }
+@media(max-width:650px) { .ccu-planner label { flex-basis:100%; } .ccu-planner details { padding:10px; } }
