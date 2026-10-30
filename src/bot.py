@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.announcements import announcement_group, permitted as announcement_permitted
 from src.shared import (
     _same_community_mining_location, remove_community_mining_location,
     add_community_mining_location, apply_community_mining_locations,
@@ -575,6 +576,11 @@ class GameAssistCommandTree(app_commands.CommandTree):
             return False
 
         command_name = _interaction_command_name(interaction)
+        if command_name.startswith("announcement "):
+            if announcement_permitted(interaction):
+                return True
+            await interaction.response.send_message("Announcements are restricted to configured bot admins in the testing Discord.", ephemeral=True)
+            return False
         configured = await bot.cache.guild_bot_settings(interaction.guild_id)
         is_primary_guild = interaction.guild_id == bot.settings.discord_guild_id
         if configured is None and not is_primary_guild and not command_name.startswith("admin "):
@@ -1074,6 +1080,7 @@ class GameAssistBot(commands.Bot):
             self.tree.add_command(audit_group, guild=guild)
             if self.settings.award_test_guild_id == self.settings.discord_guild_id:
                 self.tree.add_command(award_group, guild=guild)
+                self.tree.add_command(announcement_group, guild=guild)
                 self.tree.add_command(rep_command, guild=guild)
                 self.tree.add_command(reputation_submit_command, guild=guild)
                 self.tree.add_command(activity_command, guild=guild)
@@ -1084,6 +1091,7 @@ class GameAssistBot(commands.Bot):
             award_guild = discord.Object(id=self.settings.award_test_guild_id)
             self.tree.copy_global_to(guild=award_guild)
             self.tree.add_command(award_group, guild=award_guild)
+            self.tree.add_command(announcement_group, guild=award_guild)
             self.tree.add_command(rep_command, guild=award_guild)
             self.tree.add_command(reputation_submit_command, guild=award_guild)
             self.tree.add_command(activity_command, guild=award_guild)
