@@ -8,10 +8,16 @@ Use SC Companion's `/admin panel` → Development Announcements to create or rep
 
 Choose **Opt In to Broadcasts** in the setup response, or use `/development subscription enabled:True channel:#development-announcements`. A server owner, member with Manage Server, or configured bot admin may configure the subscription. To use a different channel, run the command again with that channel. Set enabled to False to opt out. Broadcast subscriptions are managed entirely in Discord.
 
+## Private broadcast workspace
+
+Peep creates `development-announcements` under the existing **audit log** category on startup. `/broadcast channel` repairs it. It copies the category's viewer overwrites, denies @everyone visibility, and grants the owner and Peep access. Other audit viewers have read-only access. Discord Administrator permissions still bypass channel overwrites, but the bot enforces owner-only broadcast commands even for administrators.
+
+All broadcast operations except channel setup must run in this private workspace. Draft previews, approval/rejection notices, and requested delivery reviews are visible to its authorized readers. Re-run `/broadcast channel` after changing audit-category roles to apply the current access rules.
+
 ## Draft and approve in Peep
 
-1. In Peep's home Discord, run `/broadcast draft` with the project name, started/completed stage, and announcement text. Only the home-server owner or `BOT_ADMIN_USER_IDS` can do this.
-2. Inspect the private preview and saved recipients. Use `/broadcast review` to retrieve it later, `/broadcast recipients` for a paginated full audience, and `/broadcast pending` to list recent records.
+1. In Peep's home Discord, run `/broadcast draft` with the project name, started/completed stage, and announcement text. Only the home-server owner can do this; configured bot admins cannot draft or approve.
+2. Inspect the preview and saved recipients in the private channel. Use `/broadcast review` to retrieve it later, `/broadcast recipients` for a paginated full audience, and `/broadcast pending` to list recent records.
 3. Run `/broadcast approve` with the draft ID to authorize delivery. To change the content, reject the draft with `/broadcast reject` and create a replacement. Draft content and audience are immutable.
 4. SC Companion picks up approved broadcasts within about one minute. `/broadcast review` shows per-server delivery receipts: published, skipped, failed, uncertain, or sending. A processed broadcast means delivery attempts were handled; inspect individual receipts to see failures.
 

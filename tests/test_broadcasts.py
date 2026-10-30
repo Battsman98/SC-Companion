@@ -24,7 +24,7 @@ def draft(db, targets=None):
 
 
 @pytest.mark.parametrize('profile,guild,user,owner,allowed', [
-    ('peep',9,7,8,True), ('peep',9,8,8,True), ('peep',9,6,8,False),
+    ('peep',9,7,8,False), ('peep',9,8,8,True), ('peep',9,6,8,False),
     ('public',9,7,8,False), ('peep',1,7,8,False),
 ])
 def test_only_private_home_admin_can_broadcast(profile,guild,user,owner,allowed):

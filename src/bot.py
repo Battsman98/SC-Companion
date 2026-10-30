@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.broadcast_room import ensure_broadcast_room
 from src.broadcasts import broadcast_group, permitted as broadcast_permitted
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
@@ -571,7 +572,7 @@ class GameAssistCommandTree(app_commands.CommandTree):
         if command_name.startswith("broadcast "):
             if broadcast_permitted(interaction):
                 return True
-            await interaction.response.send_message("Broadcasts are restricted to Peep's home-server owner and configured bot admins.", ephemeral=True)
+            await interaction.response.send_message("Broadcasts are restricted to Peep's home-server owner.", ephemeral=True)
             return False
         configured = await bot.cache.guild_bot_settings(interaction.guild_id)
         is_primary_guild = interaction.guild_id == bot.settings.discord_guild_id
@@ -935,6 +936,7 @@ class GameAssistBot(commands.Bot):
             return
 
         if self.settings.runtime_profile == "peep":
+            await self._run_startup_step("prepare private broadcast workspace", lambda: ensure_broadcast_room(self))
             await self._run_startup_step("create Bot Manager role", self.ensure_bot_manager_role)
             await self._run_startup_step("provision membership applications", self.ensure_membership_applications)
             await self._run_startup_step("prepare feedback forum", self.ensure_feedback_forum)

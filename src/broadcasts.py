@@ -25,15 +25,22 @@ def permitted(interaction):
     return (settings.runtime_profile == 'peep'
             and bool(settings.discord_guild_id)
             and interaction.guild_id == settings.discord_guild_id
-            and (interaction.user.id in settings.bot_admin_user_ids
-                 or interaction.user.id == interaction.guild.owner_id))
+            and interaction.user.id == interaction.guild.owner_id)
 
 
 class BroadcastCommands(app_commands.Group):
     async def interaction_check(self, interaction):
         if permitted(interaction):
-            return True
-        await interaction.response.send_message('Only the home-server owner or configured bot admins can manage broadcasts through Peep in its home Discord.', ephemeral=True)
+            if interaction.command.name == "channel":
+                return True
+            from src.broadcast_room import room_key
+            saved = await interaction.client.cache.get(room_key(interaction.guild_id)) or {}
+            if saved.get("channel_id") == interaction.channel_id:
+                return True
+            await interaction.response.send_message(
+                "Use the private development-announcements channel under audit log. Run /broadcast channel to create or repair it.", ephemeral=True)
+            return False
+        await interaction.response.send_message('Only the home-server owner can manage broadcasts through Peep in its home Discord.', ephemeral=True)
         return False
 
 
@@ -57,7 +64,7 @@ async def draft_command(interaction: discord.Interaction, project: str, phase: s
         await interaction.response.send_message(str(error), ephemeral=True)
         return
     draft = db.get(interaction.guild_id, key)
-    await interaction.response.send_message(f"Draft only. Recipients:\n{destinations(draft)}\nReview, then `/broadcast approve {key}`. To change it, reject and create a new draft.", embed=preview(draft), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+    await interaction.response.send_message(f"Draft only. Recipients:\n{destinations(draft)}\nReview, then `/broadcast approve {key}`. To change it, reject and create a new draft.", embed=preview(draft), ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
 
 
 @broadcast_group.command(name='review', description='Review the saved text, recipients, and delivery receipts.')
@@ -69,25 +76,25 @@ async def review_command(interaction: discord.Interaction, draft_id: str):
         return
     receipts = db.db.execute('SELECT guild_id,state,message_id,error FROM development_deliveries WHERE broadcast_id=?', (draft_id,)).fetchall()
     status = '\n'.join(f'{guild}: {state}' + (f' (message {message})' if message else '') + (f' — {error}' if error else '') for guild,state,message,error in receipts)
-    await interaction.response.send_message(f"Status: {draft['state']}\n{destinations(draft)}\n{status}"[:1900], embed=preview(draft), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+    await interaction.response.send_message(f"Status: {draft['state']}\n{destinations(draft)}\n{status}"[:1900], embed=preview(draft), ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
 
 
 @broadcast_group.command(name='pending', description='List recent broadcasts, including drafts and approved deliveries.')
 async def pending_command(interaction: discord.Interaction):
     rows = store(interaction).db.execute('SELECT id,project,state FROM development_broadcasts WHERE source_guild_id=? ORDER BY created_at DESC LIMIT 12', (interaction.guild_id,)).fetchall()
-    await interaction.response.send_message('\n'.join(f'`{key}` — {project[:60]} ({state})' for key,project,state in rows) or 'No broadcasts.', ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+    await interaction.response.send_message('\n'.join(f'`{key}` — {project[:60]} ({state})' for key,project,state in rows) or 'No broadcasts.', ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
 
 
 @broadcast_group.command(name='approve', description='Approve the saved text and recipients for SC Companion delivery.')
 async def approve_command(interaction: discord.Interaction, draft_id: str):
     changed = store(interaction).decide(interaction.guild_id, draft_id, 'approved', interaction.user.id)
-    await interaction.response.send_message('Approved. SC Companion will deliver within about one minute. Use /broadcast review for receipts.' if changed else 'No pending draft with that ID. Already handled broadcasts are never queued twice.', ephemeral=True)
+    await interaction.response.send_message('Approved. SC Companion will deliver within about one minute. Use /broadcast review for receipts.' if changed else 'No pending draft with that ID. Already handled broadcasts are never queued twice.', ephemeral=not changed)
 
 
 @broadcast_group.command(name='reject', description='Discard an unapproved broadcast.')
 async def reject_command(interaction: discord.Interaction, draft_id: str):
     changed = store(interaction).decide(interaction.guild_id, draft_id, 'rejected', interaction.user.id)
-    await interaction.response.send_message('Draft rejected.' if changed else 'No pending draft with that ID.', ephemeral=True)
+    await interaction.response.send_message('Draft rejected.' if changed else 'No pending draft with that ID.', ephemeral=not changed)
 
 
 async def deliver_broadcasts(bot):
@@ -194,3 +201,15 @@ class DevelopmentSubscriptionView(discord.ui.View):
     @discord.ui.button(label="Opt Out of Broadcasts", style=discord.ButtonStyle.secondary)
     async def disable(self, interaction: discord.Interaction, button: discord.ui.Button):
         await subscription_command.callback(interaction, False)
+
+
+@broadcast_group.command(name="channel", description="Create or repair Peep's private broadcast channel under audit log.")
+async def channel_command(interaction: discord.Interaction):
+    from src.broadcast_room import ensure_broadcast_room
+    await interaction.response.defer(ephemeral=True)
+    try:
+        channel = await ensure_broadcast_room(interaction.client)
+    except (discord.HTTPException, ValueError):
+        await interaction.followup.send("Could not prepare the private channel. Check the audit log category and Peep's Manage Channels, View Channel, Send Messages, Embed Links, and Read Message History permissions.", ephemeral=True)
+        return
+    await interaction.followup.send(f"Private broadcast workspace ready: {channel.mention}. Audit-category viewers can read it; only the server owner can draft or approve.", ephemeral=True)
