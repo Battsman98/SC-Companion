@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 
 def preview(draft):
-    embed = discord.Embed(title=f"Project {draft['phase']}: {draft['project']}",
+    embed = discord.Embed(title="Development Announcement" if draft["project"] == "Development Announcement" else f"Project {draft['phase']}: {draft['project']}",
                           description=draft['body'], color=0x3498DB)
     embed.set_footer(text=f"SC Companion • Announcement {draft['id']}")
     return embed
@@ -53,18 +53,10 @@ def destinations(draft):
     return f'{len(targets)} opted-in server(s)\n{summary}' + ('\nUse /broadcast recipients for the full list.' if len(targets) > 10 else '')
 
 
-@broadcast_group.command(name='draft', description='Prepare an immutable announcement and its opted-in audience.')
-@app_commands.choices(phase=[app_commands.Choice(name='New project / started', value='started'), app_commands.Choice(name='Project completed', value='completed')])
-async def draft_command(interaction: discord.Interaction, project: str, phase: str, update: str):
-    db = store(interaction)
-    try:
-        key = db.create(interaction.guild_id, project, phase, update,
-                        db.targets(interaction.client.settings.award_test_guild_id, getattr(interaction.client.settings, "announcement_testing_only", True)), interaction.user.id)
-    except ValueError as error:
-        await interaction.response.send_message(str(error), ephemeral=True)
-        return
-    draft = db.get(interaction.guild_id, key)
-    await interaction.response.send_message(f"Draft only. Recipients:\n{destinations(draft)}\nReview, then `/broadcast approve {key}`. To change it, reject and create a new draft.", embed=preview(draft), ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
+@broadcast_group.command(name='draft', description='Type the announcement you want to send.')
+async def draft_command(interaction: discord.Interaction):
+    from src.broadcast_ui import DraftModal
+    await interaction.response.send_modal(DraftModal())
 
 
 @broadcast_group.command(name='review', description='Review the saved text, recipients, and delivery receipts.')
@@ -85,10 +77,10 @@ async def pending_command(interaction: discord.Interaction):
     await interaction.response.send_message('\n'.join(f'`{key}` — {project[:60]} ({state})' for key,project,state in rows) or 'No broadcasts.', ephemeral=False, allowed_mentions=discord.AllowedMentions.none())
 
 
-@broadcast_group.command(name='approve', description='Approve the saved text and recipients for SC Companion delivery.')
-async def approve_command(interaction: discord.Interaction, draft_id: str):
-    changed = store(interaction).decide(interaction.guild_id, draft_id, 'approved', interaction.user.id)
-    await interaction.response.send_message('Approved. SC Companion will deliver within about one minute. Use /broadcast review for receipts.' if changed else 'No pending draft with that ID. Already handled broadcasts are never queued twice.', ephemeral=not changed)
+@broadcast_group.command(name='approve', description='Review a saved announcement and submit it.')
+async def approve_command(interaction: discord.Interaction):
+    from src.broadcast_ui import choose_draft
+    await choose_draft(interaction)
 
 
 @broadcast_group.command(name='reject', description='Discard an unapproved broadcast.')

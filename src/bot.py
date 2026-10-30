@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.broadcast_ui import BroadcastPanel
 from src.broadcast_room import ensure_broadcast_room
 from src.broadcasts import broadcast_group, permitted as broadcast_permitted
 from src.guild_config import BOT_MODULES, module_for_command, normalize_module_settings
@@ -861,6 +862,7 @@ class GameAssistBot(commands.Bot):
             self.add_view(CZTimerDashboardView())
             self.add_view(FirstRunSetupView())
         else:
+            self.add_view(BroadcastPanel())
             self.add_view(MembershipApplicationPanelView())
             self.add_view(MembershipReviewView())
         public_commands = (

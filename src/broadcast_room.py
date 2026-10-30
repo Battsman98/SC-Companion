@@ -1,6 +1,7 @@
 """Private Peep broadcast workspace, with visibility inherited from Audit Log."""
 import asyncio
 import discord
+from src.broadcast_ui import BroadcastPanel
 
 CATEGORY_ID = 1516295744603164732
 CHANNEL_NAME = 'development-announcements'
@@ -62,13 +63,9 @@ async def ensure_broadcast_room(bot):
         saved['channel_id'] = channel.id
         await bot.cache.set(room_key(guild.id), saved, 315360000)
         embed = discord.Embed(title='Development Announcements', description=(
-            'Private workspace for drafting and approving SC Companion announcements.\n\n'
-            '**Server owner:** `/broadcast draft` → `/broadcast review` → `/broadcast approve`. '
-            'Use `/broadcast pending` for saved drafts and `/broadcast reject` to discard one. '
-            '`/broadcast review` also shows delivery results.\n\n'
-            '**Audit viewers:** You can read the drafts and status updates here. Only the server owner can operate the broadcast commands.\n\n'
-            'Nothing is published to receiving servers until the owner explicitly approves. '
-            'Delivery remains restricted to the configured rollout and opted-in channels.'), color=0x3498DB)
+            '**Draft** — type what you want to announce.\n\n'
+            '**Approve** — review your saved announcement, then submit it.\n\n'
+            'Only the server owner can draft and submit. Audit viewers can read the updates. Nothing is sent until you submit.' ), color=0x3498DB)
         embed.set_footer(text=PANEL_FOOTER)
         message = None
         if saved.get('panel_message_id'):
@@ -82,9 +79,9 @@ async def ensure_broadcast_room(bot):
                     message = candidate
                     break
         if message is None:
-            message = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(), silent=True)
+            message = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(), silent=True, view=BroadcastPanel())
         elif message.author.id == bot.user.id:
-            await message.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            await message.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none(), view=BroadcastPanel())
         else:
             raise ValueError('The saved setup panel belongs to another application.')
         saved['panel_message_id'] = message.id

@@ -16,10 +16,12 @@ All broadcast operations except channel setup must run in this private workspace
 
 ## Draft and approve in Peep
 
-1. In Peep's home Discord, run `/broadcast draft` with the project name, started/completed stage, and announcement text. Only the home-server owner can do this; configured bot admins cannot draft or approve.
-2. Inspect the preview and saved recipients in the private channel. Use `/broadcast review` to retrieve it later, `/broadcast recipients` for a paginated full audience, and `/broadcast pending` to list recent records.
-3. Run `/broadcast approve` with the draft ID to authorize delivery. To change the content, reject the draft with `/broadcast reject` and create a replacement. Draft content and audience are immutable.
-4. SC Companion picks up approved broadcasts within about one minute. `/broadcast review` shows per-server delivery receipts: published, skipped, failed, uncertain, or sending. A processed broadcast means delivery attempts were handled; inspect individual receipts to see failures.
+1. Click **Draft** in the private announcement channel. Type your announcement in the single text box and save it. There are no project or stage fields.
+2. Click **Approve** to see the saved text and recipients. If multiple drafts exist, choose one from the list.
+3. Review the preview and click **Submit announcement**. This is the only step that queues delivery. **Discard draft** cancels it.
+4. SC Companion delivers within about one minute. Existing `/broadcast review` and `/broadcast pending` remain available for delivery records.
+
+The panel buttons work after a bot restart. `/broadcast draft` and `/broadcast approve` also open the same forms without arguments. Saved drafts remain available if a temporary review control expires; click Approve on the main panel again.
 
 Approval freezes the text and destination list shown in the draft. A newly subscribed server does not receive old broadcasts. Opting out or changing the destination before delivery causes that recipient to be skipped. Messages suppress mentions and push notifications; this does not change members' personal channel-mute settings.
 
