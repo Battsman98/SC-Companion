@@ -104,3 +104,21 @@ def test_routes_and_reserve_api(monkeypatch):
         assert saved.json()['goals'][0]['saved_path']==['Base','Middle','Target']
         assert saved.json()['goals'][0]['reserved_ccus']==['c','deal']
     finally:web.app.dependency_overrides.pop(web.require_user,None)
+
+
+def test_guest_routes_validate_without_storage_or_login(monkeypatch):
+    def forbidden_store():
+        raise AssertionError('Guest planning must not access account storage')
+    monkeypatch.setattr(web, 'ccu_store', forbidden_store)
+    client = TestClient(web.app)
+    draft = sample().model_dump()
+    assert client.post('/api/ccu/validate', json=draft).json() == draft
+    response = client.post('/api/ccu/routes/g', json=draft)
+    assert response.status_code == 200
+    assert response.json()['routes'][0]['total'] == 65
+    assert client.post('/api/ccu/routes/missing', json=draft).status_code == 404
+    draft['goals'][0]['reserved_base'] = 'missing'
+    assert client.post('/api/ccu/validate', json=draft).status_code == 422
+    monkeypatch.setattr(web, 'state', lambda: SimpleNamespace(settings=None))
+    monkeypatch.setattr(web, 'current_user_from_request', lambda request, settings: None)
+    assert client.put('/api/me/ccu', json=sample().model_dump()).status_code == 401

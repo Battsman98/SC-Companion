@@ -2769,6 +2769,20 @@ def ccu_store():
     return CcuStore(state().cache)
 
 
+@app.post("/api/ccu/validate")
+async def validate_ccu_draft(request: Planner):
+    return request.model_dump()
+
+
+@app.post("/api/ccu/routes/{goal_id}")
+async def preview_ccu_routes(goal_id: str, request: Planner):
+    # Stateless guest planning: no account or storage access.
+    try:
+        return {"routes": find_routes(request, goal_id)}
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @app.get("/api/me/ccu")
 async def get_ccu_plan(user=Depends(require_user)):
     return Planner.model_validate(await ccu_store().ccu_plan(user.id)).model_dump()

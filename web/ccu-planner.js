@@ -1,9 +1,9 @@
-/* Uses existing authenticated API and RSI-imported hangar. No RSI/store requests. */
+/* Stateless guest planning; account authentication is only needed for persistence. */
 (() => {
   const root = document.querySelector('#ccuPlanner');
   const workspace = document.querySelector('#ccuWorkspace');
   const notice = document.querySelector('#ccuNotice');
-  let plan, imported = [], busy = false;
+  let plan = {revision:0, ships:[], bases:[], upgrades:[], goals:[]}, imported = [], busy = false, dirty = false;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money = value => value == null ? 'Unknown' : new Intl.NumberFormat('en-US', {style:'currency', currency:'USD'}).format(value);
   const uid = () => crypto.randomUUID();
@@ -20,6 +20,7 @@
   async function request(path, method='GET', body) {
     const response = await fetch(path, {method, headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined});
     const result = await response.json();
+    if (response.status === 401) throw Object.assign(new Error('Sign in with Discord to save or load account plans. Your current draft is still here; you can keep building without signing in.'), {status:401});
     if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Please check the entered values and references.');
     return result;
   }
@@ -27,13 +28,20 @@
     if (busy) return;
     busy = true; root.setAttribute('aria-busy', 'true');
     root.querySelectorAll('button').forEach(b => b.disabled = true);
-    try {await work();} catch(error) {announce(error.message, true);} finally {
+    try {await work();} catch(error) {
+      announce(error.message, true);
+      if(error.status===401){
+        const link=document.createElement('a');link.href='/auth/discord/login';link.target='_blank';link.rel='noopener';
+        link.textContent=' Sign in in a new tab, then return here and try again.';notice.append(link);
+      }
+    } finally {
       busy = false; root.removeAttribute('aria-busy');root.querySelectorAll('button').forEach(b => b.disabled = false);
     }
   }
   async function save(next) {
-    plan = await request('/api/me/ccu', 'PUT', next);
-    render(); announce('Planner saved. Costs are USD before tax and fees.');
+    plan = await request('/api/ccu/validate', 'POST', next);
+    dirty = true;
+    render(); announce('Draft updated for this page session. Use Save to account to keep it. Costs are USD before tax and fees.');
   }
   const remove = (kind, id) => `<button type="button" data-edit="${kind}" data-id="${esc(id)}">Edit</button> <button type="button" data-remove="${kind}" data-id="${esc(id)}">Remove</button>`;
   function render() {
@@ -65,10 +73,16 @@
     workspace.querySelectorAll(':scope > details').forEach((d,i)=>{if(openSections[i]!==undefined)d.open=openSections[i];});
   }
   async function load() {
+    if (dirty && !confirm('Replace your current unsaved draft with your saved account plan?')) return;
     const [data, hangar] = await Promise.all([request('/api/me/ccu'),request('/api/me/ships')]);
-    plan = data; imported = hangar.filter(s=>s.ownership_type==='pledged');render();announce('Planner loaded. Imported hangar names are available in Ship values.');
+    plan = data; dirty = false; imported = hangar.filter(s=>s.ownership_type==='pledged');render();announce('Account planner loaded. Changes stay in this page until you save.');
   }
   document.querySelector('#ccuReload').addEventListener('click',()=>action(load));
+  document.querySelector('#ccuSave').addEventListener('click',()=>action(async()=>{
+    plan = await request('/api/me/ccu', 'PUT', plan);
+    dirty = false; announce('Planner saved to your Discord account.');
+  }));
+  window.addEventListener('beforeunload', event=>{if(dirty){event.preventDefault();event.returnValue='';}});
   workspace.addEventListener('submit', event => {
     const form = event.target.closest('[data-ccu]');if(!form)return;event.preventDefault();
     action(async()=>{
@@ -109,8 +123,7 @@
     if(b.dataset.remove)action(async()=>{const next=structuredClone(plan);next[b.dataset.remove]=next[b.dataset.remove].filter(x=>x.id!==b.dataset.id);await save(next);});
     if(b.dataset.release)action(async()=>{const next=structuredClone(plan);const g=next.goals.find(g=>g.id===b.dataset.release);g.reserved_base='';g.reserved_ccus=[];g.saved_path=[];await save(next);});
     if(b.dataset.find)action(async()=>{
-      const id=b.dataset.find;const result=await request(`/api/me/ccu/routes/${encodeURIComponent(id)}`);
-      if(result.revision!==plan.revision)throw new Error('Plan changed in another tab. Refresh the planner.');
+      const id=b.dataset.find;const result=await request(`/api/ccu/routes/${encodeURIComponent(id)}`, 'POST', plan);
       const out=workspace.querySelector(`[data-results="${CSS.escape(id)}"]`);
       out.innerHTML=result.routes.map(r=>`<details open><summary>${esc(names[r.mode])}</summary><p><strong>${esc(r.base.label)}</strong> (${esc(r.base.status)}) → ${r.steps.map(e=>`${esc(e.target)} [${esc(e.status)}]`).join(' → ') || 'Already at target'}</p>
       <p>Additional: <strong>${money(r.additional)}</strong> · Total: ${money(r.total)} · Savings: ${money(r.savings)} · Missing purchases: ${r.missing}</p>
@@ -118,6 +131,16 @@
       <ul>${r.steps.map(e=>`<li>${esc(e.source)} → ${esc(e.target)} — ${esc(e.status)} · ${money(e.cost)} ${esc(e.note)}</li>`).join('')}</ul>
       <button type="button" data-reserve="${esc(id)}" data-mode="${r.mode}">Reserve this base and listed CCUs</button></details>`).join('') || '<p>No eligible route. Add a priced starting base below the target, confirm LTI, or release a conflicting reservation. Equal-value upgrades are not allowed.</p>';
     });
-    if(b.dataset.reserve)action(async()=>{plan=await request(`/api/me/ccu/reserve/${encodeURIComponent(b.dataset.reserve)}/${b.dataset.mode}?revision=${plan.revision}`,'POST');render();announce('Reserved for this goal. Other goals will not use these copies.');});
+    if(b.dataset.reserve)action(async()=>{
+      const result=await request(`/api/ccu/routes/${encodeURIComponent(b.dataset.reserve)}`, 'POST', plan);
+      const route=result.routes.find(r=>r.mode===b.dataset.mode);
+      if(!route)throw new Error('No eligible route to reserve. Find routes again.');
+      const next=structuredClone(plan), goal=next.goals.find(g=>g.id===b.dataset.reserve);
+      goal.reserved_base=route.base.id;goal.reserved_ccus=route.steps.filter(e=>e.id).map(e=>e.id);
+      goal.saved_path=[route.base.ship,...route.steps.map(e=>e.target)];
+      await save(next);
+      announce('Reserved in this draft. Other goals will not use these copies. Save to account to keep this plan.');
+    });
   });
+  render();
 })();
