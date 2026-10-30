@@ -1281,6 +1281,26 @@ function renderFeatureAssignmentsByCategory(config) {
   return `<div class="feature-assignment-directory">${categoryRows}${unassignedRow}</div>`;
 }
 
+function renderDevelopmentAnnouncements(config) {
+  const settings = config.development_announcements;
+  if (!settings) return "";
+  const channel = (config.channels || []).find((item) => String(item.id) === String(settings.channel_id));
+  return `<article class="bot-feature-row" data-development-setup><div class="bot-module-copy"><span><strong>Development Announcements</strong><small>Testing Discord only. Project starts and completions require explicit approval.</small><small>${channel ? `Channel: #${escapeHtml(channel.name)}` : "No channel configured yet."}</small><small>${settings.panel_message_id ? "Setup panel saved." : "Setup panel not created yet."}</small><small>Draft and approve updates with <code>/announcement</code> in Discord.</small></span></div><button type="button" data-development-create data-guild-id="${escapeAttribute(config.guild.id)}" ${settings.can_manage && !settings.requested ? "" : "disabled"}>Create or Repair Channel &amp; Panel</button><span role="status" data-development-status>${escapeHtml(settings.error || (settings.requested ? "Setup queued. Refresh in about one minute." : settings.can_manage ? "" : "Only the server owner or a configured bot admin can set this up."))}</span></article>`;
+}
+
+async function setupDevelopmentAnnouncements(event) {
+  const button = event.currentTarget;
+  const status = button.closest("[data-development-setup]").querySelector("[data-development-status]");
+  button.disabled = true;
+  try {
+    await api(`/api/bot-management/guilds/${encodeURIComponent(button.dataset.guildId)}/development-announcements/setup`, { method: "POST" });
+    status.textContent = "Setup queued. Refresh in about one minute to see the channel and panel.";
+  } catch (error) {
+    status.textContent = error.message;
+    button.disabled = false;
+  }
+}
+
 async function loadGuildBotConfiguration(guildId) {
   if (!guildId) {
     outputs.botManagement.innerHTML = stateMessage("Choose a Discord server to configure.");
@@ -1324,18 +1344,21 @@ async function loadGuildBotConfiguration(guildId) {
         ${config.modules.map((module) => `<div class="bot-feature-row" data-module-feature-key="${escapeAttribute(module.key)}">
           <label class="bot-module-copy"><input type="checkbox" data-module-enabled ${module.enabled ? "checked" : ""}><span><strong>${escapeHtml(module.label)}</strong><small>${escapeHtml(module.description)}</small><small class="bot-module-commands">Commands: ${(module.commands || []).map((command) => `<code>/${escapeHtml(command)}</code>`).join(" ")}</small>${module.detected_routes?.length ? `<small class="bot-detected-routes"><strong>Current Discord setup</strong>${module.detected_routes.map((route) => `<span><code>/${escapeHtml(route.command)}</code> → #${escapeHtml(route.channel_name)}</span>`).join("")}</small>` : ""}</span></label>
         </div>`).join("")}
+        ${renderDevelopmentAnnouncements(config)}
         ${config.awards_available ? renderAwardChannelFeature(config) : ""}
         ${config.awards_available ? renderReputationFeature(config) : ""}
         </div><div class="bot-management-actions"><button type="submit">Save Features</button><button type="button" data-update-feature-channels>Create or Repair All Feature Channels</button><span data-bot-management-status></span></div>
       </section>
       <section id="bot-management-channels" class="bot-management-panel" data-bot-management-panel="channels" role="tabpanel" hidden>
         <div class="section-heading"><h3>Feature Assignments by Category</h3><p>Open a Discord category to change the SC Companion features assigned there. Moving a feature to a channel in another category takes effect after you save.</p></div>
+        ${renderDevelopmentAnnouncements(config)}
         ${renderFeatureAssignmentsByCategory(config)}
         <div class="bot-management-actions"><button type="submit">Save Channels</button><span data-bot-management-status></span></div>
       </section>
     </form>
     ${config.awards_available ? `<section id="bot-management-awards" class="bot-management-panel" data-bot-management-panel="awards" role="tabpanel" hidden>${renderAwardManagement(config)}</section>` : ""}`;
     if (config.awards_available) outputs.botManagement.insertAdjacentHTML("beforeend", `<section id="bot-management-progress" class="bot-management-panel" data-bot-management-panel="progress" role="tabpanel" hidden>${renderReputationManagement(config)}</section>`);
+    outputs.botManagement.querySelectorAll("[data-development-create]").forEach((button) => button.addEventListener("click", setupDevelopmentAnnouncements));
     initializeBotManagementTabs();
     outputs.botManagement.querySelector("[data-bot-management-form]")?.addEventListener("submit", saveGuildBotConfiguration);
     const managementForm = outputs.botManagement.querySelector("[data-bot-management-form]");

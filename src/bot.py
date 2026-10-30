@@ -16,7 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
-from src.announcements import announcement_group, permitted as announcement_permitted
+from src.announcements import ensure_development_panel, setup_development_announcements, announcement_group, permitted as announcement_permitted, denial_reason as announcement_denial_reason
 from src.shared import (
     _same_community_mining_location, remove_community_mining_location,
     add_community_mining_location, apply_community_mining_locations,
@@ -579,7 +579,7 @@ class GameAssistCommandTree(app_commands.CommandTree):
         if command_name.startswith("announcement "):
             if announcement_permitted(interaction):
                 return True
-            await interaction.response.send_message("Announcements are restricted to configured bot admins in the testing Discord.", ephemeral=True)
+            await interaction.response.send_message(announcement_denial_reason(interaction), ephemeral=True)
             return False
         configured = await bot.cache.guild_bot_settings(interaction.guild_id)
         is_primary_guild = interaction.guild_id == bot.settings.discord_guild_id
@@ -1523,6 +1523,15 @@ class GameAssistBot(commands.Bot):
                     and guild.id != self.settings.discord_guild_id
                 ):
                     continue
+                if self.settings.runtime_profile == "public" and guild.id == self.settings.award_test_guild_id:
+                    development = await self.cache.get(f"guild:{guild.id}:development-announcements") or {}
+                    if development.get("requested"):
+                        try:
+                            await ensure_development_panel(self, guild)
+                        except Exception:
+                            logging.exception("Development announcement setup failed for guild %s", guild.id)
+                            development.update(requested=False, error="Setup failed. Check the bot's channel and message permissions, then retry.")
+                            await self.cache.set(f"guild:{guild.id}:development-announcements", development, 315360000)
                 with suppress(Exception):
                     await self.cache.record_guild_installation(guild.id, guild.name, guild.member_count)
                     await self.sync_first_run_notice(guild)
@@ -7280,7 +7289,7 @@ class NativeAdminModuleSelect(discord.ui.Select):
         pending = len(await bot.cache.pending_review_requests()) if interaction.guild.id == bot.settings.discord_guild_id else 0
         refreshed = await bot.cache.guild_bot_settings(interaction.guild.id)
         mode = str((refreshed or {}).get("channel_setup_mode") or "manual")
-        await interaction.edit_original_response(embed=build_native_admin_embed(interaction.guild, modules, pending), view=NativeAdminView(modules, mode))
+        await interaction.edit_original_response(embed=build_native_admin_embed(interaction.guild, modules, pending), view=NativeAdminView(modules, mode, awards_available=_award_test_guild(interaction, interaction.client)))
 
 
 class ChannelSetupChoiceView(discord.ui.View):
@@ -7313,7 +7322,7 @@ class ChannelSetupChoiceView(discord.ui.View):
         await bot.ensure_about_panel(interaction.guild)
         await interaction.edit_original_response(
             embed=build_native_admin_embed(interaction.guild, self.modules),
-            view=NativeAdminView(self.modules, mode),
+            view=NativeAdminView(self.modules, mode, awards_available=_award_test_guild(interaction, interaction.client)),
         )
 
     @discord.ui.button(label="Let the bot set up channels", style=discord.ButtonStyle.primary)
@@ -7442,7 +7451,7 @@ class ManualChannelWizardView(discord.ui.View):
         await bot.ensure_about_panel(interaction.guild)
         embed = build_native_admin_embed(interaction.guild, self.modules)
         embed.description = "Manual channel setup is complete. You can change these choices at any time."
-        await interaction.edit_original_response(embed=embed, view=NativeAdminView(self.modules, "manual"))
+        await interaction.edit_original_response(embed=embed, view=NativeAdminView(self.modules, "manual", awards_available=_award_test_guild(interaction, interaction.client)))
 
     async def use_any_channel(self, interaction: discord.Interaction) -> None:
         await self.save_selection(interaction, None)
@@ -7450,7 +7459,7 @@ class ManualChannelWizardView(discord.ui.View):
     async def back_to_panel(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(
             embed=build_native_admin_embed(interaction.guild, self.modules),
-            view=NativeAdminView(self.modules, "manual"),
+            view=NativeAdminView(self.modules, "manual", awards_available=_award_test_guild(interaction, interaction.client)),
         )
 
 
@@ -7700,7 +7709,7 @@ class AwardAdminView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         await interaction.response.edit_message(
-            embed=build_native_admin_embed(interaction.guild, self.modules), view=NativeAdminView(self.modules)
+            embed=build_native_admin_embed(interaction.guild, self.modules), view=NativeAdminView(self.modules, awards_available=_award_test_guild(interaction, interaction.client))
         )
 
 
@@ -7726,6 +7735,9 @@ class NativeAdminView(discord.ui.View):
         guide.callback = self.show_guide
         self.add_item(guide)
         if awards_available:
+            development = discord.ui.Button(label="Development Announcements", style=discord.ButtonStyle.secondary)
+            development.callback = setup_development_announcements
+            self.add_item(development)
             awards = discord.ui.Button(label="Award Setup", style=discord.ButtonStyle.secondary, emoji="🏆")
             awards.callback = self.show_awards
             self.add_item(awards)
@@ -7783,7 +7795,7 @@ class NativeAdminView(discord.ui.View):
         await bot.ensure_about_panel(interaction.guild)
         await interaction.edit_original_response(
             embed=build_native_admin_embed(interaction.guild, self.modules),
-            view=NativeAdminView(self.modules, "automatic"),
+            view=NativeAdminView(self.modules, "automatic", awards_available=_award_test_guild(interaction, bot)),
         )
 
     async def show_channel_choice(self, interaction: discord.Interaction) -> None:

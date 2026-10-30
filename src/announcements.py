@@ -1,5 +1,6 @@
 """Explicitly approved project updates; never invoked by deployment/startup hooks."""
 import time
+import asyncio
 import uuid
 
 import discord
@@ -54,10 +55,20 @@ class AnnouncementStore:
 
 
 def permitted(interaction):
+    return denial_reason(interaction) is None
+
+
+def denial_reason(interaction):
     settings = interaction.client.settings
-    return bool(settings.runtime_profile == "public" and settings.award_test_guild_id
-                and interaction.guild_id == settings.award_test_guild_id
-                and interaction.user.id in settings.bot_admin_user_ids)
+    if settings.runtime_profile != "public":
+        return "Use SC Companion for announcements, not Peep."
+    if not settings.award_test_guild_id or interaction.guild_id != settings.award_test_guild_id:
+        return "Announcements are available only in the configured testing Discord."
+    guild = getattr(interaction, "guild", None)
+    if (guild is not None and guild.owner_id == interaction.user.id
+            or interaction.user.id in settings.bot_admin_user_ids):
+        return None
+    return "Only the testing-server owner or a configured bot admin can manage announcements."
 
 
 def preview(draft):
@@ -71,7 +82,7 @@ class Announcements(app_commands.Group):
     async def interaction_check(self, interaction):
         if permitted(interaction):
             return True
-        await interaction.response.send_message("Only configured bot admins can manage announcements in the testing Discord.", ephemeral=True)
+        await interaction.response.send_message(denial_reason(interaction), ephemeral=True)
         return False
 
 
@@ -82,20 +93,72 @@ def store(interaction):
     return AnnouncementStore(interaction.client.cache._connection)
 
 
-@announcement_group.command(name="channel", description="Create or find the testing-server project announcement channel.")
-async def channel_command(interaction: discord.Interaction):
+async def ensure_development_panel(bot, guild):
+    if bot.settings.runtime_profile != "public" or guild.id != bot.settings.award_test_guild_id:
+        raise ValueError("Development announcements are limited to the testing Discord.")
+    if not hasattr(bot, "_development_setup_lock"):
+        bot._development_setup_lock = asyncio.Lock()
+    async with bot._development_setup_lock:
+        key = f"guild:{guild.id}:development-announcements"
+        saved = await bot.cache.get(key) or {}
+        channel = guild.get_channel(saved.get("channel_id", 0))
+        if not isinstance(channel, discord.TextChannel):
+            channel = discord.utils.get(guild.text_channels, name="development-announcements")
+        if channel is None:
+            channel = await guild.create_text_channel(
+                "development-announcements", category=discord.utils.get(guild.categories, name="SC Companion"),
+                topic="Approved SC Companion project starts and completed features.",
+                overwrites={guild.default_role: discord.PermissionOverwrite(send_messages=False),
+                            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True)},
+                reason="Requested development announcement setup")
+        saved["channel_id"] = channel.id
+        await bot.cache.set(key, saved, 315360000)
+        embed = discord.Embed(title="Development Announcements", description=(
+            "Approved SC Companion project starts and completed features appear here.\n\n"
+            "**Owner / bot admins:** Use `/announcement draft` to prepare an update, "
+            "`/announcement pending` to find drafts, `/announcement review` to review, "
+            "and `/announcement approve` to publish. Use `/announcement revise` or "
+            "`/announcement reject` to change or discard a draft.\n\n"
+            "Deployments never publish project announcements automatically."), color=0x3498DB)
+        embed.set_footer(text="SC Companion • Development announcement setup")
+        message = None
+        if saved.get("panel_message_id"):
+            try:
+                message = await channel.fetch_message(saved["panel_message_id"])
+            except discord.NotFound:
+                pass
+        if message is None:
+            async for candidate in channel.history(limit=100):
+                if candidate.author.id == bot.user.id and candidate.embeds and candidate.embeds[0].footer.text == embed.footer.text:
+                    message = candidate
+                    break
+        if message is None:
+            message = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(), silent=True)
+        elif message.author.id == bot.user.id:
+            await message.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            raise ValueError("Saved panel belongs to another application; no message was changed.")
+        saved.update(panel_message_id=message.id, requested=False, error=None)
+        await bot.cache.set(key, saved, 315360000)
+        return channel
+
+
+async def setup_development_announcements(interaction):
+    if not permitted(interaction):
+        await interaction.response.send_message(denial_reason(interaction), ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=True)
-    channel = discord.utils.get(interaction.guild.text_channels, name="development-announcements")
-    if channel is None:
-        if not interaction.guild.me.guild_permissions.manage_channels:
-            await interaction.followup.send("Grant SC Companion Manage Channels, or create a channel manually and select it when drafting.", ephemeral=True)
-            return
-        channel = await interaction.guild.create_text_channel(
-            "development-announcements", topic="Approved SC Companion project starts and completed features.",
-            overwrites={interaction.guild.default_role: discord.PermissionOverwrite(send_messages=False),
-                        interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True)},
-            reason="Bot admin requested testing-server project announcements")
-    await interaction.followup.send(f"Use {channel.mention} as the destination in `/announcement draft`.", ephemeral=True)
+    try:
+        channel = await ensure_development_panel(interaction.client, interaction.guild)
+    except (discord.HTTPException, ValueError):
+        await interaction.followup.send("Could not create the channel/panel. Check SC Companion's Manage Channels, View Channel, Read Message History, Send Messages, and Embed Links permissions, then retry.", ephemeral=True)
+        return
+    await interaction.followup.send(f"Channel and setup panel ready in {channel.mention}. Use it as the destination in `/announcement draft`.", ephemeral=True)
+
+
+@announcement_group.command(name="channel", description="Create or repair the development announcement channel and setup panel.")
+async def channel_command(interaction: discord.Interaction):
+    await setup_development_announcements(interaction)
 
 
 @announcement_group.command(name="revise", description="Correct a draft or reopen a rejected announcement for review.")

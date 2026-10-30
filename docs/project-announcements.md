@@ -2,7 +2,7 @@
 
 SC Companion can publish approved feature/project starts and completions. There is no deployment or startup posting hook. Creating a draft never sends a public announcement.
 
-This pilot registers `/announcement` only in `AWARD_TEST_GUILD_ID`, the existing testing Discord. Every command also checks the public runtime, that guild, and `BOT_ADMIN_USER_IDS`. Peep and other servers do not receive the commands. General server administrators cannot approve announcements unless explicitly listed as bot admins.
+This pilot registers `/announcement` only in `AWARD_TEST_GUILD_ID`, the existing testing Discord. Every command also checks the public runtime and that guild, then permits the testing-server owner or an account listed in `BOT_ADMIN_USER_IDS`. Peep and other servers do not receive the commands. Other server administrators cannot approve announcements unless explicitly listed as bot admins.
 
 1. Run `/announcement channel` to create/find `development-announcements`, or use an existing text/announcement channel.
 2. Run `/announcement draft`, selecting the destination, project name, started/completed stage, and public-facing update text.
@@ -13,3 +13,7 @@ This pilot registers `/announcement` only in `AWARD_TEST_GUILD_ID`, the existing
 Use a consistent project name: the database permits one announcement per project/stage/server. Drafts and publication receipts are durable. An atomic claim prevents concurrent approvals or restarts from resending an announcement. If delivery is uncertain, the record stays `sending`; inspect the destination using the ID in the embed footer before manual recovery. There is deliberately no automatic retry.
 
 Other SC Companion servers remain excluded. A future rollout needs an explicit per-server opt-in/channel configuration and separate deployment approval.
+
+## Setup screens
+
+In the testing Discord, `/admin panel` includes **Development Announcements**, which creates or repairs the channel and an informational setup panel. The same action is available on the website under Bot Management → Features and Channel Management. The website detects an existing `development-announcements` channel and shows the stored panel status. Website setup requests are handled by SC Companion within about one minute; refresh to see the result. Only the testing-server owner or a configured bot admin can request setup. Setup does not approve or publish project updates.
