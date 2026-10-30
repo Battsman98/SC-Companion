@@ -112,7 +112,7 @@ function importDiagnostics(scannedPages, pageCount, typedCandidates) {
   };
 }
 
-async function importHangar(reportProgress = () => {}) {
+async function importHangar(reportProgress = () => {}, ccusOnly = false) {
   const candidates = new Set();
   let finalURL = "";
   let firstPageHTML = "";
@@ -153,6 +153,19 @@ async function importHangar(reportProgress = () => {}) {
   const diagnostics = importDiagnostics(scannedPages, totalPages, candidates.size);
   if (failedPage) {
     return { code: 504, error: `${failedPage.error} Reload RSI and try again.`, diagnostics };
+  }
+  if (ccusOnly) {
+    const signedOut = /(?:sign in|log in|login)/i.test(finalURL) || /(?:sign in|log in to your account)/i.test(firstPageHTML);
+    if(signedOut)return {code:401,error:"Sign into RSI in this browser, then try again."};
+    const counts = new Map(), upgrades = [];
+    for(const page of scannedPages.sort((a,b)=>a.page-b.page)) {
+      for(const item of extractCCUs(page.payload)) {
+        const key = item.source + " to " + item.target;
+        const copy = (counts.get(key)||0)+1; counts.set(key,copy);
+        upgrades.push({...item,id:"rsi-ccu:"+fnv1a(key)+":"+copy});
+      }
+    }
+    return {code:200,upgrades};
   }
   if (!candidates.size) {
     const signedOut = /(?:sign in|log in|login)/i.test(finalURL) || /(?:sign in|log in to your account)/i.test(firstPageHTML);
@@ -209,10 +222,25 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
 async function handleMessage(rawMessage, reportProgress = () => {}) {
   const message = JSON.parse(rawMessage || "{}");
   if (message.action === "connect") {
-    return { code: 200, version: "0.4.9", scope: "ships-and-vehicles-only" };
+    return { code: 200, version: "0.5.0", scope: "ships-vehicles-and-optional-ccus" };
   }
+  if (message.action === "importCCUs") return await importHangar(reportProgress, true);
   if (message.action === "importHangar") {
     return await importHangar(reportProgress);
   }
   return { code: 400, error: "Unknown action." };
+}
+
+// Only explicit upgrade pledge titles; never infer upgrades from navigation links.
+function extractCCUs(pageHTML) {
+  const upgrades=[];
+  const titles=/class=["'][^"']*\bjs-pledge-name\b[^"']*["'][^>]*>([\s\S]{0,500}?)<\/[^>]+>/gi;
+  for(const match of pageHTML.matchAll(titles)) {
+    const title=htmlText(match[1]);
+    const parsed=title.match(/^(?:Ship\s+)?Upgrade\s*[-:–]\s*(.+?)\s+to\s+(.+?)(?:\s*[-–]\s*Warbond.*)?$/i);
+    if(!parsed)continue;
+    const source=cleanShipName(parsed[1]),target=cleanShipName(parsed[2].replace(/\s*[-–]?\s*Standard Edition\s*$/i,""));
+    if(source && target && source!==target)upgrades.push({source,target});
+  }
+  return upgrades;
 }

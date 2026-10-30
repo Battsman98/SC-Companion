@@ -18,6 +18,24 @@ def sample():
         goals=[dict(id='g',target='Target')]))
 
 
+def test_goal_only_and_unknown_value_draft():
+    plan = Planner.model_validate(dict(ships=[dict(name='Target',value=200)],
+        goals=[dict(id='g',target='Target',lti_only=False)]))
+    route = find_routes(plan,'g')[0]
+    assert route['total'] == 200 and route['additional'] == 200
+    assert route['base']['status'] == 'candidate' and not route['base']['lti']
+    plan.ships[0].value = None
+    assert find_routes(plan,'g') == []
+    assert Planner.model_validate(plan.model_dump())
+
+
+def test_no_base_uses_owned_ccu_without_inventing_lti():
+    plan=sample();plan.bases=[];plan.goals[0].lti_only=False
+    assert find_routes(plan,'g')[0]['additional'] == 60
+    plan.goals[0].lti_only=True
+    assert find_routes(plan,'g') == []
+
+
 def test_owned_is_zero_additional_but_counts_in_total():
     r=find_routes(sample(),'g')[0]
     assert r['additional']==20

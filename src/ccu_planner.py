@@ -9,7 +9,7 @@ class Record(BaseModel):
 
 class Ship(Record):
     name: str = Field(min_length=1, max_length=100)
-    value: float = Field(gt=0, le=10000)
+    value: float | None = Field(default=None, gt=0, le=10000)
 
 
 class Base(Record):
@@ -83,12 +83,21 @@ def find_routes(plan: Planner, goal_id: str) -> list[dict]:
     goal = next((g for g in plan.goals if g.id == goal_id), None)
     if goal is None:
         raise ValueError("Goal not found.")
-    prices = {s.name: round(s.value * 100) for s in plan.ships}
+    prices = {s.name: round(s.value * 100) for s in plan.ships if s.value is not None}
+    if goal.target not in prices:
+        return []
     blocked_bases = {g.reserved_base for g in plan.goals if g.id != goal_id}
     blocked_ccus = {c for g in plan.goals if g.id != goal_id for c in g.reserved_ccus}
-    bases = [b for b in plan.bases if b.id not in blocked_bases and (not goal.base_id or goal.base_id == b.id)
+    bases = [b for b in plan.bases if b.ship in prices and b.id not in blocked_bases and (not goal.base_id or goal.base_id == b.id)
              and (not goal.lti_only or b.lti) and prices[b.ship] <= prices[goal.target]
              and (b.status == "owned" or b.cost is not None)]
+    if not goal.base_id and not goal.lti_only:
+        # No starting pledge is required. Compare buying known starting ships,
+        # including the target itself as a standalone-price baseline.
+        bases += [Base(id='suggested:' + str(i), ship=s.name,
+                       label='Suggested purchase: ' + s.name, status='candidate',
+                       cost=s.value) for i, s in enumerate(plan.ships)
+                  if s.name in prices and prices[s.name] <= prices[goal.target]]
     nodes = sorted((n for n in prices if prices[n] <= prices[goal.target]), key=lambda n: (prices[n], n))
     outgoing = {n: [] for n in nodes}
     for c in plan.upgrades:

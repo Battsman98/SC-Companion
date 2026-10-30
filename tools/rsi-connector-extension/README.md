@@ -43,3 +43,8 @@ Use the packaged Firefox ZIP from `web/rsi-connector-extension-firefox-v0.4.9.zi
 Temporary add-ons are removed when Firefox closes. A permanent installation requires a Mozilla-signed package.
 
 Version 0.4.9 reports pledge-page scan progress, imports only RSI items explicitly typed as ships or vehicles, and sends privacy-safe parser health metrics and a structural fingerprint to SC Companion.
+
+
+## CCU Planner import (0.5.0)
+
+In Ships > CCU Planner > Owned CCUs, click Import owned CCUs from RSI. This optional action reads explicit unapplied upgrade titles on paginated My Hangar pages. It sends only source/target ship names and generated copy identifiers. It does not import buybacks, prices, actual pledge identifiers, or full page HTML. Repeating an import adds only new generated copies and does not remove existing planner entries. Review changed inventory manually after applying or melting upgrades. Sign into RSI in the same browser; Discord is only needed to save the planner. Update unpacked installations by loading the extracted 0.5.0 folder and reloading the website.

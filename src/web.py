@@ -2817,6 +2817,11 @@ async def reserve_ccu_route(goal_id: str, mode: str, revision: int, user=Depends
     if route is None:
         raise HTTPException(status_code=422, detail="No eligible route to reserve.")
     goal = next(g for g in plan.goals if g.id == goal_id)
+    if route["base"]["id"].startswith("suggested:"):
+        from uuid import uuid4
+        from src.ccu_planner import Base
+        route["base"]["id"] = str(uuid4())
+        plan.bases.append(Base.model_validate(route["base"]))
     goal.reserved_base = route["base"]["id"]
     goal.reserved_ccus = [e["id"] for e in route["steps"] if e["id"]]
     goal.saved_path = [route["base"]["ship"]] + [e["target"] for e in route["steps"]]

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Game Assist RSI Hangar Importer",
-  "version": "0.4.9",
-  "description": "Imports only pledged ships and vehicles from your RSI hangar using your browser session.",
+  "version": "0.5.0",
+  "description": "Imports pledged ships, vehicles and optional unapplied CCUs from your RSI hangar using your browser session.",
   "host_permissions": [
     "https://robertsspaceindustries.com/*"
   ],

@@ -9,7 +9,7 @@ def test_rsi_connector_reports_paginated_scan_progress() -> None:
     content = (EXTENSION_DIR / "content.js").read_text(encoding="utf-8")
     manifest = (EXTENSION_DIR / "manifest.json").read_text(encoding="utf-8")
 
-    assert '"version": "0.4.9"' in manifest
+    assert '"version": "0.5.0"' in manifest
     assert "function pledgePageCount(pageHTML)" in background
     assert "return [...extractTypedItemShips(pageHTML)]" in background
     assert "function importDiagnostics(scannedPages, pageCount, typedCandidates)" in background
