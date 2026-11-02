@@ -1326,6 +1326,7 @@ def test_buyable_items_restore_ordnance_missing_from_cached_categories() -> None
         70: [{"id": 200, "name": "Colossus Bomb", "category": "Bombs"}],
         90: [],
     }
+    source._items_by_category = ordnance
     source._fetch_items_by_category = AsyncMock(side_effect=lambda category_id: ordnance[category_id])
 
     results = asyncio.run(source._get_buyable_items())

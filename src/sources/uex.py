@@ -86,6 +86,7 @@ class UEXSource:
         self._all_item_prices: list[dict] | None = None
         self._all_marketplace_prices: list[dict] | None = None
         self._buyable_items: list[dict] | None = None
+        self._buyable_items_loaded_at = 0.0
         self._terminals_by_id: dict[str, dict] | None = None
         self._terminals_loaded_at = 0.0
         self._location_filter_names: list[str] | None = None
@@ -620,13 +621,18 @@ class UEXSource:
             return self._item_categories
 
         cached = await self._cache.get("uex:item-categories:v1")
-        if isinstance(cached, list):
+        if isinstance(cached, list) and cached:
             self._item_categories = [row for row in cached if isinstance(row, dict)]
-            return self._item_categories
+            if self._item_categories:
+                return self._item_categories
 
         payload = await self._fetch_json(f"{self.base_url}/categories?type=item")
         rows = payload.get("data") if isinstance(payload, dict) else []
-        self._item_categories = [row for row in rows if isinstance(row, dict)]
+        categories = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        if not categories:
+            self._item_categories = None
+            return []
+        self._item_categories = categories
         await self._cache.set("uex:item-categories:v1", self._item_categories, 86400)
         return self._item_categories
 
@@ -638,16 +644,19 @@ class UEXSource:
         cache_version = "v2" if category_id in ordnance_ids else "v1"
         cache_key = f"uex:items:category:{category_id}:{cache_version}"
         cached = await self._cache.get(cache_key)
-        if isinstance(cached, list):
-            self._items_by_category[category_id] = [row for row in cached if isinstance(row, dict)]
-            return self._items_by_category[category_id]
+        if isinstance(cached, list) and cached:
+            items = [row for row in cached if isinstance(row, dict)]
+            if items:
+                self._items_by_category[category_id] = items
+                return items
 
         payload = await self._fetch_json(f"{self.base_url}/items?id_category={category_id}")
-        rows = payload.get("data") if isinstance(payload, dict) else []
+        rows = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(rows, list):
-            rows = []
+            return []
         self._items_by_category[category_id] = [row for row in rows if isinstance(row, dict)]
-        await self._cache.set(cache_key, self._items_by_category[category_id], 86400)
+        if self._items_by_category[category_id]:
+            await self._cache.set(cache_key, self._items_by_category[category_id], 86400)
         return self._items_by_category[category_id]
 
     async def _fetch_all_item_prices(self) -> list[dict]:
@@ -655,13 +664,18 @@ class UEXSource:
             return self._all_item_prices
 
         cached = await self._cache.get("uex:items-prices-all:v1")
-        if isinstance(cached, list):
+        if isinstance(cached, list) and cached:
             self._all_item_prices = [row for row in cached if isinstance(row, dict)]
-            return self._all_item_prices
+            if self._all_item_prices:
+                return self._all_item_prices
 
         payload = await self._fetch_json(f"{self.base_url}/items_prices_all")
         rows = payload.get("data") if isinstance(payload, dict) else []
-        self._all_item_prices = [row for row in rows if isinstance(row, dict)]
+        prices = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        if not prices:
+            self._all_item_prices = None
+            return []
+        self._all_item_prices = prices
         await self._cache.set("uex:items-prices-all:v1", self._all_item_prices, self._settings.cache_ttl_seconds)
         return self._all_item_prices
 
@@ -784,14 +798,23 @@ class UEXSource:
         return re.sub(r"\bl6x\b", "16x", normalized)
 
     async def _get_buyable_items(self) -> list[dict]:
+        now = time.monotonic()
         if self._buyable_items is not None:
-            return self._buyable_items
+            loaded_at = getattr(self, "_buyable_items_loaded_at", None)
+            if loaded_at is None or now - loaded_at < self._settings.cache_ttl_seconds:
+                return self._buyable_items
+            # Long-running Discord workers must re-read the shared cache instead
+            # of retaining a different catalog from the website indefinitely.
+            self._item_categories = None
+            self._items_by_category = {}
+            self._all_item_prices = None
 
         categories = [
             row
             for row in await self._get_item_categories()
             if self._item_category_is_supported(row)
         ]
+        catalog_available = bool(categories)
         category_ids = {self._int_or_none(row.get("id")) for row in categories}
         categories.extend(
             dict(row)
@@ -799,6 +822,8 @@ class UEXSource:
             if self._int_or_none(row.get("id")) not in category_ids
         )
         prices = await self._fetch_all_item_prices()
+        if not categories or not prices:
+            return self._buyable_items or []
         buyable_ids = {
             self._int_or_none(row.get("id_item"))
             for row in prices
@@ -807,6 +832,7 @@ class UEXSource:
         buyable_ids.discard(None)
 
         items = []
+        complete = catalog_available
         for category in categories:
             category_id = self._int_or_none(category.get("id"))
             if category_id is None:
@@ -814,14 +840,22 @@ class UEXSource:
             for item in await self._fetch_items_by_category(category_id):
                 if self._int_or_none(item.get("id")) in buyable_ids:
                     items.append(item)
+            if category_id not in self._items_by_category:
+                complete = False
 
         unique: dict[int, dict] = {}
         for item in items:
             item_id = self._int_or_none(item.get("id"))
             if item_id is not None:
                 unique[item_id] = item
-        self._buyable_items = sorted(unique.values(), key=lambda row: str(row.get("name", "")).lower())
-        return self._buyable_items
+        result = sorted(unique.values(), key=lambda row: str(row.get("name", "")).lower())
+        # A failed category fetch is retryable, not an authoritative empty
+        # category. Preserve a complete previous catalog during an outage.
+        if not complete:
+            return self._buyable_items if self._buyable_items is not None else result
+        self._buyable_items = result
+        self._buyable_items_loaded_at = now
+        return result
 
     async def _fetch_terminals_by_id(self) -> dict[str, dict]:
         now = time.monotonic()
