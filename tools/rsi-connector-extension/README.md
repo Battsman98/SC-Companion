@@ -55,3 +55,5 @@ Run node --test tests/rsi_inventory.test.cjs and
 py -3 -m pytest tests/test_rsi_connector_extension.py from the repository root.
 Run py -3 scripts/package_rsi_connector.py to rebuild both ZIPs. The script checks
 version agreement, shared helper equality and every packaged source file.
+
+Future releases: bump both manifests and run the packaging script. It generates rsi-connector-release.json and latest-download aliases. The website reads that metadata without caching, and the extension reports its manifest version; no website version edit is needed. Deploy the generated metadata and archives together.

@@ -1787,14 +1787,15 @@ document.addEventListener("click", async (event) => {
   outputs.missions.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
-function rsiImporterUpdateLabel(connected) {
-  if (connected?.code !== 200) return "Install importer — version 0.6.1";
+function rsiImporterUpdateLabel(connected, latestVersion) {
+  if (!/^\d+(?:\.\d+){1,3}$/.test(latestVersion || "")) return null;
+  if (connected?.code !== 200) return `Install importer — version ${latestVersion}`;
   const version = String(connected.version || "");
   if (!/^\d+(?:\.\d+){1,3}$/.test(version)) return "Check importer installation";
-  const installed = version.split(".").map(Number), latest = [0, 6, 1, 0];
-  for (let i = 0; i < latest.length; i++) {
-    if ((installed[i] || 0) < latest[i]) return `Update importer — ${version} installed; 0.6.1 available`;
-    if ((installed[i] || 0) > latest[i]) return null;
+  const installed = version.split(".").map(Number), latest = latestVersion.split(".").map(Number);
+  for (let i = 0; i < 4; i++) {
+    if ((installed[i] || 0) < (latest[i] || 0)) return `Update importer — ${version} installed; ${latestVersion} available`;
+    if ((installed[i] || 0) > (latest[i] || 0)) return null;
   }
   return null;
 }
@@ -1804,10 +1805,20 @@ async function refreshRsiImporterUpdate() {
   const panel = document.querySelector("#rsiImporterUpdate");
   if (!panel) return;
   const check = ++rsiImporterCheck;
+  let release;
+  try {
+    const response = await fetch("/assets/rsi-connector-release.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("Release metadata unavailable");
+    release = await response.json();
+    if (!/^\d+(?:\.\d+){1,3}$/.test(release.version || "") ||
+        release.chrome !== `/assets/rsi-connector-extension-v${release.version}.zip` ||
+        release.firefox !== `/assets/rsi-connector-extension-firefox-v${release.version}.zip`) throw new Error("Invalid release metadata");
+  } catch (_) { if (check === rsiImporterCheck) panel.hidden = true; return; }
   let connected = null;
   try { connected = await rsiConnect({ action: "connect" }, 2000); } catch (_) {}
   if (check !== rsiImporterCheck) return;
-  const label = rsiImporterUpdateLabel(connected);
+  const label = rsiImporterUpdateLabel(connected, release.version);
+  for (const link of document.querySelectorAll("a[data-rsi-download]")) link.href = release[link.dataset.rsiDownload];
   panel.hidden = !label;
   if (label) panel.querySelector("[data-importer-update-label]").textContent = label;
   else panel.open = false;
@@ -1829,7 +1840,7 @@ function connectorInstallPrompt(message) {
       <div class="connector-browser-grid">
         <section class="connector-browser-card">
           <h4>Google Chrome</h4>
-          <a class="button-link" href="/assets/rsi-connector-extension-v0.6.1.zip">Download for Chrome</a>
+          <a class="button-link" data-rsi-download="chrome" href="/assets/rsi-connector-extension-latest.zip">Download for Chrome</a>
           <ol class="connector-steps">
             <li>Unzip the downloaded file.</li>
             <li>Copy <code>chrome://extensions</code> into the address bar.</li>
@@ -1840,7 +1851,7 @@ function connectorInstallPrompt(message) {
         </section>
         <section class="connector-browser-card">
           <h4>Microsoft Edge</h4>
-          <a class="button-link" href="/assets/rsi-connector-extension-v0.6.1.zip">Download for Edge</a>
+          <a class="button-link" data-rsi-download="chrome" href="/assets/rsi-connector-extension-latest.zip">Download for Edge</a>
           <ol class="connector-steps">
             <li>Unzip the downloaded file.</li>
             <li>Copy <code>edge://extensions</code> into the address bar.</li>
@@ -1851,7 +1862,7 @@ function connectorInstallPrompt(message) {
         </section>
         <section class="connector-browser-card">
           <h4>Mozilla Firefox</h4>
-          <a class="button-link" href="/assets/rsi-connector-extension-firefox-v0.6.1.zip">Download for Firefox</a>
+          <a class="button-link" data-rsi-download="firefox" href="/assets/rsi-connector-extension-firefox-latest.zip">Download for Firefox</a>
           <ol class="connector-steps">
             <li>Keep the downloaded ZIP file; do not unzip it.</li>
             <li>Copy <code>about:debugging#/runtime/this-firefox</code> into the address bar.</li>

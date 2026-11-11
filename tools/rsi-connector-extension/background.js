@@ -101,7 +101,7 @@ function importDiagnostics(scannedPages, pageCount, typedCandidates) {
   const orderedPages = [...scannedPages].sort((left, right) => left.page - right.page);
   const structure = pageStructure(orderedPages.map((item) => item.payload).join(""));
   return {
-    connector_version: "0.6.1",
+    connector_version: chrome.runtime.getManifest().version,
     parser_version: "structured-inventory-v1",
     page_count: pageCount,
     scanned_pages: orderedPages.length,
@@ -222,7 +222,7 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
 async function handleMessage(rawMessage, reportProgress = () => {}) {
   const message = JSON.parse(rawMessage || "{}");
   if (message.action === "connect") {
-    return { code: 200, version: "0.6.1", scope: "ships-vehicles-and-optional-ccus", inventory_schema_version: 1 };
+    return { code: 200, version: chrome.runtime.getManifest().version, scope: "ships-vehicles-and-optional-ccus", inventory_schema_version: 1 };
   }
   if (message.action === "importBuybacks") return await importHangar(reportProgress, false, true, true);
   if (message.action === "importInventory") return await importHangar(reportProgress, false, true);

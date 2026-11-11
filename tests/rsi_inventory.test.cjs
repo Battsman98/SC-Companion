@@ -61,7 +61,7 @@ test('ambiguous prior IDs cannot be silently matched or labeled new',()=>{
   assert.equal(p.added.length,0); assert.equal(I.reconcile(old,next).inventory.items.length,4);
 });
 function background(fetch) {
-  const ctx={RSIInventory:I,crypto:require('node:crypto').webcrypto,URL,AbortController,setTimeout,clearTimeout,fetch,chrome:{runtime:{onMessage:{addListener(){}}}}};
+  const ctx={RSIInventory:I,crypto:require('node:crypto').webcrypto,URL,AbortController,setTimeout,clearTimeout,fetch,chrome:{runtime:{getManifest:()=>({version:"0.6.1"}),onMessage:{addListener(){}}}}};
   vm.createContext(ctx); vm.runInContext(fs.readFileSync(path.join(root,'tools/rsi-connector-extension/background.js'),'utf8'),ctx);
   return ctx;
 }

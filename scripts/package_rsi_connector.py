@@ -1,5 +1,6 @@
 """Build matching Chromium/Firefox downloads from an explicit source allowlist."""
 import json
+import shutil
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -26,6 +27,12 @@ def build() -> None:
             for name in FILES:
                 assert archive.read(name) == (SOURCE / name).read_bytes()
         print(destination)
+        shutil.copyfile(destination, ROOT / "web" / f"rsi-connector-extension{variant}-latest.zip")
+    (ROOT / "web" / "rsi-connector-release.json").write_text(json.dumps({
+        "version": version,
+        "chrome": f"/assets/rsi-connector-extension-v{version}.zip",
+        "firefox": f"/assets/rsi-connector-extension-firefox-v{version}.zip",
+    }, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+{
+  "version": "0.6.1",
+  "chrome": "/assets/rsi-connector-extension-v0.6.1.zip",
+  "firefox": "/assets/rsi-connector-extension-firefox-v0.6.1.zip"
+}
