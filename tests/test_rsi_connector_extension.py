@@ -9,7 +9,7 @@ def test_rsi_connector_reports_paginated_scan_progress() -> None:
     content = (EXTENSION_DIR / "content.js").read_text(encoding="utf-8")
     manifest = (EXTENSION_DIR / "manifest.json").read_text(encoding="utf-8")
 
-    assert '"version": "0.6.0"' in manifest
+    assert '"version": "0.6.1"' in manifest
     assert 'parser_version: "structured-inventory-v1"' in background
     assert "markup_fingerprint: fnv1a(structure)" in background
     assert "const controller = new AbortController()" in background

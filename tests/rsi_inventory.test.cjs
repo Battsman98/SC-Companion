@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname,'..');
 const I = require('../tools/rsi-connector-extension/inventory.js');
 const fixture = fs.readFileSync(path.join(__dirname,'fixtures/rsi-hangar-observed.html'),'utf8');
+const buybackFixture=fs.readFileSync(path.join(__dirname,'fixtures/rsi-buybacks-observed.html'),'utf8');
 const normalize = (html=fixture, complete=true, scan='scan') => I.normalize([{page:1,payload:html}],{complete,scanned_pages:[1],failed_pages:[],expected_pages:1,truncated:false},scan);
 test('observed two-pack retains current children, insurance and package scope',()=>{
   const n=normalize(); assert.equal(n.packages.length,2); assert.equal(n.items.length,3);
@@ -81,7 +82,7 @@ test('legacy names/CCUs and new schema stay compatible; redirects fail closed',a
   assert.equal((await login.importHangar()).code,401);
 });
 test('pagination cap and unrecognized HTML cannot claim complete inventory',async()=>{
-  const ctx=background(async url=>({status:200,url,text:async()=>fixture.replace('rel="900001"',`rel="${url.match(/page=(\d+)/)?.[1] || 1}"`)+'<a href="?page=30">30</a>'}));
+  const ctx=background(async url=>({status:200,url,text:async()=>fixture.replace('rel="900001"',`rel="${url.match(/page=(\d+)/)?.[1] || 1}"`)+'<a href="?page=251">30</a>'}));
   const n=await ctx.importHangar(()=>{},false,true); assert.equal(n.code,206); assert.equal(n.inventory.sync.truncated,true);
   const bad=background(async url=>({status:200,url,text:async()=>'<h1>Maintenance</h1>'}));
   assert.equal((await bad.importHangar(()=>{},false,true)).code,206);
@@ -93,11 +94,11 @@ test('repeated page responses are partial rather than duplicate owned copies',as
 });
 test('browser and extension shared helper copies match; manifests agree',()=>{
   assert.equal(fs.readFileSync(path.join(root,'web/rsi-inventory.js'),'utf8'),fs.readFileSync(path.join(root,'tools/rsi-connector-extension/inventory.js'),'utf8'));
-  for(const name of ['manifest.json','manifest.firefox.json']) assert.equal(JSON.parse(fs.readFileSync(path.join(root,'tools/rsi-connector-extension',name))).version,'0.6.0');
+  for(const name of ['manifest.json','manifest.firefox.json']) assert.equal(JSON.parse(fs.readFileSync(path.join(root,'tools/rsi-connector-extension',name))).version,'0.6.1');
 });
 test('local preview renders safe text and exports normalized data without applying changes',()=>{
   function element() {return {children:[],textContent:'',hidden:true,handlers:{},append(...nodes){this.children.push(...nodes);},replaceChildren(){this.children=[];},addEventListener(name,fn){this.handlers[name]=fn;}};}
-  const elements=Object.fromEntries(['scan','baseline','status','download','summary','records'].map(id=>[id,element()]));
+  const elements=Object.fromEntries(['scan','buybacks','baseline','status','download','summary','records'].map(id=>[id,element()]));
   let exported, progress;
   const inventory=normalize(); inventory.packages[0].title='<script>test</script>';
   const ctx={RSIInventory:I,crypto:require('node:crypto').webcrypto,Blob,URL:{createObjectURL(blob){exported=blob;return 'blob:local';},revokeObjectURL(){}},
@@ -111,4 +112,29 @@ test('local preview renders safe text and exports normalized data without applyi
   assert.match(elements.status.textContent,/No planner changes/); assert.equal(elements.download.hidden,false); assert.ok(exported instanceof Blob);
   const status=elements.status.textContent; progress({direction:'from-game-assist-rsi-progress',requestId:'unrelated',progress:{page:99,totalPages:100}});
   assert.equal(elements.status.textContent,status);
+});
+test('buyback opt-in uses its own page and never claims historical contents as owned',async()=>{
+  const urls=[];
+  const ctx=background(async url=>{urls.push(url);return {status:200,url,text:async()=>buybackFixture};});
+  const result=await ctx.handleMessage('{"action":"importBuybacks"}');
+  assert.equal(result.code,200); assert.ok(urls.every(x=>x.includes('/account/buy-back-pledges')));
+  assert.equal(result.inventory.source,'rsi-buyback'); assert.equal(result.inventory.packages.length,2);
+  assert.equal(result.inventory.items.length,1); assert.equal(result.inventory.items[0].ownership,'buyback');
+  assert.equal(result.inventory.items[0].upgrade_base_eligible,false);
+  assert.ok(!JSON.stringify(result.inventory).includes('Clipper'));
+  assert.equal(result.inventory.packages[1].id,'rsi-buyback:900102');
+  assert.throws(()=>I.reconcile(normalize(),result.inventory),/same source/);
+});
+test('complete scan timestamp survives partial reconciliation and duplicates have reviewable unique IDs',()=>{
+  const old=normalize();old.sync.last_successful_at='2026-10-30T18:00:00.000Z';
+  const fresh=normalize(fixture+fixture,false,'next');
+  assert.equal(new Set(fresh.items.map(x=>x.id)).size,fresh.items.length);
+  assert.equal(new Set(fresh.packages.map(x=>x.id)).size,fresh.packages.length);
+  assert.equal(I.reconcile(old,fresh).inventory.sync.last_successful_at,old.sync.last_successful_at);
+});
+test('scans discover pagination on later pages and timestamp complete scans',async()=>{
+  const ctx=background(async url=>{const page=Number(url.match(/page=(\d+)/)?.[1]||1);return {status:200,url,text:async()=>fixture.replaceAll('900001',String(page)) + (page<3?`<a href="?page=${page+1}">next</a>`:'')};});
+  const result=await ctx.importHangar(()=>{},false,true);
+  assert.equal(result.code,200);assert.equal(result.inventory.sync.scanned_pages.length,3);
+  assert.ok(result.inventory.sync.last_successful_at);assert.ok(result.inventory.sync.started_at);
 });

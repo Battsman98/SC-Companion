@@ -66,20 +66,53 @@
     if (!recognized) warnings.push({page, reason:"unrecognized-or-empty-hangar"});
     return {packages, items, warnings, recognized};
   }
-  function normalize(pages, sync, scanId) {
-    const parsed = pages.map(p => parsePage(p.payload, p.page, scanId));
-    const inventory = {schema_version:1, source:"rsi-hangar", packages:parsed.flatMap(p=>p.packages), items:parsed.flatMap(p=>p.items),
+  function parseBuybacks(html, page, scanId) {
+    const doc=tree(html), packages=[], items=[];
+    const rows=all(doc,n=>n.tag==='article' && has(n,'pledge'));
+    for(const [index,row] of rows.entries()) {
+      const heading=all(first(row,'pledge-title-row') || row,n=>n.tag==='h1')[0];
+      const title=heading?.attrs.title || text(heading).replace(/\s*- upgraded$/i,'');
+      const ccu=endpoints(title);
+      if(!ccu && !/^(?:Standalone Ships?|Package|Game Package)\s*[-:]/i.test(title)) continue;
+      const action=first(row,'buyback-action');
+      const link=action && all(action,n=>n.tag==='a')[0];
+      const rsiId=idValue(link?.attrs['data-pledgeid']) || idValue((link?.attrs.href || '').match(/^\/pledge\/buyback\/(\d+)$/)?.[1]);
+      const id=rsiId ? `rsi-buyback:${rsiId}` : `observation:${scanId}:${page}:${index}`;
+      const provenance={source:'rsi-buyback',page,fields:'article.pledge/pledge-title-row',identity:rsiId ? 'buyback-action' : null};
+      const base={identity:rsiId?'stable':'uncertain',rsi_id:rsiId,ownership:'buyback',insurance:[],rsi_values:{pledge:null,melt:null},provenance};
+      packages.push({...base,id,title});
+      if(ccu) items.push({...base,id:id+':ccu',package_id:id,kind:'ccu',name:title,source_ship:ccu.source,target_ship:ccu.target,value_scope:'package',upgrade_base_eligible:false});
+      // The list's historical "Contained" text is not the reacquired package contents.
+    }
+    return {packages,items,recognized:rows.length>0,warnings:rows.length?[]:[{page,reason:'unrecognized-or-empty-buybacks'}]};
+  }
+  function normalize(pages, sync, scanId, source='rsi-hangar') {
+    const parsed = pages.map(p => (source==='rsi-buyback'?parseBuybacks:parsePage)(p.payload, p.page, scanId));
+    const inventory = {schema_version:1, source, packages:parsed.flatMap(p=>p.packages), items:parsed.flatMap(p=>p.items),
       unsupported:["buybacks", "loaner-entitlements", "actual-paid", "rsi-pledge-and-melt-values", "stable-child-ship-identity"],
       sync:{...sync, warnings:parsed.flatMap(p=>p.warnings), complete:!!sync.complete && parsed.every(p=>p.recognized)}};
+    const packageOccurrences=new Map();
+    for(const p of inventory.packages) {const key=p.id+':page:'+p.provenance.page;packageOccurrences.set(key,(packageOccurrences.get(key)||0)+1);}
     for (const key of ["packages", "items"]) {
       const counts = new Map();
       for (const r of inventory[key]) counts.set(r.id, (counts.get(r.id)||0)+1);
       for (const r of inventory[key]) if (counts.get(r.id) > 1) {
+        const originalId=r.id;
         r.identity = "uncertain";
         inventory.sync.complete = false;
-        inventory.sync.warnings.push({reason:"duplicate-identity", id:r.id});
+        inventory.sync.warnings.push({reason:"duplicate-identity", id:originalId});
+        r.id=`observation:${scanId}:duplicate:${key}:${inventory[key].indexOf(r)}`;
+        if(key==='packages') {
+          const samePageCount=packageOccurrences.get(originalId+':page:'+r.provenance.page);
+          for(const item of inventory.items) if(item.package_id===originalId && item.provenance.page===r.provenance.page) {
+            item.package_id=samePageCount>1 ? null : r.id;
+            if(samePageCount>1) item.upgrade_base_eligible=false;
+          }
+        }
       }
     }
+    if(source==='rsi-buyback') inventory.unsupported=['loaner-entitlements','actual-paid','rsi-pledge-and-melt-values','buyback-current-price','buyback-reacquired-contents','buyback-availability'];
+    inventory.sync.last_successful_at=inventory.sync.complete ? (sync.finished_at || null) : null;
     return inventory;
   }
   const ownedKeys = ["id","identity","rsi_id","title","name","kind","package_id","ownership","insurance","rsi_values","value_scope","source_ship","target_ship","upgrade_base_eligible","provenance"];
@@ -92,6 +125,7 @@
     return map;
   }
   function preview(previous, next) {
+    if(previous && previous.source!==next.source) throw new Error('Compare inventories from the same source. Hangar and buybacks are separate.');
     const result = {added:[], changed:[], missing:[], unchanged:[], uncertain:[], requires_review:true};
     for (const collection of ["packages", "items"]) {
       const before = previous?.[collection] || [], after = next[collection] || [];
@@ -111,16 +145,17 @@
     return result;
   }
   function reconcile(previous, next) {
-    const proposal = {...next};
+    const changes=preview(previous,next);
+    const proposal = {...next,sync:{...next.sync,last_successful_at:next.sync.last_successful_at || previous?.sync?.last_successful_at || null}};
     for (const collection of ["packages", "items"]) {
       const before = previous?.[collection] || [], after = next[collection] || [];
       const old = stableMap(before), fresh = stableMap(after);
       proposal[collection] = before.map(r => old.has(r.id) && fresh.has(r.id) ? {...r, ...sourceRecord(fresh.get(r.id))} : {...r});
       for (const r of after) if (fresh.has(r.id) && !before.some(p=>p.id===r.id)) proposal[collection].push(sourceRecord(r));
     }
-    return {inventory:proposal, preview:preview(previous,next)};
+    return {inventory:proposal, preview:changes};
   }
-  const api = {parsePage, normalize, preview, reconcile, endpoints};
+  const api = {parsePage, parseBuybacks, normalize, preview, reconcile, endpoints};
   root.RSIInventory = api;
   if (typeof module !== "undefined") module.exports = api;
 })(globalThis);

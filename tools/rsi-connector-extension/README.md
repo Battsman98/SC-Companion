@@ -1,13 +1,13 @@
-# RSI Hangar Importer 0.6.0
+# RSI Hangar Importer 0.6.1
 
 Reads RSI My Hangar locally using the browser's existing login session. Unofficial
 fan extension; not affiliated with, endorsed or authorized by CIG/RSI.
 
 ## Install and preview
 
-Chrome/Edge: extract web/rsi-connector-extension-v0.6.0.zip, enable Developer mode
+Chrome/Edge: extract web/rsi-connector-extension-v0.6.1.zip, enable Developer mode
 on the Extensions page, and Load unpacked from the extracted folder.
-Firefox: load web/rsi-connector-extension-firefox-v0.6.0.zip using Load Temporary
+Firefox: load web/rsi-connector-extension-firefox-v0.6.1.zip using Load Temporary
 Add-on in about:debugging#/runtime/this-firefox. Temporary installations disappear
 when Firefox closes; permanent installation requires Mozilla signing.
 
@@ -29,9 +29,9 @@ reconciliation helpers. Planner integration is a separate change.
   Dragonfly two-pack are not two purchases. Package values must be summed once.
 - Insurance terms are package evidence. RSI pledge/melt amounts remain unknown
   until a verified monetary adapter exists. Manual actual-paid costs stay separate.
-- Buybacks and loaner entitlements are not collected. Unknown ownership is never an
+- The optional Preview buybacks separately button reads buyback package titles and CCU endpoints. It does not restore pledges, verify prices/availability, or infer reacquired ships from historical contents. Loaner entitlements are not collected. Unknown ownership is never an
   eligible upgrade base. Navigation links do not establish ownership or buybacks.
-- Up to three concurrent requests and 25 pages. Failures, unknown markup and
+- Up to three concurrent requests and 250 pages with a 90-second scan budget. Failures, unknown markup and
   truncation produce incomplete previews. Legacy imports fail closed.
 - Comparisons never delete, reserve, release or reassign planner items. Switching
   RSI accounts requires a new baseline; account identity is not collected.

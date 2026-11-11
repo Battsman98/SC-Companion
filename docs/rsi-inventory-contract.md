@@ -27,9 +27,9 @@ Never promote a legacy generated CCU ID to a verified stable ID by matching name
 
 `ownership: "owned"` requires the observed Attributed status on a hangar pledge.
 Otherwise it is `unknown`; unverified records are not eligible upgrade bases.
-No loaner inference or loaner-to-owned conversion is performed. Buybacks and
-loaner entitlements are unsupported/not collected, never reported as empty owned
-inventory. The presence of a buyback navigation link proves nothing about a pledge.
+No loaner inference or loaner-to-owned conversion is performed. Loaner
+entitlements are not collected. Owned-hangar scans do not collect buybacks; the
+separate opt-in action below collects buyback list records. The presence of a buyback navigation link proves nothing about a pledge.
 
 `rsi_values: {pledge: null, melt: null}` means unknown, not zero. Monetary adapters
 must provide `{amount_minor, currency, provenance}` only with verified units and
@@ -57,10 +57,43 @@ Account identity is not collected; switching RSI accounts requires a new baselin
 Privacy: only normalized, allowlisted inventory fields leave the extension.
 Cookies, credentials, authenticated HTML, billing data, gift recipients, account
 identifiers, coupon codes and scripts are never returned. Non-inventory packages
-are omitted. Requests are GET-only to RSI's existing pledge page.
+are omitted. Requests are GET-only to RSI's existing pledge and optional buyback list pages.
 
 Verified markup source: read-only inspection of RSI My Hangar on 2026-10-30,
 including the expanded Dragonfly two-pack and an unapplied 600i Explorer → Hull C
 pledge. Fixtures are minimized/redacted from those observed structures. Cases
 with populated hidden IDs or alternate status are explicitly synthetic edge tests,
 not claims of live observed data. No CCU Game implementation or data was used.
+
+
+## Additive 0.6.1 changes (2026-11-10)
+
+The deployed planner now consumes this version 1 contract and offers explicit
+add/match/skip choices. Hangar's legacy name consumer remains supported.
+
+`importBuybacks` is an explicit, separate GET-only action returning the same
+schema with `source: "rsi-buyback"` and `ownership: "buyback"`. It reads only
+`/account/buy-back-pledges`; it never opens Buy Back controls or store APIs.
+Verified list markup supplies `article.pledge`, title attributes and either
+`data-pledgeid` or `/pledge/buyback/ID`. Fixtures redact actual IDs. Only ship/package
+titles and explicit upgrade titles are retained. Historical Contained text is
+not a current/reacquired ship list, so ship children are not inferred. Price,
+availability and reacquired contents remain unsupported. This action is exposed
+in the extension preview; the planner continues to request owned inventory only.
+Comparison/reconciliation rejects mismatched sources.
+
+Sync adds `started_at`, `finished_at`, and `last_successful_at` ISO timestamps.
+Partial scans do not advance the last successful timestamp; reconciliation keeps
+the prior one. The extension does not persist account inventory or timestamps;
+a previous exported baseline supplies history in the local preview.
+Pagination now discovers later links, scans up to 250 pages with three concurrent
+requests and a 90-second scan budget (in-flight requests retain their 20-second
+timeout). Limits/failures produce partial results. Website timeouts are 120 seconds.
+Duplicate identities become unique uncertain observation IDs so the planner can
+review them instead of rejecting the entire response.
+
+Still outstanding: a verified monetary adapter, stable child-ship identity,
+loaner collection, and one persistent shared inventory for Hangar and Planner.
+Do not represent these limitations as implemented features. Current package/ship
+markup was rechecked against RSI on 2026-11-10; monetary inputs were still empty
+in the available browser DOM. No monetary units or API fields were guessed.

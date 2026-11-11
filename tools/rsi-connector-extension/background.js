@@ -101,7 +101,7 @@ function importDiagnostics(scannedPages, pageCount, typedCandidates) {
   const orderedPages = [...scannedPages].sort((left, right) => left.page - right.page);
   const structure = pageStructure(orderedPages.map((item) => item.payload).join(""));
   return {
-    connector_version: "0.6.0",
+    connector_version: "0.6.1",
     parser_version: "structured-inventory-v1",
     page_count: pageCount,
     scanned_pages: orderedPages.length,
@@ -114,30 +114,33 @@ function importDiagnostics(scannedPages, pageCount, typedCandidates) {
   };
 }
 
-async function importHangar(reportProgress = () => {}, ccusOnly = false, structured = false) {
+async function importHangar(reportProgress = () => {}, ccusOnly = false, structured = false, buybacks = false) {
   const scanId = crypto.randomUUID();
+  const startedAt = new Date().toISOString(), deadline = Date.now() + 90000;
+  const endpoint = buybacks ? "buy-back-pledges" : "pledges";
   const scannedPages = [], failedPages = [];
   let totalPages = 1, truncated = false, completed = 0;
   const candidates = new Set();
   const fetchPage = async page => {
+    if (Date.now() >= deadline) { failedPages.push({page,reason:"scan-time-limit"}); return; }
     let response;
-    try { response = await rsiHTMLGet("https://robertsspaceindustries.com/account/pledges" + (page > 1 ? "?page=" + page : "")); }
+    try { response = await rsiHTMLGet("https://robertsspaceindustries.com/account/" + endpoint + (page > 1 ? "?page=" + page : "")); }
     catch (_) { failedPages.push({page, reason:"timeout-or-network"}); return; }
     let url;
     try { url = new URL(response.url); } catch (_) {}
-    if (response.code !== 200 || !url || url.hostname !== "robertsspaceindustries.com" || !/\/account\/pledges\/?$/.test(url.pathname)) {
+    if (response.code !== 200 || !url || url.hostname !== "robertsspaceindustries.com" || !new RegExp("/account/" + endpoint + "/?$").test(url.pathname)) {
       failedPages.push({page, reason:response.code === 200 ? "sign-in-or-unexpected-page" : "http-" + response.code}); return;
     }
-    if (page === 1) {
+    {
       const requested = [...response.payload.matchAll(/[?&](?:amp;)?page=(\d+)/gi)].map(m=>Number(m[1]));
-      const advertised = Math.max(1, ...requested);
-      totalPages = Math.min(25, advertised); truncated = advertised > totalPages;
+      const advertised = Math.max(totalPages, ...requested);
+      totalPages = Math.min(250, advertised); truncated = advertised > totalPages;
     }
     if (scannedPages.some(p=>p.payload === response.payload)) {
       failedPages.push({page,reason:"repeated-page-content"}); return;
     }
     scannedPages.push({page, payload:response.payload});
-    const parsed = RSIInventory.parsePage(response.payload, page, scanId);
+    const parsed = (buybacks ? RSIInventory.parseBuybacks : RSIInventory.parsePage)(response.payload, page, scanId);
     for (const item of parsed.items) if ((item.kind === "ship" || item.kind === "vehicle") && item.ownership === "owned") candidates.add(item.name);
   };
   await fetchPage(1);
@@ -155,7 +158,7 @@ async function importHangar(reportProgress = () => {}, ccusOnly = false, structu
   }));
   scannedPages.sort((a,b)=>a.page-b.page);
   const inventory = RSIInventory.normalize(scannedPages, {expected_pages:totalPages, scanned_pages:scannedPages.map(p=>p.page), failed_pages:failedPages,
-    truncated, complete:!truncated && !failedPages.length}, scanId);
+    truncated, started_at:startedAt, finished_at:new Date().toISOString(), complete:!truncated && !failedPages.length}, scanId, buybacks ? "rsi-buyback" : "rsi-hangar");
   const diagnostics = importDiagnostics(scannedPages,totalPages,candidates.size);
   const preview = RSIInventory.preview(null,inventory);
   const result = {code:inventory.sync.complete ? 200 : 206, inventory, preview, diagnostics};
@@ -219,8 +222,9 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
 async function handleMessage(rawMessage, reportProgress = () => {}) {
   const message = JSON.parse(rawMessage || "{}");
   if (message.action === "connect") {
-    return { code: 200, version: "0.6.0", scope: "ships-vehicles-and-optional-ccus", inventory_schema_version: 1 };
+    return { code: 200, version: "0.6.1", scope: "ships-vehicles-and-optional-ccus", inventory_schema_version: 1 };
   }
+  if (message.action === "importBuybacks") return await importHangar(reportProgress, false, true, true);
   if (message.action === "importInventory") return await importHangar(reportProgress, false, true);
   if (message.action === "importCCUs") return await importHangar(reportProgress, true);
   if (message.action === "importHangar") {

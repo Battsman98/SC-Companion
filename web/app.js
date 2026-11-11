@@ -1728,7 +1728,7 @@ async function importRsiPledgesFromBrowser() {
     const connected = await rsiConnect({ action: "connect" }, 1200);
     if (connected.code !== 200) throw new Error("RSI browser connector is not available.");
     outputs.savedShips.innerHTML = stateMessage("Reading ships and vehicles from RSI...");
-    const response = await rsiConnect({ action: "importHangar" }, 60000, showRsiImportProgress);
+    const response = await rsiConnect({ action: "importHangar" }, 120000, showRsiImportProgress);
     if (response.code !== 200) {
       if (response.diagnostics) {
         await api("/api/me/ships/import/rsi/diagnostics", {
@@ -1801,7 +1801,7 @@ function connectorInstallPrompt(message) {
       <div class="connector-browser-grid">
         <section class="connector-browser-card">
           <h4>Google Chrome</h4>
-          <a class="button-link" href="https://github.com/Battsman98/SC-discord-Bot-Website/raw/main/web/rsi-connector-extension-v0.4.9.zip">Download for Chrome</a>
+          <a class="button-link" href="/assets/rsi-connector-extension-v0.6.1.zip">Download for Chrome</a>
           <ol class="connector-steps">
             <li>Unzip the downloaded file.</li>
             <li>Copy <code>chrome://extensions</code> into the address bar.</li>
@@ -1812,7 +1812,7 @@ function connectorInstallPrompt(message) {
         </section>
         <section class="connector-browser-card">
           <h4>Microsoft Edge</h4>
-          <a class="button-link" href="https://github.com/Battsman98/SC-discord-Bot-Website/raw/main/web/rsi-connector-extension-v0.4.9.zip">Download for Edge</a>
+          <a class="button-link" href="/assets/rsi-connector-extension-v0.6.1.zip">Download for Edge</a>
           <ol class="connector-steps">
             <li>Unzip the downloaded file.</li>
             <li>Copy <code>edge://extensions</code> into the address bar.</li>
@@ -1823,7 +1823,7 @@ function connectorInstallPrompt(message) {
         </section>
         <section class="connector-browser-card">
           <h4>Mozilla Firefox</h4>
-          <a class="button-link" href="https://github.com/Battsman98/SC-discord-Bot-Website/raw/main/web/rsi-connector-extension-firefox-v0.4.9.zip">Download for Firefox</a>
+          <a class="button-link" href="/assets/rsi-connector-extension-firefox-v0.6.1.zip">Download for Firefox</a>
           <ol class="connector-steps">
             <li>Keep the downloaded ZIP file; do not unzip it.</li>
             <li>Copy <code>about:debugging#/runtime/this-firefox</code> into the address bar.</li>
