@@ -88,6 +88,14 @@
           </div>
           <input id="rsiPledgeImport" type="file" accept=".html,.htm,text/html" multiple hidden>
         </div>
+        <details class="connector-prompt" id="rsiImporterUpdate">
+          <summary><strong>Install / update importer — version 0.6.1</strong></summary>
+          <p>The website update does not automatically update an unpacked browser extension.</p>
+          <p><a class="button-link" href="/assets/rsi-connector-extension-v0.6.1.zip">Download 0.6.1 for Chrome / Edge</a> · <a class="button-link" href="/assets/rsi-connector-extension-firefox-v0.6.1.zip">Download 0.6.1 for Firefox</a></p>
+          <p><strong>Chrome / Edge update:</strong> extract the ZIP into the same folder you originally loaded, replacing its files. Open <code>chrome://extensions</code> or <code>edge://extensions</code>, then click the reload icon on RSI Hangar Importer. Confirm its version is 0.6.1 and refresh this website.</p>
+          <p>If you cannot find that folder, remove the old importer, extract the ZIP into a permanent folder, enable Developer mode on the extensions page, and choose <strong>Load unpacked</strong>. Select the folder containing <code>manifest.json</code>. Keep only one importer enabled.</p>
+          <p><strong>Firefox:</strong> open <code>about:debugging#/runtime/this-firefox</code>, remove the old temporary add-on, and use <strong>Load Temporary Add-on</strong> to select the new ZIP. Refresh this website afterward.</p>
+        </details>
         <div id="savedShipsOutput" class="saved-list"></div>
       </article>
       <form class="panel form wide ship-search-form" data-action="ship">
