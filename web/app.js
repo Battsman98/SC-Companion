@@ -1624,6 +1624,7 @@ async function downloadNewestScannerExport(event) {
 }
 
 async function loadSavedShips(options = {}) {
+  void refreshRsiImporterUpdate();
   closeHangarModal();
   if (!currentUser.authenticated) {
     savedShipTypes = new Map();
@@ -1785,6 +1786,33 @@ document.addEventListener("click", async (event) => {
   await loadMissionResults(form, page);
   outputs.missions.scrollIntoView({ behavior: "smooth", block: "start" });
 });
+
+function rsiImporterUpdateLabel(connected) {
+  if (connected?.code !== 200) return "Install importer — version 0.6.1";
+  const version = String(connected.version || "");
+  if (!/^\d+(?:\.\d+){1,3}$/.test(version)) return "Check importer installation";
+  const installed = version.split(".").map(Number), latest = [0, 6, 1, 0];
+  for (let i = 0; i < latest.length; i++) {
+    if ((installed[i] || 0) < latest[i]) return `Update importer — ${version} installed; 0.6.1 available`;
+    if ((installed[i] || 0) > latest[i]) return null;
+  }
+  return null;
+}
+
+let rsiImporterCheck = 0;
+async function refreshRsiImporterUpdate() {
+  const panel = document.querySelector("#rsiImporterUpdate");
+  if (!panel) return;
+  const check = ++rsiImporterCheck;
+  let connected = null;
+  try { connected = await rsiConnect({ action: "connect" }, 2000); } catch (_) {}
+  if (check !== rsiImporterCheck) return;
+  const label = rsiImporterUpdateLabel(connected);
+  panel.hidden = !label;
+  if (label) panel.querySelector("[data-importer-update-label]").textContent = label;
+  else panel.open = false;
+}
+window.addEventListener("focus", () => { void refreshRsiImporterUpdate(); });
 
 function connectorInstallPrompt(message) {
   return `<div class="connector-prompt">
