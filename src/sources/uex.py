@@ -308,11 +308,11 @@ class UEXSource:
             return names[:limit]
 
         query_aliases = self._item_query_aliases(normalized_query)
-        starts = [name for name in names if any(self._normalize(name).startswith(alias) for alias in query_aliases)]
+        starts = [name for name in names if self._item_name_matches(name, normalized_query, starts=True)]
         contains = [
             name
             for name in names
-            if any(alias in self._normalize(name) for alias in query_aliases) and name not in starts
+            if self._item_name_matches(name, normalized_query) and name not in starts
         ]
         return (starts + contains)[:limit]
 
@@ -1592,7 +1592,7 @@ class UEXSource:
         filtered = []
         for item in items:
             if normalized_queries and not any(
-                query in self._normalize(item.get("name"))
+                self._item_name_matches(item.get("name"), query)
                 or query in self._normalize(item.get("category"))
                 or query in self._normalize(item.get("section"))
                 or query in self._normalize(item.get("company_name"))
@@ -1619,6 +1619,32 @@ class UEXSource:
             "med pen": ["med pen", "medpen", "paramed", "medical"],
         }
         return aliases.get(normalized_query, [normalized_query])
+
+    def _item_name_matches(self, name: object, query: str, starts: bool = False) -> bool:
+        def canonical(value: object) -> str:
+            text = self._normalize(value)
+            roman = r"m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
+            values = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+            def number(match):
+                token = match.group()
+                if not re.fullmatch(roman, token):
+                    return token
+                return str(sum(-values[c] if i + 1 < len(token) and values[c] < values[token[i + 1]] else values[c] for i, c in enumerate(token)))
+            text = re.sub(r"\b[ivxlcdm]+\b", number, text)
+            # UEX's size-zero heads use names such as S0 Helix.
+            text = re.sub(r"^s(\d+)\s+(.+)$", r"\2 \1", text)
+            return text
+
+        candidate = canonical(name)
+        for alias in self._item_query_aliases(self._normalize(query)):
+            needle = canonical(alias)
+            pattern = re.escape(needle)
+            if needle and needle[-1].isdigit():
+                pattern += r"(?!\d)"
+            if re.search(("^" if starts else "") + pattern, candidate):
+                return True
+        return False
+
 
     def _item_category_label(self, value: object) -> str | None:
         """Present ordnance and its mounting racks as one searchable category."""

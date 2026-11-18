@@ -9,33 +9,37 @@ from src.sources.uex import UEXSource
 
 CATEGORIES = [
     {"id": 28, "section": "Utility", "name": "Gadgets", "is_game_related": 1},
+    {"id": 29, "section": "Utility", "name": "Mining Laser Heads", "is_game_related": 1},
     {"id": 30, "section": "Utility", "name": "Mining Modules", "is_game_related": 1},
 ]
 ITEMS = {
     28: [{"id": 105, "name": "Sabir", "section": "Utility", "category": "Gadgets"}],
+    29: [
+        {"id": 114, "name": "Helix I Mining Laser", "section": "Utility", "category": "Mining Laser Heads", "size": "1"},
+        {"id": 115, "name": "Helix II Mining Laser", "section": "Utility", "category": "Mining Laser Heads", "size": "2"},
+    ],
     30: [{"id": 106, "name": "Brandt Module", "section": "Utility", "category": "Mining Modules"}],
 }
-PRICES = [{"id_item": item_id, "price_buy": 13815} for item_id in (105, 106)]
+PRICES = [{"id_item": item_id, "price_buy": 13815} for item_id in (105, 106, 114, 115)]
 
 
 def make_source():
     cache = AsyncMock()
     cache.get.return_value = None
     source = UEXSource(SimpleNamespace(cache_ttl_seconds=300), cache, None)
-    source._ordnance_categories = ()
 
     async def fetch(url):
         if "/categories?" in url:
             return {"data": CATEGORIES}
         if "/items_prices_all" in url:
             return {"data": PRICES}
-        return {"data": ITEMS[int(url.rsplit("=", 1)[1])]}
+        return {"data": ITEMS.get(int(url.rsplit("=", 1)[1]), [])}
 
     source._fetch_json = AsyncMock(side_effect=fetch)
     return source
 
 
-@pytest.mark.parametrize("failed_endpoint", ["categories?", "items_prices_all", "items?id_category=28", "items?id_category=30"])
+@pytest.mark.parametrize("failed_endpoint", ["categories?", "items_prices_all", "items?id_category=28", "items?id_category=29", "items?id_category=30"])
 @pytest.mark.parametrize("failure", [None, {"data": None}, {"data": "unavailable"}])
 def test_item_catalog_recovers_after_one_failed_request(failed_endpoint, failure):
     async def run():
@@ -55,8 +59,9 @@ def test_item_catalog_recovers_after_one_failed_request(failed_endpoint, failure
 
         assert await source.autocomplete_items("sabir") == ["Sabir"]
         assert await source.autocomplete_items("brandt") == ["Brandt Module"]
+        assert await source.autocomplete_items("helix") == ["Helix I Mining Laser", "Helix II Mining Laser"]
         assert await source.autocomplete_item_filter("category", "gad") == ["Gadgets"]
-        assert await source.autocomplete_item_filter("category", "mining") == ["Mining Modules"]
+        assert await source.autocomplete_item_filter("category", "mining") == ["Mining Laser Heads", "Mining Modules"]
         assert all(call.args[1] for call in source._cache.set.await_args_list)
 
     asyncio.run(run())
@@ -145,8 +150,15 @@ def test_discord_item_search_and_autocomplete_include_mining_items():
 
         choices = await item_locator_name_autocomplete(interaction, "sabi")
         assert [choice.value for choice in choices] == ["Sabir"]
+        choices = await item_locator_name_autocomplete(interaction, "helix")
+        assert [choice.value for choice in choices] == ["Helix I Mining Laser", "Helix II Mining Laser"]
+        choices = await item_locator_name_autocomplete(interaction, "helix 1")
+        assert [choice.value for choice in choices] == ["Helix I Mining Laser"]
+        await item_search_command.callback(interaction, name="helix 1")
+        embed = interaction.followup.send.await_args.kwargs["embed"]
+        assert embed.title == "Helix I Mining Laser"
         choices = await item_locator_filter_autocomplete(interaction, "mining")
-        assert [choice.value for choice in choices] == ["Mining Modules"]
+        assert [choice.value for choice in choices] == ["Mining Laser Heads", "Mining Modules"]
         choices = await item_locator_filter_autocomplete(interaction, "gad")
         assert [choice.value for choice in choices] == ["Gadgets"]
 
@@ -165,3 +177,17 @@ def test_discord_item_search_and_autocomplete_include_mining_items():
             view.stop()
 
     asyncio.run(run())
+
+
+
+@pytest.mark.parametrize("name,query", [
+    ("S0 Helix", "helix 0"), ("S0 Arbor", "arbor 0"),
+    ("Helix II Mining Laser", "helix 2"), ("Hofstede I Mining Laser", "hofstede 1"),
+    ("Lancet MH1", "lancet mh1"), ("Arrow IV Missile", "arrow 4"),
+    ("Example XII", "example 12"), ("Example 12", "example xii"),
+])
+def test_item_numeral_matching(name, query):
+    source = make_source()
+    assert source._item_name_matches(name, query)
+    assert not source._item_name_matches("Helix II Mining Laser", "helix 1")
+
