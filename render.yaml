@@ -27,6 +27,8 @@ services:
         - src/config.py
         - src/postgres_compat.py
         - src/security.py
+        - src/malware.py
+        - src/malware_worker.py
         - src/shared.py
         - src/timers.py
         - src/sources/**
@@ -100,6 +102,8 @@ services:
         - src/config.py
         - src/postgres_compat.py
         - src/security.py
+        - src/malware.py
+        - src/malware_worker.py
         - src/shared.py
         - src/timers.py
         - src/sources/**
@@ -166,6 +170,8 @@ services:
         - src/guild_config.py
         - src/postgres_compat.py
         - src/security.py
+        - src/malware.py
+        - src/malware_worker.py
         - src/shared.py
         - src/timers.py
         - src/sources/**

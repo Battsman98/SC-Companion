@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from src.cache import SQLiteCache
 from src.config import Settings
+from src.malware import MalwareProtection, MalwareRejected, MalwareUnavailable
 from src.broadcast_ui import BroadcastPanel
 from src.broadcast_room import ensure_broadcast_room
 from src.broadcasts import broadcast_group, permitted as broadcast_permitted
@@ -825,6 +826,7 @@ class GameAssistBot(commands.Bot):
             tree_cls=GameAssistCommandTree,
         )
         self.settings = settings
+        self.malware = MalwareProtection.from_env()
         self.cache = cache
         self.sources = sources
         self.started_at_unix = int(discord.utils.utcnow().timestamp())
@@ -858,6 +860,7 @@ class GameAssistBot(commands.Bot):
         )
 
     async def setup_hook(self) -> None:
+        await self.malware.start()
         if self.settings.runtime_profile == "public":
             self.add_view(CZTimerDashboardView())
             self.add_view(FirstRunSetupView())
@@ -1070,10 +1073,16 @@ class GameAssistBot(commands.Bot):
             image_attachment = self.feedback_image_attachment(attachments)
             if image_attachment:
                 try:
-                    mirror_file = await image_attachment.to_file(use_cached=True)
+                    mirror_file = await self.protected_attachment_file(image_attachment)
                     mirror_files.append(mirror_file)
                     mirror_embed.set_image(url=f"attachment://{mirror_file.filename}")
+                except (MalwareRejected, MalwareUnavailable) as exc:
+                    logging.warning("Feedback attachment blocked: %s", exc)
+                    return
                 except discord.HTTPException:
+                    if self.malware.enabled:
+                        logging.warning("Feedback image unavailable for malware inspection; mirror skipped")
+                        return
                     logging.info("Could not download the mirrored image; using its refreshed source URL")
                     mirror_embed.set_image(url=image_attachment.url)
             if not mirror_embed.image.url and embedded_image:
@@ -1184,10 +1193,16 @@ class GameAssistBot(commands.Bot):
             image = self.feedback_image_attachment(attachments)
             if image:
                 try:
-                    mirror_file = await image.to_file(use_cached=True)
+                    mirror_file = await self.protected_attachment_file(image)
                     embed.set_image(url=f"attachment://{mirror_file.filename}")
                     await central_starter.edit(embed=embed, attachments=[mirror_file])
+                except (MalwareRejected, MalwareUnavailable) as exc:
+                    logging.warning("Feedback attachment blocked: %s", exc)
+                    return
                 except discord.HTTPException:
+                    if self.malware.enabled:
+                        logging.warning("Feedback image unavailable for malware inspection; mirror skipped")
+                        return
                     logging.info("Could not copy the mirrored file; retaining the refreshed source image URL")
                     embed.set_image(url=image.url)
                     await central_starter.edit(embed=embed)
@@ -1264,7 +1279,7 @@ class GameAssistBot(commands.Bot):
                     files: list[discord.File] = []
                     image_attachment = self.feedback_image_attachment(message.attachments)
                     if image_attachment:
-                        mirror_file = await image_attachment.to_file(use_cached=True)
+                        mirror_file = await self.protected_attachment_file(image_attachment)
                         files.append(mirror_file)
                         embed.set_image(url=f"attachment://{mirror_file.filename}")
                     await central.send(
@@ -1272,7 +1287,7 @@ class GameAssistBot(commands.Bot):
                         files=files,
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
-            except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            except (discord.Forbidden, discord.HTTPException, discord.NotFound, MalwareRejected, MalwareUnavailable):
                 logging.exception("Could not sync reporter update from thread %s", message.channel.id)
             return
         if message.author.id not in self.settings.bot_admin_user_ids:
@@ -3024,6 +3039,15 @@ class GameAssistBot(commands.Bot):
             logging.exception("Could not read starter message for trading post %s", thread.id)
         await thread.send(embed=build_trading_item_embed(item, selected[0], seller_terms))
 
+    async def protected_attachment_file(self, attachment: discord.Attachment) -> discord.File:
+        if attachment.size > self.settings.max_upload_bytes:
+            raise MalwareRejected()
+        data = await attachment.read(use_cached=True)
+        if len(data) > self.settings.max_upload_bytes:
+            raise MalwareRejected()
+        await self.malware.check_upload(data)
+        return discord.File(io.BytesIO(data), filename=attachment.filename)
+
     async def fetch_trade_store_inventory(self, sheet_url: str) -> ParsedStoreInventory:
         export_url = google_sheet_csv_url(sheet_url)
         timeout = aiohttp.ClientTimeout(total=max(15, self.settings.http_timeout_seconds))
@@ -3035,6 +3059,7 @@ class GameAssistBot(commands.Bot):
                     data.extend(chunk)
                     if len(data) > MAX_STORE_SHEET_BYTES:
                         raise ValueError("The Google Sheet is larger than the 2 MB store limit.")
+                await self.malware.check_upload(bytes(data))
                 return parse_store_inventory_csv(bytes(data))
 
     async def sync_trade_store(self, store: dict, force: bool = False) -> tuple[bool, str]:
@@ -4376,6 +4401,7 @@ class GameAssistBot(commands.Bot):
         }
 
     async def close(self) -> None:
+        await self.malware.close()
         if self._exec_status_task:
             self._exec_status_task.cancel()
         if self._cz_timers_task:
@@ -6289,6 +6315,7 @@ async def trade_store_command(
             if inventory_file.size > MAX_STORE_WORKBOOK_BYTES:
                 raise ValueError("The Excel inventory file is larger than the 5 MB store limit.")
             upload_data = await inventory_file.read()
+            await bot.malware.check_upload(upload_data)
             inventory = parse_store_inventory_xlsx(upload_data)
             source_type = "inventory_workbook"
             source_url = inventory_file.url
@@ -7471,6 +7498,8 @@ def build_admin_health_embed(bot: GameAssistBot) -> discord.Embed:
     now = int(discord.utils.utcnow().timestamp())
     description = [
         _line("Status", "Online"),
+        _line("File protection", bot.malware.summary()["status"]),
+        _line("Malware definitions", bot.malware.version or "Not loaded"),
         _line("Uptime", _format_duration(max(0, now - bot.started_at_unix))),
         _line("Guild ID", str(settings.discord_guild_id) if settings.discord_guild_id else "Global commands"),
         _line("Command Channels", str(len(settings.command_channel_ids))),
