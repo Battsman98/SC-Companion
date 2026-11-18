@@ -152,10 +152,10 @@ def test_bot_copies_mirrored_images_into_peep() -> None:
     mirror_source = inspect.getsource(GameAssistBot.mirror_feedback_thread)
     sync_source = inspect.getsource(GameAssistBot.sync_mirrored_feedback_attachments)
 
-    assert "await image_attachment.to_file(use_cached=True)" in mirror_source
+    assert "await self.protected_attachment_file(image_attachment)" in mirror_source
     assert 'mirror_embed.set_image(url=f"attachment://{mirror_file.filename}")' in mirror_source
     assert "files=mirror_files" in mirror_source
-    assert "await image.to_file(use_cached=True)" in sync_source
+    assert "await self.protected_attachment_file(image)" in sync_source
     assert "attachments=[mirror_file]" in sync_source
     assert "except discord.HTTPException" in mirror_source
     assert "except discord.HTTPException" in sync_source
@@ -167,7 +167,7 @@ def test_reporter_updates_are_forwarded_to_the_main_ticket() -> None:
     assert "feedback_mirror_for_origin_thread(message.channel.id)" in source
     assert 'title=f"Reporter update from {message.author.display_name}"' in source
     assert "self.add_feedback_attachments(embed, message.attachments)" in source
-    assert "await image_attachment.to_file(use_cached=True)" in source
+    assert "await self.protected_attachment_file(image_attachment)" in source
     assert "files=files" in source
 
 

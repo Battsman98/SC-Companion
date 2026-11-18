@@ -43,6 +43,7 @@ from src.ccu_storage import CcuStore
 from src.ccu_deals import planner_market
 from src.cache import AUDIT_ACTION_TYPES, SCANNER_DIAGNOSTIC_RETENTION_SECONDS, SQLiteCache
 from src.config import Settings
+from src.malware import MalwareProtection, MalwareRejected, MalwareUnavailable
 from src.guild_config import BOT_MODULES, default_module_settings, normalize_module_settings
 from src.security import SlidingWindowLimiter, install_secret_redaction
 from src.sources.base import ItemLocatorResult
@@ -182,6 +183,7 @@ SHIP_DISPLAY_PREFIXES = (
 
 
 class AppState:
+    malware: MalwareProtection
     settings: Settings
     cache: SQLiteCache
     sources: SourceRegistry
@@ -510,6 +512,8 @@ async def lifespan(app: FastAPI):
     warbonds = WarbondTrackerSource(cache, settings.http_timeout_seconds)
     app.state.game_assist = AppState()
     app.state.game_assist.settings = settings
+    app.state.game_assist.malware = MalwareProtection.from_env()
+    await app.state.game_assist.malware.start()
     app.state.game_assist.cache = cache
     app.state.game_assist.sources = sources
     app.state.game_assist.updates = updates
@@ -548,6 +552,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await app.state.game_assist.malware.close()
         app.state.game_assist.item_catalog_task.cancel()
         app.state.game_assist.warbond_task.cancel()
         app.state.game_assist.scanner_warmup_task.cancel()
@@ -906,6 +911,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "online",
         "revision": os.getenv("RENDER_GIT_COMMIT", "local")[:12],
+        "malware_protection": state().malware.summary(),
         "discord_auth_enabled": sc_companion_auth_configured(settings) or discord_auth_configured(settings),
         "sc_companion_auth_enabled": sc_companion_auth_configured(settings),
         "inventory_scanner": {
@@ -2157,6 +2163,7 @@ async def submit_feedback(
         data = await upload.read(8 * 1024 * 1024 + 1)
         if len(data) > 8 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Each image must be 8 MB or smaller.")
+        await _protect_upload(data)
         total_bytes += len(data)
         if total_bytes > 20 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Combined image size must be 20 MB or smaller.")
@@ -4281,6 +4288,22 @@ async def delete_my_inventory_item(item_id: int, user=Depends(require_user)) -> 
     return {"status": "removed"}
 
 
+async def _protect_upload(data: bytes) -> None:
+    protection = getattr(state(), "malware", None)
+    if protection is None:
+        # Test fixtures and legacy callers may not create a lifespan state.
+        # A configured production instance must never silently bypass protection.
+        if os.getenv("MALWARE_PROTECTION_ENABLED", os.getenv("RENDER", "false")).casefold() in {"1", "true", "yes"}:
+            raise HTTPException(status_code=503, detail=str(MalwareUnavailable()))
+        return
+    try:
+        await protection.check_upload(data)
+    except MalwareRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MalwareUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "30"}) from exc
+
+
 async def _ocr_blueprint_images(files: list[UploadFile]) -> tuple[str, str | None]:
     try:
         from PIL import Image
@@ -4294,6 +4317,7 @@ async def _ocr_blueprint_images(files: list[UploadFile]) -> tuple[str, str | Non
             raise HTTPException(status_code=413, detail="Uploaded image is too large.")
         if not data:
             continue
+        await _protect_upload(data)
         try:
             Image.open(BytesIO(data)).verify()
             texts.append(await asyncio.to_thread(_read_image_text, data))
@@ -4312,6 +4336,7 @@ async def _ocr_inventory_title_images(
             raise HTTPException(status_code=413, detail="Uploaded image is too large.")
         if not data:
             continue
+        await _protect_upload(data)
         try:
             text, calibrated_box, used_fast = await asyncio.to_thread(
                 _read_inventory_title,
@@ -4334,6 +4359,7 @@ async def _ocr_inventory_title_candidates(
             raise HTTPException(status_code=413, detail="Uploaded image is too large.")
         if not data:
             continue
+        await _protect_upload(data)
         try:
             candidates = await asyncio.to_thread(
                 _read_inventory_title_candidates,
@@ -4355,6 +4381,7 @@ async def _read_inventory_scanner_image(
             raise HTTPException(status_code=413, detail="Uploaded image is too large.")
         if not data:
             continue
+        await _protect_upload(data)
         return data, None
     return b"", None
 
