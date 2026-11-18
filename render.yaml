@@ -13,7 +13,7 @@ services:
     runtime: python
     plan: 2c-4g
     region: oregon
-    buildCommand: pip install -r requirements-web.txt
+    buildCommand: python -m pip install --upgrade "pip>=26.2,<27" && python -m pip install -r requirements-web.txt
     startCommand: python -m uvicorn src.web:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips=*
     healthCheckPath: /api/health
     autoDeployTrigger: commit
@@ -35,7 +35,7 @@ services:
         - render.yaml
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: 3.12.16
       - key: DATABASE_PATH
         fromDatabase:
           name: star-citizen-game-assist-db
@@ -88,7 +88,7 @@ services:
     runtime: python
     plan: starter
     region: oregon
-    buildCommand: pip install -r requirements-bot.txt
+    buildCommand: python -m pip install --upgrade "pip>=26.2,<27" && python -m pip install -r requirements-bot.txt
     startCommand: python -m src.bot
     autoDeployTrigger: commit
     buildFilter:
@@ -108,7 +108,7 @@ services:
         - render.yaml
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: 3.12.16
       - key: DATABASE_PATH
         fromDatabase:
           name: star-citizen-game-assist-db
@@ -153,7 +153,7 @@ services:
     runtime: python
     plan: starter
     region: oregon
-    buildCommand: pip install -r requirements-bot.txt
+    buildCommand: python -m pip install --upgrade "pip>=26.2,<27" && python -m pip install -r requirements-bot.txt
     startCommand: python -m src.bot
     autoDeployTrigger: commit
     buildFilter:
@@ -174,7 +174,7 @@ services:
         - render.yaml
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: 3.12.16
       - key: DATABASE_PATH
         fromDatabase:
           name: star-citizen-game-assist-db

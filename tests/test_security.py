@@ -18,6 +18,42 @@ def test_sliding_window_limiter_isolated_by_identity() -> None:
     assert limiter.allow("second")[0] is True
 
 
+def test_limiter_reclaims_abandoned_identities(monkeypatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("src.security.time.monotonic", lambda: clock[0])
+    limiter = SlidingWindowLimiter(limit=1, window_seconds=10, max_keys=2)
+    assert limiter.allow("old")[0] is True
+    clock[0] = 5
+    assert limiter.allow("active")[0] is True
+    clock[0] = 10
+    assert limiter.allow("new")[0] is True
+    assert limiter.allow("active")[0] is False
+    assert len(limiter._events) == 2
+    assert "old" not in limiter._events
+
+
+def test_limiter_caps_identity_flood_without_resetting_active_limits() -> None:
+    limiter = SlidingWindowLimiter(limit=1, window_seconds=60, max_keys=2)
+    assert limiter.allow("first")[0] is True
+    assert limiter.allow("second")[0] is True
+    for number in range(100):
+        assert limiter.allow(f"flood-{number}")[0] is False
+    assert limiter.allow("first")[0] is False
+    assert len(limiter._events) == 2
+
+
+def test_limiter_expires_events_for_returning_identity(monkeypatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("src.security.time.monotonic", lambda: clock[0])
+    limiter = SlidingWindowLimiter(limit=2, window_seconds=10)
+    assert limiter.allow("user")[0] is True
+    clock[0] = 5
+    assert limiter.allow("user")[0] is True
+    clock[0] = 10
+    assert limiter.allow("user")[0] is True
+    assert limiter.allow("user")[0] is False
+
+
 def test_secret_redaction_filter_removes_credentials() -> None:
     record = logging.LogRecord(
         "test", logging.INFO, __file__, 1, "token=%s", ("super-secret",), None
