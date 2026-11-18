@@ -15,6 +15,14 @@ from src.web import _website_audit_metadata
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_community_feed_rejects_xml_entities() -> None:
+    xml = '''<!DOCTYPE feed [<!ENTITY data "untrusted">]>
+      <feed xmlns="http://www.w3.org/2005/Atom"><entry>
+      <title>datamine &data;</title><link href="https://example.com"/>
+      </entry></feed>'''
+    assert CitizenUpdatesSource.parse_community_intel(xml) == []
+
+
 def test_direct_source_parsers_keep_official_and_unverified_items_separate() -> None:
     development = '''<a href="/en/comm-link/Patch-Notes/21245-Star-Citizen-Alpha-49">
       Star Citizen Alpha 4.9 Posted 6 days ago</a>'''

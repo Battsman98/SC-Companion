@@ -4,12 +4,19 @@ import csv
 import hashlib
 import io
 import re
+from contextlib import closing
 from dataclasses import dataclass
 from urllib.parse import parse_qs, quote, urlparse
+from zipfile import BadZipFile, ZipFile
 
 
 MAX_STORE_SHEET_BYTES = 2 * 1024 * 1024
 MAX_STORE_ITEMS = 500
+MAX_STORE_WORKBOOK_BYTES = 5 * 1024 * 1024
+MAX_STORE_WORKBOOK_EXPANDED_BYTES = 20 * 1024 * 1024
+MAX_STORE_WORKBOOK_ENTRIES = 256
+MAX_STORE_WORKBOOK_ROWS = 5000
+MAX_STORE_WORKBOOK_COLUMNS = 100
 
 
 @dataclass(frozen=True)
@@ -93,56 +100,81 @@ def parse_store_inventory_csv(data: bytes) -> ParsedStoreInventory:
 def parse_store_inventory_xlsx(data: bytes) -> ParsedStoreInventory:
     if not data:
         raise ValueError("The Excel inventory file is empty.")
-    if len(data) > 5 * 1024 * 1024:
+    if len(data) > MAX_STORE_WORKBOOK_BYTES:
         raise ValueError("The Excel inventory file is larger than the 5 MB store limit.")
+    _validate_workbook_archive(data)
     try:
         from openpyxl import load_workbook
 
-        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True, keep_links=False)
     except Exception as exc:
         raise ValueError("The attachment is not a readable .xlsx inventory workbook.") from exc
-    sheet = workbook.active
-    rows = sheet.iter_rows(values_only=True)
-    first_row = next(rows, None)
-    if not first_row:
-        raise ValueError("The Excel inventory file needs a header row.")
-    headers = {_normalize_header(value): index for index, value in enumerate(first_row) if value is not None}
-    name_index = _find_header_index(headers, "item name", "name", "item", "product")
-    if name_index is None:
-        raise ValueError("The Excel inventory file needs a Name or Item Name column.")
-    quantity_index = _find_header_index(headers, "quantity", "qty", "stock")
-    quality_index = _find_header_index(headers, "quality", "grade")
-    notes_index = _find_header_index(headers, "notes", "details", "description")
-    location_index = _find_header_index(headers, "location", "station")
-    category_index = _find_header_index(headers, "category")
-    price_indices = [
-        _find_header_index(headers, "store price auec", "price auec", "unit price", "price"),
-        _find_header_index(headers, "average uex player seller price auec"),
-        _find_header_index(headers, "average uex terminal sell price auec"),
-    ]
-    items: list[StoreInventoryItem] = []
-    for row in rows:
-        name = _xlsx_cell(row, name_index)
-        if not name:
-            continue
-        price = next((_xlsx_cell(row, index) for index in price_indices if _xlsx_cell(row, index)), None)
-        items.append(
-            StoreInventoryItem(
-                name=name[:150],
-                price=price,
-                quantity=_xlsx_cell(row, quantity_index),
-                quality=_xlsx_cell(row, quality_index),
-                notes=_xlsx_cell(row, notes_index),
-                location=_xlsx_cell(row, location_index),
-                category=_xlsx_cell(row, category_index),
+    with closing(workbook):
+        sheet = workbook.active
+        if sheet is None:
+            raise ValueError("The Excel inventory file needs a worksheet.")
+        sheet.reset_dimensions()
+        rows = sheet.iter_rows(values_only=True, max_col=MAX_STORE_WORKBOOK_COLUMNS)
+        first_row = next(rows, None)
+        if not first_row:
+            raise ValueError("The Excel inventory file needs a header row.")
+        headers = {_normalize_header(value): index for index, value in enumerate(first_row) if value is not None}
+        name_index = _find_header_index(headers, "item name", "name", "item", "product")
+        if name_index is None:
+            raise ValueError("The Excel inventory file needs a Name or Item Name column.")
+        quantity_index = _find_header_index(headers, "quantity", "qty", "stock")
+        quality_index = _find_header_index(headers, "quality", "grade")
+        notes_index = _find_header_index(headers, "notes", "details", "description")
+        location_index = _find_header_index(headers, "location", "station")
+        category_index = _find_header_index(headers, "category")
+        price_indices = [
+            _find_header_index(headers, "store price auec", "price auec", "unit price", "price"),
+            _find_header_index(headers, "average uex player seller price auec"),
+            _find_header_index(headers, "average uex terminal sell price auec"),
+        ]
+        items: list[StoreInventoryItem] = []
+        for row_number, row in enumerate(rows, start=2):
+            if row_number > MAX_STORE_WORKBOOK_ROWS:
+                raise ValueError("The Excel inventory exceeds the worksheet row limit.")
+            name = _xlsx_cell(row, name_index)
+            if not name:
+                continue
+            price = next((_xlsx_cell(row, index) for index in price_indices if _xlsx_cell(row, index)), None)
+            items.append(
+                StoreInventoryItem(
+                    name=name[:150],
+                    price=price,
+                    quantity=_xlsx_cell(row, quantity_index),
+                    quality=_xlsx_cell(row, quality_index),
+                    notes=_xlsx_cell(row, notes_index),
+                    location=_xlsx_cell(row, location_index),
+                    category=_xlsx_cell(row, category_index),
+                )
             )
-        )
-        if len(items) > MAX_STORE_ITEMS:
-            raise ValueError(f"The Excel inventory contains more than {MAX_STORE_ITEMS} rows.")
-    workbook.close()
-    if not items:
-        raise ValueError("No inventory rows with an item name were found in the Excel file.")
-    return ParsedStoreInventory(items=items, content_hash=hashlib.sha256(data).hexdigest())
+            if len(items) > MAX_STORE_ITEMS:
+                raise ValueError(f"The Excel inventory contains more than {MAX_STORE_ITEMS} rows.")
+        if not items:
+            raise ValueError("No inventory rows with an item name were found in the Excel file.")
+        return ParsedStoreInventory(items=items, content_hash=hashlib.sha256(data).hexdigest())
+
+
+def _validate_workbook_archive(data: bytes) -> None:
+    """Bound ZIP expansion before openpyxl reads workbook XML into memory."""
+    try:
+        with ZipFile(io.BytesIO(data)) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_STORE_WORKBOOK_ENTRIES:
+                raise ValueError("The Excel inventory contains too many archive entries.")
+            if sum(entry.file_size for entry in entries) > MAX_STORE_WORKBOOK_EXPANDED_BYTES:
+                raise ValueError("The Excel inventory is too large when decompressed.")
+            for entry in entries:
+                name = entry.filename.casefold()
+                if entry.flag_bits & 1:
+                    raise ValueError("Encrypted Excel inventory files are not supported.")
+                if name.endswith("vbaproject.bin") or name.startswith("xl/embeddings/"):
+                    raise ValueError("Excel inventory files cannot contain macros or embedded files.")
+    except BadZipFile as exc:
+        raise ValueError("The attachment is not a readable .xlsx inventory workbook.") from exc
 
 
 def _normalize_header(value: object) -> str:

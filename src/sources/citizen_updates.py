@@ -1,11 +1,12 @@
 import asyncio
 import re
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from src.cache import SQLiteCache
 from src.config import Settings
@@ -203,7 +204,7 @@ class CitizenUpdatesSource:
     def parse_community_intel(xml: str, limit: int = 25) -> list[dict]:
         try:
             root = ET.fromstring(xml or "<feed />")
-        except ET.ParseError:
+        except (ET.ParseError, DefusedXmlException):
             return []
         rows = []
         for entry in root.findall("{*}entry"):

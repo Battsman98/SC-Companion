@@ -1,13 +1,107 @@
 import asyncio
 import io
+from types import SimpleNamespace
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 
-from src.bot import build_trade_store_embed
+from src.bot import GameAssistBot, build_trade_store_embed
 from src.cache import SQLiteCache
 from openpyxl import Workbook
 
 from src.trade_stores import google_sheet_csv_url, parse_store_inventory_csv, parse_store_inventory_xlsx
+
+
+def _inventory_workbook_bytes() -> bytes:
+    workbook = Workbook()
+    workbook.active.append(["Name", "Quantity"])
+    workbook.active.append(["MedPen", 2])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+    return buffer.getvalue()
+
+
+def test_workbook_rejects_compression_bomb_before_parsing(monkeypatch) -> None:
+    monkeypatch.setattr("src.trade_stores.MAX_STORE_WORKBOOK_EXPANDED_BYTES", 1024)
+    buffer = io.BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("xl/workbook.xml", b"x" * 2048)
+    with pytest.raises(ValueError, match="decompressed"):
+        parse_store_inventory_xlsx(buffer.getvalue())
+
+
+@pytest.mark.parametrize("name", ["xl/vbaProject.bin", "xl/embeddings/object.bin"])
+def test_workbook_rejects_active_content(name) -> None:
+    buffer = io.BytesIO(_inventory_workbook_bytes())
+    with ZipFile(buffer, "a") as archive:
+        archive.writestr(name, b"test")
+    with pytest.raises(ValueError, match="macros or embedded"):
+        parse_store_inventory_xlsx(buffer.getvalue())
+
+
+def test_workbook_rejects_xml_entity_declarations() -> None:
+    buffer = io.BytesIO()
+    with ZipFile(io.BytesIO(_inventory_workbook_bytes())) as original:
+        with ZipFile(buffer, "w", ZIP_DEFLATED) as changed:
+            for entry in original.infolist():
+                data = original.read(entry.filename)
+                if entry.filename == "xl/workbook.xml":
+                    data = b'<!DOCTYPE workbook [<!ENTITY data "untrusted">]>' + data
+                changed.writestr(entry.filename, data)
+    with pytest.raises(ValueError, match="readable"):
+        parse_store_inventory_xlsx(buffer.getvalue())
+
+
+def test_workbook_bounds_sparse_row_expansion(monkeypatch) -> None:
+    monkeypatch.setattr("src.trade_stores.MAX_STORE_WORKBOOK_ROWS", 10)
+    workbook = Workbook()
+    workbook.active.append(["Name"])
+    workbook.active["A100"] = "MedPen"
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    with pytest.raises(ValueError, match="row limit"):
+        parse_store_inventory_xlsx(buffer.getvalue())
+
+
+def test_store_download_stops_at_byte_limit(monkeypatch) -> None:
+    monkeypatch.setattr("src.bot.MAX_STORE_SHEET_BYTES", 10)
+    consumed = []
+
+    class Response:
+        content = None
+
+        def __init__(self):
+            self.content = self
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def raise_for_status(self):
+            pass
+
+        async def iter_chunked(self, size):
+            for chunk in [b"123456", b"789012", b"must not be consumed"]:
+                consumed.append(chunk)
+                yield chunk
+
+    class Session(Response):
+        def __init__(self, **kwargs):
+            pass
+
+        def get(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr("src.bot.aiohttp.ClientSession", Session)
+    bot = SimpleNamespace(settings=SimpleNamespace(http_timeout_seconds=15))
+    with pytest.raises(ValueError, match="2 MB"):
+        asyncio.run(GameAssistBot.fetch_trade_store_inventory(
+            bot, "https://docs.google.com/spreadsheets/d/test/edit"
+        ))
+    assert len(consumed) == 2
 
 
 def test_google_sheet_url_converts_to_csv_export() -> None:

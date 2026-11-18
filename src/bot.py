@@ -57,7 +57,7 @@ from src.timers import (
     calculate_exec_hangar_status,
     fetch_exec_cycle_start_unix,
 )
-from src.trade_stores import ParsedStoreInventory, StoreInventoryItem, google_sheet_csv_url, parse_store_inventory_csv, parse_store_inventory_xlsx
+from src.trade_stores import MAX_STORE_SHEET_BYTES, MAX_STORE_WORKBOOK_BYTES, ParsedStoreInventory, StoreInventoryItem, google_sheet_csv_url, parse_store_inventory_csv, parse_store_inventory_xlsx
 
 
 EXEC_OVERRIDE_CACHE_KEY = "exec:cycle-start-override"
@@ -3205,7 +3205,12 @@ class GameAssistBot(commands.Bot):
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(export_url, headers={"Accept": "text/csv"}) as response:
                 response.raise_for_status()
-                return parse_store_inventory_csv(await response.read())
+                data = bytearray()
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    data.extend(chunk)
+                    if len(data) > MAX_STORE_SHEET_BYTES:
+                        raise ValueError("The Google Sheet is larger than the 2 MB store limit.")
+                return parse_store_inventory_csv(bytes(data))
 
     async def sync_trade_store(self, store: dict, force: bool = False) -> tuple[bool, str]:
         thread_id = int(store["thread_id"])
@@ -6980,6 +6985,8 @@ async def trade_store_command(
         if inventory_file:
             if not inventory_file.filename.casefold().endswith(".xlsx"):
                 raise ValueError("Inventory Scanner uploads must be .xlsx files.")
+            if inventory_file.size > MAX_STORE_WORKBOOK_BYTES:
+                raise ValueError("The Excel inventory file is larger than the 5 MB store limit.")
             upload_data = await inventory_file.read()
             inventory = parse_store_inventory_xlsx(upload_data)
             source_type = "inventory_workbook"
