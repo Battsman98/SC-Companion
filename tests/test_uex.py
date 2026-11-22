@@ -1508,3 +1508,54 @@ def test_item_location_autocomplete_groups_shops_under_physical_locations() -> N
     results = asyncio.run(source.autocomplete_item_filter("location", "", limit=25))
 
     assert results == ["Port Tressler"]
+
+
+def test_fetch_prices_excludes_partial_commodity_matches(monkeypatch) -> None:
+    source = UEXSource.__new__(UEXSource)
+    diamond = {"commodity_name": "Diamond", "price_sell_avg": 7700, "status_sell": 1}
+    laminate = {"commodity_name": "Diamond Laminate", "price_sell_avg": 98889, "status_sell": 1}
+    raw = {"commodity_name": "Diamond (Raw)", "price_sell_avg": 1000, "status_sell": 1}
+
+    async def fetch_json(url):
+        return {"data": [diamond, laminate, raw, None, {}]}
+
+    monkeypatch.setattr(source, "_fetch_json", fetch_json)
+
+    prices = asyncio.run(source._fetch_prices("Diamond"))
+    assert prices == [diamond]
+    result = source._parse_commodity({"name": "Diamond"}, prices)
+    assert result.sell_to[0].price == 7700
+    assert asyncio.run(source._fetch_prices("Diamond Laminate")) == [laminate]
+    assert asyncio.run(source._fetch_prices("Diamond (Raw)")) == [raw]
+
+
+def test_find_commodity_preserves_raw_ore_and_pure_variants() -> None:
+    source = UEXSource.__new__(UEXSource)
+    source._commodities = [
+        {"name": "Diamond", "code": "DIAM"},
+        {"name": "Diamond (Raw)", "code": "DIAM"},
+        {"name": "Copper", "code": "COPP"},
+        {"name": "Copper (Ore)", "code": "COPP"},
+        {"name": "Carinite", "code": "CARI"},
+        {"name": "Carinite (Pure)", "code": "CARI"},
+    ]
+    for commodity in source._commodities:
+        assert asyncio.run(source._find_commodity(commodity["name"])) == commodity
+        assert asyncio.run(source._find_commodity(source._display_name(commodity))) == commodity
+    assert asyncio.run(source._find_commodity("DIAM"))["name"] == "Diamond"
+
+
+def test_widow_locations_rank_average_prices_on_correct_sides() -> None:
+    source = UEXSource.__new__(UEXSource)
+    rows = [
+        {"terminal_name": "Rat's Nest", "price_buy_avg": 5929, "status_buy": 4},
+        {"terminal_name": "Megumi", "price_buy_avg": 5929, "status_buy": 3},
+        {"terminal_name": "The Golden Riviera", "price_sell": 8600, "price_sell_avg": 7657, "status_sell": 1},
+        {"terminal_name": "Devlin Scrap", "price_sell_avg": 8533, "status_sell": 6},
+        {"terminal_name": "Reclamation Orinth", "price_sell_avg": 8000, "status_sell": 5},
+        {"terminal_name": "Brio's Breaker", "price_sell_avg": 7700, "status_sell": 4},
+    ]
+    result = source._parse_commodity({"name": "WiDoW"}, rows)
+    assert [m.terminal_name for m in result.buy_from] == ["Rat's Nest", "Megumi"]
+    assert [m.terminal_name for m in result.sell_to] == ["Devlin Scrap", "Reclamation Orinth", "Brio's Breaker"]
+

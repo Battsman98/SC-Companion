@@ -117,7 +117,7 @@ class UEXSource:
         normalized_purchase_system = self._normalize(purchase_system) or normalized_system
         normalized_sell_system = self._normalize(sell_system) or normalized_system
         cache_key = (
-            f"uex:commodity:v8:{commodity['name'].lower()}:"
+            f"uex:commodity:v9:{commodity['name'].lower()}:"
             f"buy-{normalized_purchase_system or 'all'}:"
             f"sell-{normalized_sell_system or 'all'}"
         )
@@ -451,11 +451,19 @@ class UEXSource:
         return (starts + contains)[:limit]
 
     async def _find_commodity(self, query: str) -> dict | None:
-        normalized_query = self._normalize(self._strip_code_suffix(query))
+        normalized_query = self._normalize(query)
         if not normalized_query:
             return None
 
         commodities = await self._get_commodities()
+        # Parentheses can be part of the commodity, not just an autocomplete code.
+        for commodity in commodities:
+            if normalized_query in {
+                self._normalize(commodity.get("name")),
+                self._normalize(self._display_name(commodity)),
+            }:
+                return commodity
+        normalized_query = self._normalize(self._strip_code_suffix(query))
         for commodity in commodities:
             if self._normalize(commodity.get("name")) == normalized_query:
                 return commodity
@@ -591,7 +599,14 @@ class UEXSource:
         url = f"{self.base_url}/commodities_prices?commodity_name={quote(commodity_name)}"
         payload = await self._fetch_json(url)
         rows = payload.get("data") if isinstance(payload, dict) else []
-        return [row for row in rows if isinstance(row, dict)]
+        # UEX matches partial names: Diamond also returns Diamond Laminate.
+        # Keep variants separate before ranking purchase and sell locations.
+        normalized_name = self._normalize(commodity_name)
+        return [
+            row for row in rows or []
+            if isinstance(row, dict)
+            and self._normalize(row.get("commodity_name")) == normalized_name
+        ]
 
     async def _fetch_all_prices(self) -> list[dict]:
         now = time.monotonic()
