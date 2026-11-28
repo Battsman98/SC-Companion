@@ -1134,6 +1134,8 @@ class GameAssistBot(commands.Bot):
 
         if self.settings.runtime_profile == "peep":
             await self._run_startup_step("create Bot Manager role", self.ensure_bot_manager_role)
+            await self._run_startup_step("provision changelog channels", self.ensure_changelog_channels)
+            await self._run_startup_step("record deployment changelog", self.record_deployment)
             await self._run_startup_step("provision membership applications", self.ensure_membership_applications)
             await self._run_startup_step("prepare feedback forum", self.ensure_feedback_forum)
             await self._run_startup_step("provision loot report reviews", self.ensure_loot_review_channel)
@@ -2195,6 +2197,8 @@ class GameAssistBot(commands.Bot):
     async def _record_current_website_deployment(self) -> None:
         if not WEBSITE_HEALTH_URL:
             return
+        if WEBSITE_CHANGELOG_CHANNEL_NAME not in self.changelog_channels:
+            await self.ensure_changelog_channels()
         try:
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -2207,7 +2211,7 @@ class GameAssistBot(commands.Bot):
         revision = str(payload.get("revision") or "").strip()
         if not re.fullmatch(r"[0-9a-fA-F]{7,40}", revision):
             return
-        cache_key = "changelog:last-observed-website-revision:v1"
+        cache_key = "changelog:last-observed-website-revision:v2"
         if await self.cache.get(cache_key) == revision:
             return
         if not await self._deployment_already_recorded(WEBSITE_CHANGELOG_CHANNEL_NAME, revision):
@@ -2426,7 +2430,7 @@ class GameAssistBot(commands.Bot):
         channel_id = self.changelog_channels.get(channel_name)
         channel = self.get_channel(channel_id or 0)
         if not isinstance(channel, discord.TextChannel):
-            return
+            raise RuntimeError(f"Changelog channel {channel_name} is unavailable; revision was not recorded")
         embed = discord.Embed(
             title=title,
             description=_truncate_audit_value(description),
