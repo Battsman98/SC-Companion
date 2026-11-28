@@ -178,6 +178,8 @@ class UEXSource:
         result = await self._fetch_mining_location_result(commodity, system_code)
         if result is None:
             fallback = self._fallback_mining_location_result(commodity, system_code)
+            if fallback is not None:
+                fallback = await self._with_mining_signatures(fallback, commodity)
             return self._filter_mining_result(fallback, planet) if fallback is not None else None
         result = await self._with_mining_sell_prices(result, commodity)
         result = await self._with_mining_signatures(result, commodity)
