@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
+import pytest
 
 from src.config import Settings
 from src.bot import (
@@ -133,9 +134,29 @@ def test_website_deployment_monitor_runs_without_discord_restart() -> None:
 
     assert "_website_deployment_monitor_loop" in source
     assert "_record_current_website_deployment" in source
-    assert 'changelog:last-observed-website-revision:v1' in source
+    assert 'changelog:last-observed-website-revision:v2' in source
     assert "await asyncio.sleep(60)" in source
     assert '"Website deployed"' in source
+
+
+def test_missing_changelog_channel_does_not_mark_deployment_recorded(monkeypatch) -> None:
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "abcdef1234567890")
+    cache = SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock())
+    bot = SimpleNamespace(
+        cache=cache,
+        changelog_channels={},
+        get_channel=lambda channel_id: None,
+        _relocate_recent_misclassified_deployments=AsyncMock(),
+        _deployment_change_summary=AsyncMock(return_value="Ice fix"),
+        _deployment_targets=AsyncMock(return_value={"discord-changelog"}),
+        _deployment_already_recorded=AsyncMock(return_value=False),
+    )
+    bot._send_changelog = lambda *args: GameAssistBot._send_changelog(bot, *args)
+
+    with pytest.raises(RuntimeError, match="revision was not recorded"):
+        asyncio.run(GameAssistBot.record_deployment(bot))
+
+    cache.set.assert_not_awaited()
 
 
 def test_interaction_command_name_handles_grouped_commands() -> None:
