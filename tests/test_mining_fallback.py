@@ -37,3 +37,16 @@ def test_mining_fallback_applies_system_and_location_filters() -> None:
     assert result.lagrange_points == []
     assert len(result.location_groups or []) == 1
     assert result.location_groups[0].system == "Pyro"
+
+
+def test_ice_fallback_includes_canonical_signature() -> None:
+    source = fallback_source()
+    source._find_mining_material = AsyncMock(
+        return_value={"name": "Ice (Raw)", "code": "ICEW"}
+    )
+
+    result = asyncio.run(source.lookup_mining_material("ice"))
+
+    assert result is not None
+    assert result.material_name == "Ice"
+    assert result.rock_signatures == [4300]
